@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitlab.light-of-moe.com/sakura/incus-devkit/schemas/dev-v1.schema.json",
+  "title": "incus-devkit development environment definition (schema 1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "instance"],
+  "properties": {
+    "schema": { "const": 1 },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 55,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      }
+    },
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "image": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["container", "virtual-machine"] },
+        "profiles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "config": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/$defs/scalar" }
+        },
+        "devices": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "propertyNames": { "minLength": 1 },
+            "additionalProperties": { "$ref": "#/$defs/scalar" }
+          }
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "idmap": { "enum": ["auto", "none"] }
+      }
+    },
+    "bootstrap": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "provision": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "scalar": {
+      "type": ["string", "number", "boolean"]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "run": { "type": "string", "minLength": 1 },
+        "shell": { "type": "string", "minLength": 1 },
+        "cwd": { "type": "string", "minLength": 1 },
+        "user": { "type": "string", "minLength": 1 },
+        "env": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/$defs/scalar" }
+        },
+        "ansible": { "$ref": "#/$defs/ansible" }
+      }
+    },
+    "ansible": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["playbook"],
+      "properties": {
+        "playbook": { "type": "string", "minLength": 1 },
+        "vars": { "type": "string", "minLength": 1 },
+        "inventory": { "type": "string", "minLength": 1 },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "skip_tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "extra_args": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
