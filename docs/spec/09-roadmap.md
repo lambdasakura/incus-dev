@@ -7,13 +7,13 @@
 ### CLI
 
 ```text
-dev up
-dev provision
-dev shell
-dev status
-dev destroy
-dev rebuild
-dev validate
+idk up
+idk provision
+idk shell
+idk status
+idk destroy
+idk rebuild
+idk validate
 ```
 
 ### Incus
@@ -68,8 +68,8 @@ provision --step / --from（部分実行）
 galaxy ステップ型（ansible-galaxy install）
 追加のステップ型（必要が生じた場合のみ）
 
-dev exec
-dev shell の user / command / cwd 設定
+idk exec
+idk shell の user / command / cwd 設定
 JSON output
 shell completion
 
@@ -102,7 +102,7 @@ Goプロジェクトの初期化。
 
 ```text
 go.mod
-cmd/dev
+cmd/idk
 internal/ の骨格
 Makefile
 CI (gofmt / go vet / go test)
@@ -111,8 +111,8 @@ CI (gofmt / go vet / go test)
 以下が成功する状態にする。
 
 ```bash
-go build ./cmd/dev
-dev --version
+go build ./cmd/idk
+idk --version
 ```
 
 ---
@@ -131,7 +131,7 @@ CLI skeleton
 以下が成功する状態にする。
 
 ```bash
-dev validate
+idk validate
 ```
 
 ---
@@ -151,10 +151,10 @@ devkit管理情報
 以下を成立させる。
 
 ```bash
-dev up        # provisionなし
-dev status
-dev shell
-dev destroy
+idk up        # provisionなし
+idk status
+idk shell
+idk destroy
 ```
 
 ---
@@ -192,8 +192,8 @@ ansible.cfg の扱い
 運用系。
 
 ```text
-dev rebuild
-dev provision の再実行検証
+idk rebuild
+idk provision の再実行検証
 dry-run
 エラーメッセージの整備
 ```
@@ -224,7 +224,7 @@ MVPは以下がすべて成立した時点で完成とする。
 新規Ubuntuホスト上で、以下のみをセットアップ済みとする。
 
 - Incus
-- dev CLI（単一バイナリの配置のみ）
+- `idk`（単一バイナリの配置のみ）
 - Ansible（Ansibleを使うサンプルを検証する場合）
 
 ### 基本フロー
@@ -235,10 +235,10 @@ MVPは以下がすべて成立した時点で完成とする。
 git clone <repository>
 cd <repository>
 
-dev validate
-dev up
-dev status
-dev shell
+idk validate
+idk up
+idk status
+idk shell
 ```
 
 が成功すること。
@@ -271,8 +271,8 @@ provision:
 さらに、
 
 ```bash
-dev provision
-dev provision
+idk provision
+idk provision
 ```
 
 を連続実行して正常終了すること。
@@ -280,7 +280,7 @@ dev provision
 ### 破棄
 
 ```bash
-dev destroy --force
+idk destroy --force
 ```
 
 を実行するとIncus instanceだけが削除され、
@@ -300,6 +300,6 @@ source files
 1. devkitリポジトリに Ansible Role / Incus Profile が存在しない
 2. devkitバイナリが同梱するアセットは JSON Schema のみである
 3. あるプロジェクトの `.incus-dev/` を別の空リポジトリへコピーし、
-   `dev up` を実行すると同じ環境が再現される
+   `idk up` を実行すると同じ環境が再現される
 4. devkitを新しいバージョンへ更新しても、既存プロジェクトの
    構築内容（導入されるパッケージやツール）が変化しない

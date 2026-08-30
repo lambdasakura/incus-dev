@@ -5,7 +5,7 @@
 責務を以下の層に分離し、依存方向を一方向に保つ。
 
 ```text
-cmd/dev
+cmd/idk
    │
    ▼
 internal/cli            コマンド定義・入出力
@@ -57,7 +57,7 @@ type Command struct {
     Dir   string
     Env   []string
     Stdin io.Reader
-    // 端末を引き継ぐ対話実行（dev shell）用
+    // 端末を引き継ぐ対話実行（idk shell）用
     Interactive bool
 }
 
@@ -75,7 +75,7 @@ type Result struct {
   操作名・対象・コマンド・exit code・stderr を含むエラーを構築する
 - ログ出力時、Secretを含みうる引数・環境変数はマスクする
 - dry-runモードでは実行せず、実行予定コマンドを記録する
-- 対話実行（`dev shell`）では `os.Stdin` / `os.Stdout` / `os.Stderr` を直接引き継ぐ
+- 対話実行（`idk shell`）では `os.Stdin` / `os.Stdout` / `os.Stderr` を直接引き継ぐ
 
 エラーは `fmt.Errorf("...: %w", err)` でラップし、
 呼び出し側は `errors.Is` / `errors.As` で判別する。
@@ -218,7 +218,7 @@ project/
 
 ```bash
 cd src/foo/bar
-dev status
+idk status
 ```
 
 を実行した場合でもproject rootを検出できること。
@@ -240,7 +240,7 @@ project root検出にGitを利用してもよい。
 
 ## 7.5 ホスト側Git repositoryの保護
 
-dev CLIは原則としてGit working treeを変更してはならない。
+`idk` は原則としてGit working treeを変更してはならない。
 
 以下は禁止する。
 
@@ -299,8 +299,8 @@ dev CLIは原則としてGit working treeを変更してはならない。
 - CLI / Incus / Provision / Configurationの責務を分離する。
 - 外部コマンド失敗を無視しない。
 - どのステップが失敗したかを特定できるエラーを返す。
-- `dev provision` で既存instanceを破壊しない。
-- `dev destroy` でhost側source treeを削除しない。
+- `idk provision` で既存instanceを破壊しない。
+- `idk destroy` でhost側source treeを削除しない。
 - devkit管理外のinstanceを破壊しない。
 - Git repositoryへSecretを書き込まない。
 - 実装変更には可能な限りテストを追加する。

@@ -72,7 +72,7 @@ embedされるアセットが schemas/ のみであること
 Incusを利用可能な環境では最低限以下を検証する。
 
 ```text
-dev up
+idk up
   ↓
 container RUNNING
 
@@ -89,15 +89,15 @@ ansible ステップ
   ↓
 SSHなしで playbook が適用される
 
-dev provision
+idk provision
   ↓
 再実行成功（ステップが冪等なテストプロジェクトを用いる）
 
-dev up（dev.yml のリソース変更後）
+idk up（dev.yml のリソース変更後）
   ↓
 instance を破壊せず設定が反映される
 
-dev destroy
+idk destroy
   ↓
 instance削除
 
@@ -132,7 +132,7 @@ go test -tags integration ./test/integration/...
 gofmt -l .
 go vet ./...
 go test ./...
-dev validate           # examples/ 配下の各サンプルに対して
+idk validate           # examples/ 配下の各サンプルに対して
 ```
 
-`examples/` の各サンプルが常に `dev validate` を通ることを保証する。
+`examples/` の各サンプルが常に `idk validate` を通ることを保証する。

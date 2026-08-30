@@ -1,7 +1,7 @@
 # Incus Development Environment Toolkit 仕様書
 
 Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理する
-CLIツール（`dev` / devkit）の仕様書。
+CLIツール（`idk` / devkit）の仕様書。
 
 ## 基本方針
 
@@ -13,7 +13,20 @@ devkitに含めず、すべてプロジェクトの `.incus-dev/` が所有す�
 **「開発環境を再現するために必要な情報が、すべて `.incus-dev/` の中にある」**
 状態を維持することが、本仕様の中核である。
 
-dev CLIはGoで実装し、単一バイナリとして配布する。
+`idk` はGoで実装し、単一バイナリとして配布する。
+
+## 用語
+
+| 用語 | 意味 |
+| --- | --- |
+| incus-devkit / devkit | 本プロジェクトの名称 |
+| `idk` | コマンド名（incus **d**ev**k**it の略） |
+| `.incus-dev/` | プロジェクト側の設定ディレクトリ |
+| `dev.yml` | 開発環境定義ファイル（`.incus-dev/dev.yml`） |
+| `dev-<project>` | 生成されるIncus instance名 |
+| `dev` | Ansible inventory上のホスト名（`hosts: dev`） |
+
+`idk` 以外の識別子は「開発環境」を指すものであり、コマンド名の変更に追従しない。
 
 ## 目次
 

@@ -2,7 +2,7 @@
 
 ## 2.1 実装言語
 
-dev CLIはGoで実装する。
+`idk` はGoで実装する。
 
 理由：
 
@@ -19,7 +19,7 @@ dev CLIはGoで実装する。
 
 ---
 
-## 2.2 dev CLI側リポジトリ
+## 2.2 devkit側リポジトリ
 
 共通ツールは独立したGitリポジトリとして管理する。
 
@@ -34,7 +34,7 @@ incus-devkit/
 ├── Makefile
 │
 ├── cmd/
-│   └── dev/
+│   └── idk/
 │       └── main.go             # エントリポイント / exit code のみ担当
 │
 ├── internal/
@@ -104,7 +104,7 @@ requirements.yml       共通collection定義
 これらはすべてプロジェクト側の `.incus-dev/` に属する。
 
 `examples/` 配下のサンプルは **ドキュメントとしてのみ** 存在し、
-dev CLIの実行時に参照されない。バイナリにも同梱しない。
+`idk` の実行時に参照されない。バイナリにも同梱しない。
 
 再利用可能なprovisioning資産を共有したい場合は、devkitとは別の
 Ansible Collectionやリポジトリとして配布し、各プロジェクトが
@@ -138,14 +138,14 @@ Playbook・Role・Profileを同梱しないため、
 ## 2.5 ビルドと配布
 
 ```bash
-go build ./cmd/dev            # ローカルビルド
-go install ./cmd/dev          # $GOBIN へインストール
+go build ./cmd/idk            # ローカルビルド
+go install ./cmd/idk          # $GOBIN へインストール
 ```
 
 バージョン情報は `-ldflags` で埋め込む。
 
 ```bash
-go build -ldflags "-X main.version=$(git describe --tags)" ./cmd/dev
+go build -ldflags "-X main.version=$(git describe --tags)" ./cmd/idk
 ```
 
 リリース成果物は各プラットフォーム向けの単一バイナリとする。
