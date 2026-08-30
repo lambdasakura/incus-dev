@@ -8,20 +8,22 @@
 cmd/dev
    │
    ▼
-internal/cli          コマンド定義・入出力
+internal/cli            コマンド定義・入出力
    │
-   ├─▶ internal/project    project root 探索
-   ├─▶ internal/config     dev.yml の解釈
-   ├─▶ internal/incus      Incus操作
-   └─▶ internal/ansible    Ansible操作
+   ├─▶ internal/project     project root 探索
+   ├─▶ internal/config      dev.yml の解釈
+   ├─▶ internal/incus       Incus操作
+   └─▶ internal/provision   bootstrap / step 実行
               │
-              ▼
-       internal/runner     外部コマンド実行
+              ├─▶ internal/incus     run ステップ
+              └─▶ internal/runner    ansible ステップ
 ```
 
-- `internal/config` からIncus操作やAnsible実行を行ってはならない
-- `internal/incus`、`internal/ansible` はCLIの出力形式を知らない
+- `internal/config` からIncus操作やステップ実行を行ってはならない
+- `internal/incus`、`internal/provision` はCLIの出力形式を知らない
 - 外部コマンド実行は `internal/runner` に集約する
+- **どのパッケージにも、特定のOS・言語ランタイム・ツールの知識を持たせない**
+  （唯一の例外は 6.3.2 の既定bootstrap）
 
 ---
 
@@ -82,32 +84,83 @@ type Result struct {
 
 ## 7.3 Configuration Parser
 
-`internal/config` は、
+`internal/config` は `.incus-dev/dev.yml` の読み込みとvalidationのみを担当する。
 
-```text
-.incus-dev/dev.yml
-```
+Incus操作やステップ実行をここから行ってはならない。
 
-の読み込みとvalidationのみを担当する。
-
-Incus操作やAnsible実行をここから行ってはならない。
-
-設定は型付き構造体へ変換する。
+### 7.3.1 型定義
 
 ```go
 type Config struct {
     Schema    int        `json:"schema"`
-    Runtime   Runtime    `json:"runtime"`
+    Runtime   *Runtime   `json:"runtime,omitempty"`
     Project   Project    `json:"project"`
     Instance  Instance   `json:"instance"`
-    Workspace Workspace  `json:"workspace"`
-    Packages  []string   `json:"packages"`
-    Features  map[string]map[string]any `json:"features"`
-    Provision *Provision `json:"provision,omitempty"`
+    Workspace *Workspace `json:"workspace,omitempty"`
+    Bootstrap *[]Step    `json:"bootstrap,omitempty"`
+    Provision []Step     `json:"provision,omitempty"`
+}
+
+type Instance struct {
+    Image    string                       `json:"image"`
+    Type     string                       `json:"type,omitempty"`
+    Profiles *[]string                    `json:"profiles,omitempty"`
+    Config   map[string]string            `json:"config,omitempty"`
+    Devices  map[string]map[string]string `json:"devices,omitempty"`
 }
 ```
 
-### 7.3.1 YAMLの扱い
+`instance.config` / `devices` はIncusへの素通しであるため、
+devkit側で意味を持つ型に変換しない。未知キーを拒否しない。
+
+### 7.3.2 「省略」と「明示的な空」の区別
+
+以下の2つは意味が異なるため、ポインタで区別する。
+
+| フィールド | 省略 (`nil`) | 明示的な空 |
+| --- | --- | --- |
+| `instance.profiles` | `["default"]` を適用 | Profileを適用しない |
+| `bootstrap` | 既定bootstrapを実行 | bootstrapを行わない |
+
+### 7.3.3 スカラ値の文字列化
+
+Incusのconfig値は文字列である。
+
+YAML上の `limits.cpu: 8` や `security.nesting: true` を受け付け、
+デコード時に文字列へ正規化する。
+
+```go
+type Scalar string
+
+func (s *Scalar) UnmarshalJSON(b []byte) error {
+    // string / number / bool を受け付け、文字列へ正規化する
+    // object / array はエラー
+}
+```
+
+### 7.3.4 ステップのデコード
+
+`provision[]` は `run` と `ansible` の判別を伴うため、
+カスタムデコードを実装する。
+
+```go
+type Step struct {
+    Name    string
+    Run     *RunStep
+    Ansible *AnsibleStep
+}
+
+func (s *Step) UnmarshalJSON(b []byte) error {
+    // 1. run / ansible のキー存在を確認
+    // 2. 両方あれば error、両方無ければ error
+    // 3. run が文字列の場合は短縮形として RunStep.Script へ展開
+}
+```
+
+ステップ型の追加が、この関数と `internal/provision` への
+`Step` 実装追加だけで完結する構造を保つ。
+
+### 7.3.5 YAMLの扱い
 
 YAMLはJSONへ変換したうえでデコードする方式を推奨する。
 
@@ -120,27 +173,24 @@ sigs.k8s.io/yaml
 - 構造体タグを `json` に一本化できる
 - 同じJSON表現に対してJSON Schema validationを適用できる
 
-### 7.3.2 Validation
+### 7.3.6 Validation
 
 二段構えとする。
 
 1. JSON Schema (`schemas/dev-v1.schema.json`) による構造検証
    - 例: `github.com/santhosh-tekuri/jsonschema`
+   - `instance.config` / `instance.devices` は自由なキーを許可する
+   - それ以外のオブジェクトは `additionalProperties: false` とし、
+     タイプミスを検出する
 2. Goコードによる意味検証
    - schema versionの既知性
    - runtime versionの互換性
-   - Feature名が既知のRoleに対応するか
-   - パスの解決可否
+   - ステップの排他性（`run` / `ansible`）
+   - bootstrapに `ansible` ステップが無いこと
+   - 参照パスの存在
+   - `user.incus-devkit.*` の使用禁止
 
-JSON Schemaとコード側validationの責務重複を過度に複雑化しない。
 「形」はSchema、「意味」はコード、という分担を基本とする。
-
-### 7.3.3 未知フィールド
-
-未知のフィールドは原則としてエラーとする（JSON Schemaの
-`additionalProperties: false` で表現する）。
-
-タイプミスによる設定の無視を防ぐため。
 
 ---
 
@@ -177,20 +227,12 @@ dev status
 
 project root検出にGitを利用してもよい。
 
-ただし、
-
-```text
-.incus-dev/dev.yml
-```
-
-が存在する非Git directoryでも動作可能な設計とする。
+ただし `.incus-dev/dev.yml` が存在する非Git directoryでも動作可能とする。
 
 優先順位：
 
 1. `.incus-dev/dev.yml` 探索
 2. Git情報
-
-とする。
 
 探索はファイルシステムrootまで、または上限段数で打ち切る。
 
@@ -240,6 +282,7 @@ dev CLIは原則としてGit working treeを変更してはならない。
   テストで差し替え可能にする
 - panicを制御フローに使わない。エラーは戻り値で伝播する
 - `context.Context` を外部プロセス実行を伴う関数の第一引数に取る
+- 一時ファイル・一時ディレクトリは `defer` で確実に削除する
 
 ---
 
@@ -251,11 +294,14 @@ dev CLIは原則としてGit working treeを変更してはならない。
 
 - 本仕様を実装判断の基準とする。
 - 不必要な機能を追加しない。
-- CLI / Incus / Ansible / Configurationの責務を分離する。
+- **devkitへ環境固有の資産（Role / Profile / パッケージ導入手順）を追加しない（REQ-007）。**
+  - 「便利だから」という理由での共通Role追加は仕様違反である。
+- CLI / Incus / Provision / Configurationの責務を分離する。
 - 外部コマンド失敗を無視しない。
-- Ansible Roleを冪等にする。
+- どのステップが失敗したかを特定できるエラーを返す。
 - `dev provision` で既存instanceを破壊しない。
 - `dev destroy` でhost側source treeを削除しない。
+- devkit管理外のinstanceを破壊しない。
 - Git repositoryへSecretを書き込まない。
 - 実装変更には可能な限りテストを追加する。
 - `gofmt` および `go vet` を通す。
@@ -268,3 +314,9 @@ dev CLIは原則としてGit working treeを変更してはならない。
 - configを型付き内部表現へ変換する。
 - CLI behaviorをintegration testする。
 - Incusが存在しない環境でもunit testを実行可能にする。
+
+### 判断に迷った場合
+
+「この処理は、あるプロジェクト固有の事情に依存していないか？」を問う。
+
+依存している場合、それはdevkitではなく `.incus-dev/` に属する。

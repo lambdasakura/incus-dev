@@ -8,24 +8,37 @@ Incus daemonを必要としないテストを充実させる。
 
 ```text
 Configuration parsing
+  - 最小構成 / 完全構成
+  - run 短縮形と完全形
+  - run と ansible の排他性
+  - 省略と明示的な空の区別（profiles / bootstrap）
+  - スカラ値の文字列化（数値・真偽値）
 Schema validation
+Runtime version 互換性判定
 Project root detection
-Instance naming
+Instance naming / 正規化
+Bootstrap 既定動作の選択
+  - ansible ステップの有無による分岐
+  - bootstrap 明示時の上書き
+Step planning（実行順序、dry-run出力）
 Command construction
-Feature mapping
-Error handling
+  - incus exec の引数
+  - ansible-playbook の引数
+Inventory / extra-vars 生成
+Error handling（失敗ステップの特定）
 ```
 
 実装方針：
 
 - 標準の `testing` を使用し、table-driven testを基本とする
-- Incus / Ansible操作層はinterfaceとして定義し、fake実装で差し替える
-  （[05-incus.md](05-incus.md)、[06-ansible.md](06-ansible.md) 参照）
+- Incus操作層はinterfaceとして定義し、fake実装で差し替える
+  （[05-incus.md](05-incus.md) 参照）
 - 外部コマンド実行は `internal/runner` のinterfaceを差し替え、
   「どのコマンドが構築されたか」を検証する
 - project discoveryは `t.TempDir()` に一時ツリーを作って検証する
 - `dev.yml` のパースは `internal/config/testdata/` の
   正常系・異常系ファイルで検証する
+- 生成されるinventoryやextra-varsはgolden fileで比較する
 
 ```bash
 go test ./...
@@ -35,7 +48,26 @@ go test ./...
 
 ---
 
-## 8.2 Integration Test
+## 8.2 構造の検証
+
+REQ-007（devkitが環境固有の資産を持たないこと）は仕様の中核であり、
+テストで機械的に検証する。
+
+```text
+devkitリポジトリに以下が存在しないこと
+
+  ansible/roles/
+  profiles/*.yaml
+  requirements.yml
+
+embedされるアセットが schemas/ のみであること
+```
+
+`examples/` 配下がバイナリへ同梱されていないことも確認する。
+
+---
+
+## 8.3 Integration Test
 
 Incusを利用可能な環境では最低限以下を検証する。
 
@@ -47,14 +79,23 @@ container RUNNING
 /workspace
   ↓
 host repositoryが見える
+（コンテナ内から .incus-dev/dev.yml が読める）
 
-python feature
+run ステップ
   ↓
-pythonが利用可能
+コンテナ内で実行され、結果が反映される
+
+ansible ステップ
+  ↓
+SSHなしで playbook が適用される
 
 dev provision
   ↓
-再実行成功
+再実行成功（ステップが冪等なテストプロジェクトを用いる）
+
+dev up（dev.yml のリソース変更後）
+  ↓
+instance を破壊せず設定が反映される
 
 dev destroy
   ↓
@@ -77,13 +118,13 @@ host repository
 go test -tags integration ./test/integration/...
 ```
 
-- テスト用instance名は衝突しないよう一意化し、
-  `t.Cleanup` で必ず削除する
+- テスト用フィクスチャは `.incus-dev/` 一式を持つ最小プロジェクトとする
+- テスト用instance名は衝突しないよう一意化し、`t.Cleanup` で必ず削除する
 - CIではIncusが利用可能なジョブでのみ実行する
 
 ---
 
-## 8.3 CI
+## 8.4 CI
 
 最低限以下を実行する。
 
@@ -91,6 +132,7 @@ go test -tags integration ./test/integration/...
 gofmt -l .
 go vet ./...
 go test ./...
-dev validate       # サンプルプロジェクトに対して
-ansible-lint       # Role更新時
+dev validate           # examples/ 配下の各サンプルに対して
 ```
+
+`examples/` の各サンプルが常に `dev validate` を通ることを保証する。

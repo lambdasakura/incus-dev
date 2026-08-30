@@ -1,5 +1,12 @@
 # 5. Incus層
 
+devkitがIncusに対して行うのは、instanceのライフサイクル管理と、
+`dev.yml` に宣言された設定の適用のみである。
+
+devkitはIncus Profileを同梱・作成しない（REQ-007）。
+
+---
+
 ## 5.1 Instance命名規則
 
 基本形：
@@ -20,12 +27,6 @@ dev-example-project
 
 ```text
 dev-example-project-main
-dev-example-project-feature-foo
-```
-
-または、
-
-```text
 dev-example-project-a8f213
 ```
 
@@ -33,9 +34,102 @@ dev-example-project-a8f213
 
 命名ロジックは単独の純粋関数として実装し、単体テスト可能にする。
 
+Incusのinstance名制約（長さ、使用可能文字）に適合するよう正規化する。
+
 ---
 
-## 5.2 Incus Project
+## 5.2 devkitが管理するinstanceの識別
+
+devkitは自身が作成したinstanceを、instance configで印付けする。
+
+```text
+user.incus-devkit.project = example-project
+user.incus-devkit.root    = /home/user/src/example-project
+user.incus-devkit.schema  = 1
+```
+
+目的：
+
+- 既存instanceが本当にこのプロジェクトのものかを確認する
+- 名前衝突時に、無関係なinstanceを破壊しないようにする
+
+`dev destroy` および `dev rebuild` は、対象instanceが
+devkit管理下でない場合、明示的に失敗する。
+
+`user.incus-devkit.*` 名前空間はdevkitの予約とする。
+
+---
+
+## 5.3 Profile
+
+`instance.profiles` は **ホスト側に既に存在するProfileの名前参照のみ** を表す。
+
+- devkitはProfileを同梱しない
+- devkitはProfileを作成・更新・削除しない
+- 指定されたProfileが存在しない場合、`dev up` は明示的に失敗する
+  - エラーには不足しているProfile名を含める
+
+省略時は `["default"]` を使用する。
+
+明示的な空リストはProfileを一切適用しないことを意味する。
+実装は対象Incus versionの該当フラグ（例: `--no-profiles`）を用いる。
+
+環境依存を避けたいプロジェクトは、Profileを使わず
+`instance.config` と `instance.devices` にすべて記述できる。
+
+---
+
+## 5.4 configとdeviceの適用
+
+### 5.4.1 適用対象
+
+| 由来 | 内容 |
+| --- | --- |
+| `instance.config` | 宣言されたkey-valueをそのまま設定 |
+| `instance.devices` | 宣言されたdeviceをそのまま設定 |
+| `workspace` | `workspace` という名前のdisk deviceとして設定 |
+| devkit管理情報 | `user.incus-devkit.*` |
+
+devkitはconfigキーの意味を解釈しない。
+CPUやメモリも `limits.cpu` / `limits.memory` として素通しする。
+
+### 5.4.2 適用タイミング
+
+`dev up` は、instanceが既に存在する場合も宣言内容を再適用する。
+
+これにより `dev.yml` の変更（リソース増減、device追加）が反映される。
+
+### 5.4.3 削除の扱い
+
+MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunsetは行わない。
+
+理由：devkitが管理していない設定（利用者が手動で追加したもの）を
+誤って削除する危険があるため。
+
+クリーンな状態が必要な場合は `dev rebuild` を使用する。
+
+将来的には、devkitが適用したキーの一覧を
+
+```text
+user.incus-devkit.managed
+```
+
+に記録し、差分をunsetする方式を検討する。
+
+### 5.4.4 再起動を要する設定
+
+一部の設定は変更にinstance再起動を要する。
+
+devkitは再起動が必要な変更を検出した場合、以下のいずれかとする。
+
+- 明示的に警告し、再起動が必要である旨を表示する
+- `--restart` 等の明示的な指示があった場合のみ再起動する
+
+利用者の作業中プロセスを予期せず停止させてはならない。
+
+---
+
+## 5.5 Incus Project
 
 初期実装ではIncusの `default` projectを利用してよい。
 
@@ -52,18 +146,11 @@ incus:
 
 ---
 
-## 5.3 Incus Remote
+## 5.6 Incus Remote
 
 同様にlocal Incusをデフォルトとする。
 
 将来的には、
-
-```yaml
-incus:
-  remote: local
-```
-
-または、
 
 ```yaml
 incus:
@@ -75,49 +162,12 @@ incus:
 初期実装でremote対応を実装する必要はないが、
 Incus操作層ではremoteを引数として受けられるようにすることが望ましい。
 
----
-
-## 5.4 Profile管理
-
-共通ツールが利用するProfile例：
-
-```text
-dev-base
-nested
-gpu-amd
-gpu-nvidia
-```
-
-Profileには原則として以下のみを持たせる。
-
-- network
-- disk
-- GPU
-- device
-- security
-- nesting
-
-言語ランタイムやOS packageはProfileへ含めない。
+remoteを利用する場合、workspaceのbind mountはホスト側パスを前提とするため
+成立しない点に注意する。remote対応時に扱いを定義する。
 
 ---
 
-## 5.5 Profileの存在確認
-
-`dev up` 実行時、指定Profileが存在しない場合は明示的に失敗する。
-
-初期実装ではProfileを自動作成しなくてもよい。
-
-将来的には、
-
-```bash
-dev setup
-```
-
-により共通Profileをホストへinstallする機能を追加してよい。
-
----
-
-## 5.6 Incus操作層
+## 5.7 Incus操作層
 
 Incus関連処理を `internal/incus` へ集約する。
 
@@ -130,18 +180,29 @@ package incus
 
 type Client interface {
     InstanceExists(ctx context.Context, name string) (bool, error)
-    InstanceStatus(ctx context.Context, name string) (Status, error)
+    Instance(ctx context.Context, name string) (Instance, error)
 
     CreateInstance(ctx context.Context, spec InstanceSpec) error
     StartInstance(ctx context.Context, name string) error
     StopInstance(ctx context.Context, name string) error
     DeleteInstance(ctx context.Context, name string) error
 
-    SetResources(ctx context.Context, name string, r Resources) error
+    ApplyConfig(ctx context.Context, name string, cfg map[string]string) error
+    ApplyDevices(ctx context.Context, name string, dev map[string]Device) error
 
-    AddWorkspaceMount(ctx context.Context, name string, m Mount) error
+    ProfileExists(ctx context.Context, name string) (bool, error)
 
-    Exec(ctx context.Context, name string, argv []string, opt ExecOptions) error
+    Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error)
+}
+
+type ExecOptions struct {
+    Env         map[string]string
+    Cwd         string
+    User        string
+    TTY         bool      // dev shell のみ true
+    Stdin       io.Reader
+    Stdout      io.Writer
+    Stderr      io.Writer
 }
 ```
 
@@ -150,7 +211,7 @@ interfaceとして定義することで、以下を可能にする。
 - 単体テストでのfake実装（Incus daemon不要）
 - 将来的な実装差し替え
 
-### 5.6.1 実装方針
+### 5.7.1 実装方針
 
 MVPでは `incus` CLIをラップした実装 (`internal/incus/cli.go`) を用いる。
 
@@ -173,13 +234,14 @@ github.com/lxc/incus/client
 
 ただし `dev shell` は端末制御の都合上、CLI呼び出しを維持してよい。
 
-### 5.6.2 出力パース
+### 5.7.2 出力パース
 
 CLI実装で状態を取得する場合は、人間向け出力ではなく
 機械可読な形式を用いる。
 
 ```bash
 incus list <name> --format json
+incus config show <name>
 ```
 
-得られたJSONは型付き構造体へデコードする。
+得られたJSON/YAMLは型付き構造体へデコードする。

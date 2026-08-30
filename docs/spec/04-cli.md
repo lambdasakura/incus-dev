@@ -28,26 +28,28 @@ dev up
 
 以下を実行する。
 
-1. Git project rootを検出
+1. project rootを検出
 2. `.incus-dev/dev.yml` を読み込む
 3. schema validation
 4. runtime compatibility validation
 5. instance名を決定
-6. instance存在確認
-7. 存在しなければinstance作成
-8. Incus Profile適用
-9. CPU / memory等を設定
-10. workspace mountを作成
+6. 参照Profileの存在確認（存在しなければ失敗）
+7. instance存在確認
+8. 存在しなければ作成（image / profiles）
+9. instance config・devices・workspace mountを適用
+10. devkit管理情報 (`user.incus-devkit.*`) を設定
 11. instance起動
 12. instance ready待ち
-13. Ansible bootstrap
-14. 共通Ansible provisioning
-15. project-specific provisioning
-16. 完了状態を表示
+13. bootstrap実行
+14. provisionステップを順に実行
+15. 完了状態を表示
 
-すでにinstanceが存在する場合は破壊してはならない。
+### 制約
 
-必要に応じて既存instanceを起動し、provisionを再実行する。
+- すでにinstanceが存在する場合は破壊してはならない
+- 既存instanceがdevkit管理下でない場合は明示的に失敗する
+- 既存instanceに対しても、`dev.yml` の宣言内容は再適用する
+  （[05-incus.md](05-incus.md) 参照）
 
 ---
 
@@ -57,18 +59,30 @@ dev up
 dev provision
 ```
 
-Incus instanceを再作成せず、Ansibleのみ再適用する。
+Incus instanceを再作成せず、bootstrapとprovisionステップのみ再実行する。
 
 主な用途：
 
-- `dev.yml` 更新
-- Role更新
-- package追加
-- project.yml変更
+- `dev.yml` の `provision` 更新
+- playbook / スクリプトの変更
+- 依存パッケージの追加
 
-実行対象instanceが存在しない場合は明示的なエラーとする。
+### 制約
 
-暗黙的に `dev up` へ切り替えてはならない。
+- 実行対象instanceが存在しない場合は明示的なエラーとする
+- 暗黙的に `dev up` へ切り替えてはならない
+- instance config / devices の変更は行わない（それは `dev up` の責務）
+
+### 部分実行
+
+ステップ数が増えると全体再実行が重くなるため、以下を提供することを推奨する。
+
+```bash
+dev provision --step <name>      # 特定ステップのみ実行
+dev provision --from <name>      # 指定ステップ以降を実行
+```
+
+MVPではoptionalとする。
 
 ---
 
@@ -80,19 +94,26 @@ dev shell
 
 対象コンテナへinteractive shellを開く。
 
-初期実装ではroot shellでも構わない。
+- TTYを割り当て、標準入出力を引き継ぐ
+- 作業ディレクトリの既定は `workspace.target`
+- 初期実装ではroot shellでよい
 
 将来的には、
 
 ```yaml
-user:
-  name: developer
+shell:
+  user: developer
+  command: /bin/bash
+  cwd: /workspace
 ```
 
-などを定義し、一般ユーザーでshellを開始する機能を追加できる構造とする。
+を `dev.yml` で指定できる構造とする。
 
-実装上は端末制御を伴うため、`incus exec -t` をそのままforegroundで実行し、
-標準入出力を引き継ぐ方式を基本とする（[07-implementation.md](07-implementation.md) 参照）。
+引数を与えた場合は、そのコマンドを実行して終了する形も検討する。
+
+```bash
+dev shell -- make test
+```
 
 ---
 
@@ -109,17 +130,18 @@ Project:    example-project
 Instance:   dev-example-project
 Status:     RUNNING
 Image:      images:ubuntu/24.04
-Workspace:  /workspace
+Workspace:  /home/user/src/example-project -> /workspace
 ```
 
 可能であれば以下も表示する。
 
-- CPU
-- Memory
-- Profile
-- Incus remote
-- Incus project
+- Profiles
+- 主要なconfig（`limits.cpu`, `limits.memory` など）
+- devices
+- provisionステップ数
+- Incus remote / project
 - runtime version
+- devkit管理下かどうか
 
 ---
 
@@ -131,7 +153,15 @@ dev destroy
 
 対象プロジェクトのIncus instanceを削除する。
 
-ソースコードはbind mountされたホスト側ディレクトリなので削除してはならない。
+### 制約
+
+- ソースコードはbind mountされたホスト側ディレクトリなので削除してはならない
+- devkit管理下でないinstanceは削除してはならない
+- 破壊操作のため、既定では確認を求める
+
+```bash
+dev destroy --force
+```
 
 将来的にpersistent volumeを追加する場合、削除ポリシーを明示的に管理する。
 
@@ -152,15 +182,16 @@ dev up
 
 を実行する。
 
-既存instance内の状態は破棄されるため、実行前に確認を求めてもよい。
+既存instance内の状態は破棄されるため、実行前に確認を求める。
 
-非interactive用途のため、
+非interactive用途のため、以下をサポートする。
 
 ```bash
 dev rebuild --force
 ```
 
-などをサポートすることを推奨する。
+`dev.yml` から削除した設定を確実に消したい場合の正規手段でもある
+（[05-incus.md](05-incus.md) 5.4.3 参照）。
 
 ---
 
@@ -170,17 +201,32 @@ dev rebuild --force
 dev validate
 ```
 
-以下だけを確認し、Incus instanceへ変更を加えない。
+以下だけを確認し、Incusへ一切変更を加えない。
 
 - YAML syntax
-- schema
-- runtime version
-- required fields
-- Feature existence
-- Profile name syntax
-- filesystem path
+- schema version
+- JSON Schemaへの適合
+- runtime version互換性
+- 必須フィールドの存在
+- provisionステップの構造
+  - `run` と `ansible` が排他であること
+  - bootstrapに `ansible` ステップが無いこと
+- 参照パスの存在
+  - `ansible.playbook` / `vars` / `inventory`
+  - `workspace.source`
+  - 相対パスで指定されたdeviceの `source`
+- Profile名の構文
+- `instance.config` の値がスカラであること
+- `user.incus-devkit.*` を使用していないこと
 
-CIから実行可能なこと。
+CIから実行可能なこと。Incusが無い環境でも実行可能とする。
+
+Incus daemonへの問い合わせ（Profileの実在確認など）は行わない。
+それが必要な場合は明示的なオプションとする。
+
+```bash
+dev validate --check-host
+```
 
 ---
 
@@ -194,19 +240,19 @@ dev up --dry-run
 
 をサポートする。
 
-実際に変更せず、
+実際に変更せず、実行予定の操作を表示する。
 
 ```text
-Create instance
-Set CPU=8
-Set Memory=16GiB
-Mount /foo/bar -> /workspace
-Apply profile dev-base
-Run Ansible feature python
-Run Ansible feature docker
+Create instance dev-example-project (images:ubuntu/24.04)
+Apply profiles: default
+Set config limits.cpu=8
+Set config limits.memory=16GiB
+Add device workspace (disk /home/user/src/example-project -> /workspace)
+Start instance
+Bootstrap: 1 step (default)
+Provision step 1/2: prepare (run)
+Provision step 2/2: main playbook (ansible .incus-dev/ansible/site.yml)
 ```
-
-などを確認可能にする。
 
 初期MVPではoptionalとする。
 
@@ -227,29 +273,24 @@ dev up
 ```text
 [dev] Project: example-project
 [dev] Creating instance dev-example-project
-[dev] Mounting workspace
+[dev] Mounting workspace /home/user/src/example-project -> /workspace
 [dev] Starting instance
-[dev] Bootstrapping Python
-[dev] Running Ansible provisioning
+[dev] Bootstrap (default)
+[dev] Step 1/2: prepare
+[dev] Step 2/2: main playbook
 [dev] Development environment is ready
 ```
 
-詳細確認用に、
+ステップ実行中の出力は、通常モードでは要約し、失敗時には全量を表示する。
+
+詳細確認用に以下を提供する。
 
 ```bash
 dev up --verbose
-```
-
-または、
-
-```bash
 dev -v up
 ```
 
-を提供することを推奨する。
-
-実装には標準ライブラリの `log/slog` を用い、
-通常モードは上記形式のハンドラ、`--verbose` ではdebugレベルを出力する。
+実装には標準ライブラリの `log/slog` を用いる。
 
 ---
 
@@ -263,17 +304,21 @@ dev -v up
 incus
 ansible-playbook
 git
+コンテナ内で実行した run ステップ
 ```
 
 失敗時には最低限以下を表示する。
 
 ```text
-Operation
-Target
-Command
-Exit code
-Error message
+Operation        provision step 2/3
+Target           dev-example-project
+Step             main playbook (ansible)
+Command          ansible-playbook ...
+Exit code        2
+Error message    ...
 ```
+
+ステップ実行の失敗では、どのステップが失敗したかを必ず特定できること。
 
 ただしSecretを含む可能性のある引数や環境変数を無条件で出力してはならない。
 
@@ -288,8 +333,7 @@ AIツールやCIが判定できるよう、終了コードを正しく返す。
 non-zero = failure
 ```
 
-`main` 関数のみが `os.Exit` を呼び、それ以外の層は
-`error` を返して呼び出し元へ伝播させる。
+`main` 関数のみが `os.Exit` を呼び、それ以外の層は `error` を返す。
 
 可能なら将来的にエラー種別別exit codeを導入してよいが、初期段階では不要。
 
@@ -336,6 +380,10 @@ dev shell
 
 AIエージェントがIncus内部実装を知らなくても利用できることを目標とする。
 
+環境を変更したい場合、AIエージェントが編集すべき対象は
+`.incus-dev/` 配下のファイルのみである。この一貫性がAI利用時の
+理解しやすさに直結する。
+
 ---
 
 ## 4.14 AI向けコマンド設計
@@ -351,18 +399,16 @@ dev status
 dev validate
 ```
 
-破壊操作のみ確認を入れてよい。
+破壊操作のみ確認を入れる。
 
 ```bash
 dev destroy
 dev rebuild
 ```
 
-非interactive用途として、
+非interactive用途として、以下を提供する。
 
 ```bash
 dev destroy --force
 dev rebuild --force
 ```
-
-を提供する。

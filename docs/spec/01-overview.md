@@ -2,7 +2,7 @@
 
 ## 1.1 概要
 
-本プロジェクトは、Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理するためのCLIツールを提供する。
+本プロジェクトは、Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理するためのCLIツール（dev CLI / devkit）を提供する。
 
 各ソフトウェアプロジェクトは、自身のGitリポジトリ内に開発環境定義を保持する。
 
@@ -16,18 +16,25 @@ dev up
 dev shell
 ```
 
-開発環境のインフラ部分はIncusで管理し、コンテナ内部のOS・パッケージ・開発ツールの構成はAnsibleで管理する。
+### 責務分担
 
 本ツールでは、以下の責務を明確に分離する。
 
-- プロジェクトリポジトリ
-  - 「どのような開発環境が必要か」を宣言する
-- dev CLI
-  - プロジェクト定義を解釈し、IncusとAnsibleをオーケストレーションする
+- プロジェクトリポジトリ (`.incus-dev/`)
+  - **どのようなコンテナを作るか** を宣言する
+  - **コンテナ内部をどう構成するか** の手順を保持する
+- dev CLI (devkit)
+  - Incus instanceのライフサイクルを管理する
+  - workspaceをコンテナへマウントする
+  - コンテナをbootstrapする
+  - `.incus-dev/` 配下で宣言された手順を、定義された順序で実行する
 - Incus
-  - コンテナ、リソース、デバイス、マウント、ネットワークなどを管理する
-- Ansible
-  - コンテナ内部のOS設定、パッケージ、ランタイム、開発ツールを構成する
+  - コンテナ、リソース、デバイス、マウント、ネットワークなどを実行する
+
+**devkitは環境固有の内容を一切持たない。**
+
+devkitはAnsible Role、Incus Profile、言語ランタイムの定義などを同梱しない。
+それらはすべてプロジェクト側の `.incus-dev/` に存在する。
 
 dev CLIはGoで実装し、単一バイナリとして配布する。詳細は [07-implementation.md](07-implementation.md) を参照。
 
@@ -68,8 +75,7 @@ dev up
 
 - Incus
 - dev CLI（単一バイナリ）
-- Ansible
-- dev CLIが要求する補助ツール
+- プロジェクトが利用するprovisionerの実行環境（Ansibleを使う場合はAnsible）
 
 プロジェクトごとの手作業によるIncus設定は要求しない。
 
@@ -104,24 +110,19 @@ Container:
 
 などはホスト側から利用可能としながら、ビルド・テスト・実行はIncusコンテナ内で行える構成を可能にする。
 
+`.incus-dev/` 自体もworkspaceの一部としてコンテナから見えるため、
+provisioning用のスクリプトはコンテナ内から直接参照できる。
+
 ---
 
 ### REQ-004: SSHを不要とすること
 
-Ansibleによるプロビジョニングのために各コンテナへSSH Serverを導入してはならない。
+プロビジョニングのために各コンテナへSSH Serverを導入してはならない。
 
-AnsibleからIncusへは原則として、
-
-```text
-community.general.incus
-```
-
-connection pluginを使用する。
-
-概念上は以下の経路とする。
+コンテナ内でのコマンド実行はIncusの提供する経路のみを使用する。
 
 ```text
-Ansible
+dev CLI
    │
    ▼
 Incus CLI / Incus daemon
@@ -130,13 +131,14 @@ Incus CLI / Incus daemon
 Container
 ```
 
+Ansibleを使用する場合も、`community.general.incus` connection pluginを使用し、
+SSHを経由しない。
+
 ---
 
-### REQ-005: 冪等なプロビジョニング
+### REQ-005: 再実行可能なプロビジョニング
 
-コンテナ内部の構成管理は原則としてAnsibleで実装する。
-
-以下を複数回実行しても正常に収束すること。
+以下を複数回実行しても、同じ手順が同じ順序で再実行されること。
 
 ```bash
 dev provision
@@ -144,7 +146,12 @@ dev provision
 dev provision
 ```
 
-可能な限り `shell` や `command` に依存せず、Ansible Moduleを使用する。
+devkitが保証するのは「同じ手順を同じ順序で再実行すること」までである。
+
+**個々の手順が冪等であることはプロジェクト側の責務とする。**
+
+Ansibleを使用する場合は、可能な限り `shell` や `command` に依存せず、
+Ansible Moduleを使用することを推奨する。
 
 ---
 
@@ -154,9 +161,38 @@ dev CLI本体は、実行時に言語ランタイムやパッケージマネー�
 
 Goで実装し、静的リンクされた単一バイナリとして配布する。
 
-ホスト側にPython仮想環境やnpm等のセットアップを要求しない。
+（Ansibleを使うかどうかはプロジェクトの選択であり、dev CLI本体の依存ではない。）
 
-（Ansible自体はホストにインストールされている前提とするが、dev CLI本体の依存とは分離して扱う。）
+---
+
+### REQ-007: devkitは環境固有の資産を持たないこと
+
+devkitは以下を同梱してはならない。
+
+- Ansible Role
+- Incus Profile
+- 言語ランタイムやツールの導入手順
+- 特定OS・特定ディストリビューションを前提とした処理
+
+理由：
+
+- devkitが用意したProfileやRoleに依存すると、それが存在しない環境で再現できない
+- プロジェクトによっては不要なものまで導入されてしまう
+- devkitの更新がプロジェクトの環境を意図せず変化させてしまう
+
+devkitが持ってよいのは以下に限る。
+
+- Incus instanceのライフサイクル操作
+- workspaceのマウント
+- bootstrap（provisionerを動かすための最小限の準備）
+- `.incus-dev/` 配下で宣言された手順の実行
+- 設定ファイルの解釈とvalidation
+
+**「あるプロジェクトの開発環境を再現するために必要な情報が、
+すべて `.incus-dev/` の中にある」状態を維持する。**
+
+例外は「bootstrapの既定動作」のみであり、これもプロジェクト側から上書き可能とする
+（[06-provisioning.md](06-provisioning.md) 参照）。
 
 ---
 
@@ -174,6 +210,15 @@ Goで実装し、静的リンクされた単一バイナリとして配布する
 - 開発者ごとのSecret管理基盤
 - GUI
 
+また、以下は **恒久的に非目標** とする（REQ-007）。
+
+- devkitによる共通Ansible Roleの提供
+- devkitによる共通Incus Profileの提供
+- `features:` のような、devkit側の実装に紐づく高水準の環境記述
+
+再利用可能なprovisioning資産が必要な場合は、devkitとは独立した
+Ansible CollectionやGitリポジトリとして配布し、プロジェクトが明示的に取り込む。
+
 ただし、将来の拡張を妨げる設計にはしない。
 
 ---
@@ -183,83 +228,79 @@ Goで実装し、静的リンクされた単一バイナリとして配布する
 ```text
                     Project Git Repository
                             │
-                  .incus-dev/dev.yml
-                            │
-                 Development declaration
+                     .incus-dev/
+                       ├── dev.yml          何を作り、何を実行するか
+                       ├── ansible/         プロジェクト所有のplaybook
+                       └── scripts/         プロジェクト所有のスクリプト
                             │
                             ▼
               ┌─────────────────────────┐
               │      dev CLI (Go)       │
               │                         │
-              │ up                      │
-              │ provision               │
-              │ shell                   │
-              │ status                  │
-              │ destroy                 │
-              │ rebuild                 │
+              │ up / provision / shell  │
+              │ status / destroy        │
+              │ rebuild / validate      │
               └───────┬─────────┬───────┘
                       │         │
-             Incus    │         │ Ansible
-                      ▼         ▼
-              ┌───────────┐ ┌─────────────┐
-              │ Instance  │ │ Common Roles│
-              │ Profile   │ │ Features    │
-              │ Devices   │ │ Project     │
-              │ Resources │ │ Provision   │
-              └─────┬─────┘ └──────┬──────┘
-                    │              │
-                    └──────┬───────┘
-                           ▼
-                 Development Container
-                           │
-                           ▼
-                      /workspace
-                           │
-                           ▼
-                  Project Git Working Tree
+      instance        │         │  bootstrap
+      config          │         │  + provision steps
+      devices         │         │
+      workspace       ▼         ▼
+              ┌───────────┐ ┌──────────────────┐
+              │   Incus   │ │  Step Executor   │
+              │           │ │                  │
+              │ create    │ │  run   (in ctr)  │
+              │ start     │ │  ansible (host)  │
+              │ device    │ │                  │
+              │ config    │ │                  │
+              └─────┬─────┘ └────────┬─────────┘
+                    │                │
+                    └────────┬───────┘
+                             ▼
+                   Development Container
+                             │
+                             ▼
+                        /workspace
+                             │
+                             ▼
+                    Project Git Working Tree
 ```
 
 ---
 
 ## 1.5 設計原則まとめ
 
-本システムでは、最終的に以下の責務分担を維持する。
-
 ```text
-Project repository
+Project repository (.incus-dev/)
        │
-       │ What
+       │ What & How
        ▼
-.incus-dev/dev.yml
+    dev CLI
        │
-       ▼
-     dev CLI
+       │ Orchestration only
        │
-       │ Orchestration
-       │
-       ├─────────────────┐
-       ▼                 ▼
-     Incus             Ansible
-       │                 │
-       │ Infrastructure  │ OS / Tools
-       │                 │
-       └────────┬────────┘
-                ▼
-         Dev Container
-                │
-                ▼
-           /workspace
-                │
-                ▼
-        Project Sources
+       ├─────────────────────┐
+       ▼                     ▼
+     Incus              Step Executor
+       │                     │
+       │ Container runtime   │ run / ansible
+       │                     │
+       └──────────┬──────────┘
+                  ▼
+           Dev Container
+                  │
+                  ▼
+             /workspace
+                  │
+                  ▼
+          Project Sources
 ```
 
-**Projectは「何が必要か」を定義する。**
+**Projectは「何が必要か」と「どう構成するか」を定義する。**
 
-**dev CLIは「どの順序で構築するか」を管理する。**
+**dev CLIは「どの順序で構築・実行するか」だけを管理する。**
 
 **Incusは「コンテナをどう実行するか」を管理する。**
 
-**Ansibleは「コンテナ内部をどう構成するか」を管理する。**
-
-この境界を崩さないことを、本システムの最重要設計原則とする。
+dev CLIが「どう構成するか」を持ち始めた時点でこの境界は崩れる。
+これを避けることを、本システムの最重要設計原則とする。

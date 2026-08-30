@@ -1,12 +1,68 @@
 # 3. 開発環境定義（dev.yml）
 
-ファイル：
+## 3.1 ファイル配置
+
+開発環境に関するすべてのファイルは `.incus-dev/` 配下に置く。
 
 ```text
-.incus-dev/dev.yml
+my-project/
+├── .incus-dev/
+│   ├── dev.yml              # 唯一の必須ファイル
+│   │
+│   ├── ansible/             # 任意（プロジェクト所有）
+│   │   ├── site.yml
+│   │   ├── vars.yml
+│   │   ├── requirements.yml
+│   │   └── roles/
+│   │
+│   └── scripts/             # 任意（プロジェクト所有）
+│       └── prepare.sh
+│
+├── src/
+└── ...
 ```
 
-## 3.1 基本例
+`dev.yml` 以外の構成は自由であり、devkitは特定のディレクトリ名を要求しない。
+`dev.yml` から参照されたパスだけを使用する。
+
+---
+
+## 3.2 基本例
+
+### 3.2.1 最小構成
+
+```yaml
+schema: 1
+
+project:
+  name: example-project
+
+instance:
+  image: images:ubuntu/24.04
+```
+
+これだけで、workspaceがマウントされた素のコンテナが起動する。
+
+### 3.2.2 シェルスクリプトで構成する例
+
+```yaml
+schema: 1
+
+project:
+  name: example-project
+
+instance:
+  image: images:ubuntu/24.04
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+
+provision:
+  - name: setup
+    run: sh /workspace/.incus-dev/scripts/prepare.sh
+```
+
+### 3.2.3 Ansibleで構成する例
 
 ```yaml
 schema: 1
@@ -21,37 +77,38 @@ instance:
   image: images:ubuntu/24.04
 
   profiles:
-    - dev-base
+    - default
 
-  resources:
-    cpu: 8
-    memory: 16GiB
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+    security.nesting: "true"
+
+  devices:
+    gpu0:
+      type: gpu
 
 workspace:
   source: .
   target: /workspace
 
-packages:
-  - jq
-  - cmake
-  - ninja-build
-
-features:
-  python:
-    version: "3.13"
-
-  docker: {}
-
 provision:
-  playbook: .incus-dev/ansible/project.yml
-  vars: .incus-dev/ansible/vars.yml
+  - name: base packages
+    run: |
+      apt-get update
+      apt-get install -y --no-install-recommends jq cmake ninja-build
+
+  - name: main playbook
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+      vars: .incus-dev/ansible/vars.yml
 ```
 
 すべてのフィールドを必須にはしない。
 
 ---
 
-## 3.2 schema
+## 3.3 schema
 
 ```yaml
 schema: 1
@@ -65,32 +122,29 @@ dev CLIは未知のschema versionを検出した場合、処理を継続して�
 
 ---
 
-## 3.3 runtime
+## 3.4 runtime
 
 ```yaml
 runtime:
   version: "1.0"
 ```
 
-共通dev runtimeとの互換性を指定する。
+任意。
 
-将来的にはSemVer形式を使用することを想定する。
+このプロジェクトが要求するdev CLIの互換バージョンを指定する。
 
-目的は以下の問題を防ぐこと。
+dev CLIが要求を満たさない場合は明示的なエラーとする。
 
-```text
-project commit A
-        +
-最新dev CLI / 最新Ansible Role
+devkitはAnsible RoleやProfileを同梱しないため（REQ-007）、
+このバージョンが示すのは **CLIの挙動と設定フォーマットの互換性のみ** である。
 
-↓
+provisioning内容のバージョン管理はプロジェクト側のGit履歴が担う。
 
-過去と異なる環境
-```
+将来的にはSemVer形式を使用する。
 
 ---
 
-## 3.4 project
+## 3.5 project
 
 ```yaml
 project:
@@ -99,99 +153,162 @@ project:
 
 `name` は原則必須。
 
-Incus instance名生成などに利用する。
+Incus instance名生成などに利用する（[05-incus.md](05-incus.md) 参照）。
 
 ---
 
-## 3.5 instance
+## 3.6 instance
 
 ```yaml
 instance:
   image: images:ubuntu/24.04
+  type: container
 
   profiles:
-    - dev-base
+    - default
 
-  resources:
-    cpu: 8
-    memory: 16GiB
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+    security.nesting: "true"
+
+  devices:
+    gpu0:
+      type: gpu
 ```
 
-### 3.5.1 image
+### 3.6.1 image
 
-Incus image referenceを指定する。
-
-例：
+必須。Incus image referenceを指定する。
 
 ```yaml
 image: images:ubuntu/24.04
 ```
 
-### 3.5.2 profiles
+devkitは特定のOSを前提としない。
+image選択と、それに適合するprovisioning手順の整合はプロジェクトの責務とする。
 
-必要なIncus Profileを指定する。
+### 3.6.2 type
 
-Profileは以下のようなホスト・仮想化レイヤーの設定に限定することを推奨する。
+任意。`container`（既定）または `virtual-machine`。
 
-- Network
-- Storage
-- GPU
-- nesting
-- security
-- device passthrough
+MVPでは `container` のみをサポートする。
 
-以下はProfileで管理しない。
+### 3.6.3 profiles
 
-- Python version
-- Node.js version
-- OS package
-- プロジェクト固有ツール
-
-それらはAnsibleで管理する。
-
-### 3.5.3 resources
-
-最低限以下をサポートする。
+任意。**ホスト側に既に存在するIncus Profileを名前で参照するだけ** のフィールド。
 
 ```yaml
-resources:
-  cpu: 8
-  memory: 16GiB
+profiles:
+  - default
 ```
 
-これらはIncus instance configへ変換する。
+- devkitはProfileを同梱しない（REQ-007）
+- devkitはProfileを作成・更新しない
+- 指定されたProfileが存在しない場合は明示的に失敗する
+
+省略時は `["default"]` として扱う（Incusの既定挙動と一致させるため）。
+
+明示的に空リストを指定した場合は、Profileを一切適用しない。
+
+```yaml
+profiles: []
+```
+
+この場合、ネットワークデバイス等も継承されないため、
+必要なものは `devices` で明示すること。
+
+**推奨：** 環境依存を避けたい場合はProfileに依存せず、
+`config` と `devices` にすべて記述する。
+
+### 3.6.4 config
+
+任意。Incus instance configへそのまま渡すkey-value。
+
+```yaml
+config:
+  limits.cpu: "8"
+  limits.memory: 16GiB
+  security.nesting: "true"
+  environment.TZ: Asia/Tokyo
+```
+
+devkitはキーの意味を解釈しない。未知のキーを拒否してはならない。
+
+Incusのconfig値は文字列であるため、YAML上のスカラ値（数値・真偽値）は
+文字列へ変換して渡す。
+
+```yaml
+limits.cpu: 8         # "8" として渡される
+```
+
+`user.incus-devkit.*` 名前空間はdevkitが管理用に予約する。
+プロジェクトから指定してはならない。
+
+### 3.6.5 devices
+
+任意。Incus deviceをそのまま渡す。
+
+```yaml
+devices:
+  gpu0:
+    type: gpu
+
+  extra-data:
+    type: disk
+    source: /srv/dataset      # ホスト側パス
+    path: /data
+
+  http:
+    type: proxy
+    listen: tcp:127.0.0.1:8080
+    connect: tcp:127.0.0.1:8080
+```
+
+- deviceの `source` に相対パスを指定した場合、project rootを基準に解決する
+- `workspace` という名前のdeviceはdevkitが予約する（3.7参照）
 
 ---
 
-## 3.6 workspace
+## 3.7 workspace
 
 ```yaml
 workspace:
   source: .
   target: /workspace
+  idmap: auto
 ```
 
-### 3.6.1 source
+省略時は上記の既定値が使用される。
 
-`dev.yml` ではなく、プロジェクトrootを基準に解決する。
+### 3.7.1 source
+
+project rootを基準に解決する。
 
 ```yaml
 source: .
 ```
 
-の場合、Git repository rootを意味する。
+の場合、project root（`.incus-dev/` の親）を意味する。
 
-### 3.6.2 target
+### 3.7.2 target
 
-コンテナ内部のmount point。
+コンテナ内部のmount point。既定は `/workspace`。
 
-デフォルト：
+### 3.7.3 idmap
 
-```text
-/workspace
-```
+非特権コンテナでbind mountを行う場合、ホスト側uid/gidとコンテナ内uid/gidの
+対応付けが必要になる。
 
-### 3.6.3 mount方式
+| 値 | 動作 |
+| --- | --- |
+| `auto`（既定） | devkitが実行ユーザーのuid/gidに基づき対応付けを設定する |
+| `none` | 何も設定しない。プロジェクトが `instance.config` で自前設定する |
+
+`auto` の場合にdevkitが設定する内容（`raw.idmap` 等）は、
+対象Incus versionの仕様に従う。実装時に確認すること。
+
+### 3.7.4 mount方式
 
 Incus disk deviceを使用する。
 
@@ -208,126 +325,165 @@ incus config device add \
 
 ---
 
-## 3.7 packages
-
-簡単な追加パッケージのために以下を提供する。
+## 3.8 bootstrap
 
 ```yaml
-packages:
-  - jq
-  - cmake
-  - ninja-build
+bootstrap:
+  - run: |
+      command -v python3 >/dev/null 2>&1 ||
+        (apt-get update && apt-get install -y python3)
 ```
 
-これらは共通Ansible Playbook内でインストールする。
+任意。provision実行前に、コンテナ内で実行する準備処理。
 
-プロジェクトごとに `project.yml` を書く必要を減らすことが目的である。
+- ステップは `run` のみ使用できる（`ansible` は使用できない）
+- 指定した場合、devkitの既定bootstrapを **完全に置き換える**
+- 空リスト `bootstrap: []` を指定すると、bootstrapを行わない
 
----
-
-## 3.8 features
-
-Featureは共通Ansible Roleに対応する。
-
-例：
-
-```yaml
-features:
-  python:
-    version: "3.13"
-
-  nodejs:
-    version: "24"
-
-  docker: {}
-
-  rust: {}
-```
-
-初期実装では最低限以下を検討する。
-
-- common
-- devtools
-- python
-- nodejs
-- golang
-- rust
-- docker
-
-Featureは将来的に追加可能でなければならない。
-
-Feature名からAnsible Roleへのマッピングは [06-ansible.md](06-ansible.md) を参照。
+既定動作および詳細は [06-provisioning.md](06-provisioning.md) を参照。
 
 ---
 
 ## 3.9 provision
 
-共通Featureだけでは表現できない処理のため、任意のAnsibleファイルをサポートする。
-
 ```yaml
 provision:
-  playbook: .incus-dev/ansible/project.yml
-  vars: .incus-dev/ansible/vars.yml
+  - name: prepare
+    run: sh /workspace/.incus-dev/scripts/prepare.sh
+
+  - name: main playbook
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+
+  - name: project setup
+    run: |
+      cd /workspace
+      make setup
 ```
 
-これらはoptionalとする。
+任意。順序付きのステップ配列。
 
-### 3.9.1 project.yml
+各ステップは `run` または `ansible` のいずれか一方を持つ。
+両方を持つステップは不正とする。
 
-例：
+ステップは記述順に実行する。いずれかが失敗した時点で全体を失敗とする。
+
+### 3.9.1 `run` ステップ
+
+コンテナ内でコマンドを実行する。
+
+短縮形：
 
 ```yaml
----
-- name: Install project dependencies
-  ansible.builtin.apt:
-    name:
-      - protobuf-compiler
-      - libssl-dev
-      - postgresql-client
-    state: present
+- run: apt-get update
 ```
 
-共通環境構築終了後に実行する。
+完全形：
 
-実行順序は、
+```yaml
+- name: install packages
+  run: |
+    apt-get update
+    apt-get install -y jq
+  shell: /bin/sh          # 既定: /bin/sh
+  cwd: /workspace         # 既定: コンテナの既定作業ディレクトリ
+  user: root              # 既定: root
+  env:
+    DEBIAN_FRONTEND: noninteractive
+```
+
+| フィールド | 必須 | 説明 |
+| --- | --- | --- |
+| `run` | ○ | 実行するスクリプト本文 |
+| `name` | | 表示名。ログとエラーに使用する |
+| `shell` | | スクリプトを解釈するシェル |
+| `cwd` | | 作業ディレクトリ（コンテナ内パス） |
+| `user` | | 実行ユーザー |
+| `env` | | 追加の環境変数 |
+
+`.incus-dev/` はworkspaceの一部としてコンテナ内に見えるため、
+スクリプトファイルは `<workspace.target>/.incus-dev/...` として参照できる。
+
+冪等性はプロジェクトの責務とする（REQ-005）。
+
+### 3.9.2 `ansible` ステップ
+
+ホスト側で `ansible-playbook` を実行する。
+
+```yaml
+- name: main playbook
+  ansible:
+    playbook: .incus-dev/ansible/site.yml
+    vars: .incus-dev/ansible/vars.yml
+    inventory: .incus-dev/ansible/extra-inventory.yml
+    tags:
+      - setup
+    extra_args:
+      - --diff
+```
+
+| フィールド | 必須 | 説明 |
+| --- | --- | --- |
+| `playbook` | ○ | playbookのパス（project root相対） |
+| `vars` | | 追加varsファイル。`--extra-vars @<file>` として渡す |
+| `inventory` | | 追加inventory。devkit生成のinventoryに加えて渡す |
+| `tags` / `skip_tags` | | `--tags` / `--skip-tags` |
+| `extra_args` | | `ansible-playbook` へそのまま渡す引数 |
+
+devkitは接続用の一時inventoryを生成する。
+Role解決やcollectionの導入はプロジェクトの責務とする。
+
+詳細は [06-provisioning.md](06-provisioning.md) を参照。
+
+---
+
+## 3.10 devkitが提供する変数
+
+devkitはprovisioningの実行対象を各ステップへ通知する。
+プロジェクトはこれによりinstance名等をハードコードせずに済む。
+
+### 3.10.1 `run` ステップの環境変数
 
 ```text
-Bootstrap
-   ↓
-common
-   ↓
-packages
-   ↓
-features
-   ↓
-project-specific provisioning
+DEVKIT_PROJECT_NAME
+DEVKIT_INSTANCE
+DEVKIT_WORKSPACE            コンテナ内のworkspaceパス
+DEVKIT_WORKSPACE_SOURCE     ホスト側のproject rootパス
+DEVKIT_INCUS_REMOTE
+DEVKIT_INCUS_PROJECT
 ```
 
-とする。
+### 3.10.2 `ansible` ステップの変数
 
----
-
-## 3.10 将来的な拡張予定フィールド
-
-以下は初期実装では対象外だが、後方互換に追加できる構造としておく。
+同じ情報を `--extra-vars` として渡す。
 
 ```yaml
-incus:
-  remote: local
-  project: development
-
-user:
-  name: developer
-
-secrets:
-  ...
+devkit_project_name: example-project
+devkit_instance: dev-example-project
+devkit_workspace: /workspace
+devkit_workspace_source: /home/user/src/example-project
+devkit_incus_remote: local
+devkit_incus_project: default
 ```
 
-詳細は [05-incus.md](05-incus.md)、[07-implementation.md](07-implementation.md) を参照。
+`devkit_` および `DEVKIT_` プレフィックスはdevkitが予約する。
 
 ---
 
-## 3.11 Secret
+## 3.11 パス解決規則
+
+| 対象 | 基準 |
+| --- | --- |
+| `workspace.source` | project root |
+| `devices.*.source`（相対パスの場合） | project root |
+| `provision[].ansible.playbook` / `vars` / `inventory` | project root |
+| `provision[].run` 内のパス | コンテナ内の絶対パス（利用者が記述） |
+
+project rootの外を指すパスは警告してよいが、禁止はしない。
+
+---
+
+## 3.12 Secret
 
 以下を `dev.yml` へ直接書くことを推奨しない。
 
@@ -338,19 +494,33 @@ secrets:
 
 特にGitへcommitされることを前提に設計する。
 
-将来的には、
+Secretが必要な場合は、以下から注入する方式を優先する。
+
+- ホスト側の環境変数
+- ホスト側のファイル
+- password manager / secret manager
+
+将来的にdevkit側で注入機構を提供する可能性はあるが、初期実装では対象外とする。
+
+---
+
+## 3.13 将来的な拡張予定フィールド
+
+以下は初期実装では対象外だが、後方互換に追加できる構造としておく。
 
 ```yaml
-secrets:
+incus:
+  remote: local
+  project: development
+
+shell:
+  user: developer
+  command: /bin/bash
+  cwd: /workspace
+
+provision:
+  - galaxy:                       # ansible-galaxy install
+      requirements: .incus-dev/ansible/requirements.yml
 ```
 
-のような仕組みを追加できるようにするが、初期実装では対象外とする。
-
-Secretを実装する場合は、
-
-- environment variable
-- host-side file
-- password manager
-- secret manager
-
-等から注入する方式を優先する。
+詳細は [05-incus.md](05-incus.md)、[09-roadmap.md](09-roadmap.md) を参照。

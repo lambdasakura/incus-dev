@@ -21,25 +21,22 @@ dev validate
 ```text
 local remote
 default project
-container only
-Ubuntu 24.04
-CPU
-Memory
-Profile
-Workspace bind mount
+container のみ
+任意の image
+既存 profile の名前参照
+instance.config / instance.devices の素通し
+workspace bind mount（idmap: auto）
+devkit管理情報 user.incus-devkit.*
 ```
 
-### Ansible
+### Provisioning
 
 ```text
-community.general.incus
-
-bootstrap
-common
-packages
-python
-docker
-project.yml
+instance ready 待ち
+bootstrap（既定 + 上書き + 無効化）
+run ステップ（コンテナ内実行）
+ansible ステップ（community.general.incus / 一時inventory）
+devkit変数の注入
 ```
 
 ### Configuration
@@ -48,32 +45,37 @@ project.yml
 schema
 runtime
 project
-instance
-workspace
-packages
-features
-provision
+instance (image / type / profiles / config / devices)
+workspace (source / target / idmap)
+bootstrap
+provision (run / ansible)
+```
+
+### 明示的にMVPに含まないもの
+
+```text
+packages / features に相当する高水準フィールド（恒久的な非目標）
+devkit同梱の Role / Profile（恒久的な非目標）
+requirements.yml の自動適用
 ```
 
 ---
 
 ## 9.2 MVP以降の候補
 
-以下はMVP完成後に検討する。
-
 ```text
-Node.js
-Go
-Rust
+provision --step / --from（部分実行）
+galaxy ステップ型（ansible-galaxy install）
+追加のステップ型（必要が生じた場合のみ）
 
-AMD GPU
-NVIDIA GPU
+dev exec
+dev shell の user / command / cwd 設定
+JSON output
+shell completion
 
-multiple workspaces
-persistent volumes
-
-environment variables
-secrets
+instance.config の削除追従（user.incus-devkit.managed による差分unset）
+再起動が必要な設定変更の自動処理
+virtual-machine サポート
 
 Incus remote
 Incus project
@@ -81,20 +83,11 @@ Incus project
 multiple checkout support
 branch-specific instance
 
-snapshot
-restore
+snapshot / restore
+persistent volumes
+multiple workspaces
 
-clone environment
-
-dev exec
-
-JSON output
-
-shell completion
-
-custom images
-
-cloud-init support
+環境変数 / secrets の注入機構
 
 Incus Go client library への移行
 ```
@@ -102,8 +95,6 @@ Incus Go client library への移行
 ---
 
 ## 9.3 開発優先順位
-
-推奨実装順：
 
 ### Phase 0
 
@@ -128,8 +119,11 @@ dev --version
 
 ### Phase 1
 
+設定とproject discovery。
+
 ```text
-config parser
+config parser（instance.config / devices / step のデコード）
+JSON Schema
 project discovery
 CLI skeleton
 ```
@@ -147,63 +141,61 @@ dev validate
 Incus基本操作。
 
 ```text
-create
-start
-status
-destroy
-workspace mount
-CPU
-Memory
-Profile
+create / start / stop / delete
+profile 存在確認
+config / devices の適用
+workspace mount（idmap）
+devkit管理情報
 ```
 
 以下を成立させる。
 
 ```bash
-dev up
+dev up        # provisionなし
 dev status
 dev shell
 dev destroy
 ```
 
-まだAnsibleは不要。
-
 ---
 
 ### Phase 3
 
-Ansible統合。
+実行機構（devkitの中核）。
 
 ```text
-community.general.incus
-temporary inventory
-bootstrap
-common role
-packages
+instance ready 待ち
+bootstrap（既定 / 上書き / 無効化）
+run ステップ
+ステップ失敗時のエラー
 ```
 
-同時に、Playbook/Roleの `go:embed` 同梱と展開を実装する。
+`.incus-dev/` にシェルスクリプトだけを置いたプロジェクトが
+完全に動作する状態にする。
 
 ---
 
 ### Phase 4
 
-Feature。
+ansibleステップ。
 
 ```text
-python
-docker
+一時inventory生成
+devkit変数の注入
+ansible.cfg の扱い
 ```
 
 ---
 
 ### Phase 5
 
-project-specific Ansible。
+運用系。
 
 ```text
-.incus-dev/ansible/project.yml
-.incus-dev/ansible/vars.yml
+dev rebuild
+dev provision の再実行検証
+dry-run
+エラーメッセージの整備
 ```
 
 ---
@@ -216,10 +208,9 @@ project-specific Ansible。
 unit tests
 integration tests
 verbose
-dry-run
 JSON output
-error messages
 shell completion
+examples/ の整備
 ```
 
 ---
@@ -228,9 +219,15 @@ shell completion
 
 MVPは以下がすべて成立した時点で完成とする。
 
-新規Ubuntuホスト上で必要な共通ツールをセットアップ済みとする。
+### 前提
 
-（dev CLIについては、単一バイナリをPATH上へ配置するだけで動作すること。）
+新規Ubuntuホスト上で、以下のみをセットアップ済みとする。
+
+- Incus
+- dev CLI（単一バイナリの配置のみ）
+- Ansible（Ansibleを使うサンプルを検証する場合）
+
+### 基本フロー
 
 任意のテストプロジェクトで、
 
@@ -239,11 +236,8 @@ git clone <repository>
 cd <repository>
 
 dev validate
-
 dev up
-
 dev status
-
 dev shell
 ```
 
@@ -257,18 +251,22 @@ cd /workspace
 
 するとホスト側Git repositoryが見えること。
 
-`dev.yml` に、
+### provisioning
+
+`.incus-dev/dev.yml` に以下を記述したプロジェクトで、
+コンテナ内に該当環境が構築されること。
 
 ```yaml
-packages:
-  - jq
+provision:
+  - name: packages
+    run: |
+      command -v jq >/dev/null 2>&1 ||
+        (apt-get update && apt-get install -y jq)
 
-features:
-  python:
-    version: "3.13"
+  - name: playbook
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
 ```
-
-を指定した場合、コンテナ内部で該当環境を利用できること。
 
 さらに、
 
@@ -279,7 +277,7 @@ dev provision
 
 を連続実行して正常終了すること。
 
-最後に、
+### 破棄
 
 ```bash
 dev destroy --force
@@ -290,7 +288,18 @@ dev destroy --force
 ```text
 Git repository
 source files
-.incus-dev/dev.yml
+.incus-dev/
 ```
 
 がホスト上に残ること。
+
+### 自己完結性（REQ-007）
+
+以下がすべて成立すること。
+
+1. devkitリポジトリに Ansible Role / Incus Profile が存在しない
+2. devkitバイナリが同梱するアセットは JSON Schema のみである
+3. あるプロジェクトの `.incus-dev/` を別の空リポジトリへコピーし、
+   `dev up` を実行すると同じ環境が再現される
+4. devkitを新しいバージョンへ更新しても、既存プロジェクトの
+   構築内容（導入されるパッケージやツール）が変化しない
