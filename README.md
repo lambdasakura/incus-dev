@@ -98,6 +98,11 @@ make test-integration   # Incus実機に対する統合テスト
 
 開発方針は [CLAUDE.md](CLAUDE.md)、仕様は [docs/spec/](docs/spec/README.md) を参照。
 
+## 困ったときは
+
+ホスト環境に起因する典型的な問題（Dockerとのネットワーク競合、workspaceの
+所有者、Profile不足など）は [docs/troubleshooting.md](docs/troubleshooting.md) を参照。
+
 ## 実装状況
 
 MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
