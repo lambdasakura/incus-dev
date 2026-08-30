@@ -3,7 +3,9 @@
 package integration_test
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -125,6 +127,32 @@ provision:
 	}
 	if _, err := f.run("shell", "--", "test", "-f", "/etc/should-not-exist"); err == nil {
 		t.Error("失敗後のステップが実行されている")
+	}
+}
+
+// idev shell -- cmd は端末以外へ出力しても内容を壊さず、終了コードを伝播する
+func TestShellCommandOutputAndExitCode(t *testing.T) {
+	f := newFixture(t, minimalYAML)
+	f.mustRun("up")
+
+	out := f.mustRun("shell", "--", "printf", `a\nb\n`)
+	if strings.Contains(out, "\r") {
+		t.Errorf("output = %q, パイプ経由の出力にCRを混入させないこと", out)
+	}
+	if out != "a\nb\n" {
+		t.Errorf("output = %q, want %q", out, "a\nb\n")
+	}
+
+	cmd := exec.Command(idevBin, "shell", "--", "sh", "-c", "exit 42")
+	cmd.Dir = f.root
+	err := cmd.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %v, want exit error", err)
+	}
+	if exitErr.ExitCode() != 42 {
+		t.Errorf("exit code = %d, want 42 (コマンドの終了コードを伝播すること)", exitErr.ExitCode())
 	}
 }
 

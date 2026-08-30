@@ -20,13 +20,14 @@ func main() {
 	defer stop()
 
 	if err := cli.Execute(ctx, version, os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "[idev] error: %v\n", err)
-
-		// コンテナ内コマンドの終了コードはそのまま伝播させる。
+		// コンテナ内コマンドが異常終了しただけの場合は、
+		// その終了コードをそのまま返す（出力は既に中継済み）。
 		var exitErr *cli.ExitCodeError
 		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.Code)
 		}
+
+		fmt.Fprintf(os.Stderr, "[idev] error: %v\n", err)
 		os.Exit(1)
 	}
 }

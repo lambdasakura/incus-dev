@@ -25,11 +25,16 @@ type AppOptions struct {
 	Config *config.Config
 	Client incus.Client
 	Runner runner.Runner
+	// In は shell へ渡す標準入力。
+	In io.Reader
 	// Out は結果の出力先（status など）。
 	Out io.Writer
 	// ErrOut はログとステップ出力の出力先。
 	ErrOut  io.Writer
 	Verbose bool
+	// Interactive は標準入出力が端末に接続されているか。
+	// idev shell で擬似端末を割り当てるかの判断に使う。
+	Interactive bool
 
 	Remote       string
 	IncusProject string
@@ -40,12 +45,15 @@ type AppOptions struct {
 
 // App はコマンドの実処理を保持する。
 type App struct {
-	cfg      *config.Config
-	client   incus.Client
-	exec     *provision.Executor
-	out      io.Writer
-	log      *slog.Logger
-	instance string
+	cfg         *config.Config
+	client      incus.Client
+	exec        *provision.Executor
+	in          io.Reader
+	out         io.Writer
+	errOut      io.Writer
+	log         *slog.Logger
+	instance    string
+	interactive bool
 
 	remote       string
 	incusProject string
@@ -73,6 +81,7 @@ func NewApp(opt AppOptions) *App {
 	return &App{
 		cfg:    opt.Config,
 		client: opt.Client,
+		in:     opt.In,
 		exec: &provision.Executor{
 			Incus:  opt.Client,
 			Runner: opt.Runner,
@@ -81,7 +90,9 @@ func NewApp(opt AppOptions) *App {
 			Stderr: errOut,
 		},
 		out:          out,
+		errOut:       errOut,
 		log:          log,
+		interactive:  opt.Interactive,
 		instance:     incus.InstanceName(opt.Config.Project.Name),
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
@@ -208,11 +219,26 @@ func (a *App) Shell(ctx context.Context, argv []string) error {
 		argv = []string{DefaultShellCommand}
 	}
 
-	code, err := a.client.Exec(ctx, a.instance, argv, incus.ExecOptions{
+	opt := incus.ExecOptions{
 		Cwd: a.cfg.WorkspaceOrDefault().Target,
-		TTY: true,
-	})
+		// 端末に接続されていない場合に擬似端末を割り当てると、
+		// 出力へCRが混入しパイプやリダイレクトが壊れる。
+		TTY: a.interactive,
+	}
+	if !opt.TTY {
+		opt.Stdin = a.in
+		opt.Stdout = a.out
+		opt.Stderr = a.errOut
+	}
+
+	code, err := a.client.Exec(ctx, a.instance, argv, opt)
 	if err != nil {
+		// コマンドが異常終了しただけの場合は、その終了コードを伝播させる。
+		// devkit自身のエラーとしては扱わない。
+		var exitErr *runner.ExitError
+		if errors.As(err, &exitErr) {
+			return &ExitCodeError{Code: exitErr.ExitCode}
+		}
 		return err
 	}
 	if code != 0 {
