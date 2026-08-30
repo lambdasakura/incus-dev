@@ -7,17 +7,15 @@ dev CLIはGoで実装する。
 理由：
 
 - 単一の静的バイナリとして配布でき、実行時のランタイム依存が無い
-  （利用者はGoツールチェインを持たなくてよい）
 - クロスコンパイルが容易（Linux amd64 / arm64 など）
 - `os/exec` による外部コマンド呼び出しが標準ライブラリで完結する
 - 構造体タグによるYAML/JSONの型付きデコードが自然に書ける
-- `go:embed` によりAnsible Role・Profile・JSON Schemaをバイナリへ同梱できる
 - 標準の `testing` によりテストが容易
 - Incusの公式Go client library (`github.com/lxc/incus/client`) を将来利用できる
 
 ただし、アーキテクチャ上Go固有機能への過剰な依存は避ける。
-特に、外部コマンド（incus / ansible-playbook / git）との境界は
-インターフェースとして定義し、実装差し替えが可能な形に保つ。
+外部コマンド（incus / ansible-playbook / git）との境界はインターフェースとして
+定義し、実装差し替えが可能な形に保つ。
 
 ---
 
@@ -34,7 +32,6 @@ incus-devkit/
 ├── go.mod
 ├── go.sum
 ├── Makefile
-├── requirements.yml            # ansible-galaxy collections
 │
 ├── cmd/
 │   └── dev/
@@ -53,6 +50,7 @@ incus-devkit/
 │   │
 │   ├── config/                 # dev.yml の読み込みとvalidation
 │   │   ├── config.go
+│   │   ├── step.go             # provision ステップのデコード
 │   │   ├── schema.go
 │   │   └── testdata/
 │   │
@@ -64,15 +62,14 @@ incus-devkit/
 │   │   ├── cli.go              # incus CLI 実装
 │   │   └── name.go             # instance命名規則
 │   │
-│   ├── ansible/                # Ansible操作層
-│   │   ├── ansible.go
+│   ├── provision/              # bootstrap / provision ステップの実行
+│   │   ├── provision.go
+│   │   ├── step_run.go
+│   │   ├── step_ansible.go
 │   │   └── inventory.go
 │   │
 │   ├── runner/                 # 外部コマンド実行の集約
 │   │   └── runner.go
-│   │
-│   ├── assets/                 # go:embed による同梱アセットの展開
-│   │   └── assets.go
 │   │
 │   └── errs/                   # エラー型 / exit code マッピング
 │       └── errs.go
@@ -80,25 +77,10 @@ incus-devkit/
 ├── schemas/
 │   └── dev-v1.schema.json
 │
-├── ansible/
-│   ├── ansible.cfg
-│   ├── bootstrap.yml
-│   ├── provision.yml
-│   │
-│   └── roles/
-│       ├── common/
-│       ├── devtools/
-│       ├── python/
-│       ├── nodejs/
-│       ├── golang/
-│       ├── rust/
-│       └── docker/
-│
-├── profiles/
-│   ├── dev-base.yaml
-│   ├── nested.yaml
-│   ├── gpu-amd.yaml
-│   └── gpu-nvidia.yaml
+├── examples/                   # ドキュメント用サンプル（実行時には使用しない）
+│   ├── minimal/
+│   ├── shell-based/
+│   └── ansible-based/
 │
 └── test/
     └── integration/            # //go:build integration
@@ -106,38 +88,54 @@ incus-devkit/
 
 Goの慣例に従い、外部から利用されない実装は `internal/` へ配置する。
 
-将来的にライブラリとして公開したいパッケージが生じた場合のみ `pkg/` を検討する。
-
 ---
 
-## 2.3 アセットの同梱
+## 2.3 devkitリポジトリに置かないもの
 
-`ansible/`、`profiles/`、`schemas/` は `go:embed` でバイナリへ同梱する。
-
-```go
-//go:embed all:ansible all:profiles all:schemas
-var Assets embed.FS
-```
-
-`ansible-playbook` は実ファイルパスを必要とするため、
-実行時にキャッシュディレクトリへ展開してから使用する。
+REQ-007により、以下はdevkitリポジトリに存在してはならない。
 
 ```text
-${XDG_CACHE_HOME:-~/.cache}/incus-devkit/runtime/<runtime-version>/
+ansible/roles/         共通Ansible Role
+ansible/*.yml          共通Playbook
+profiles/*.yaml        共通Incus Profile
+requirements.yml       共通collection定義
 ```
 
-これにより以下を満たす。
+これらはすべてプロジェクト側の `.incus-dev/` に属する。
 
-- 利用者は単一バイナリの配置のみで動作する
-- `runtime.version` ごとに展開先を分離でき、再現性を確保できる
-  （[03-configuration.md](03-configuration.md) の `runtime` を参照）
+`examples/` 配下のサンプルは **ドキュメントとしてのみ** 存在し、
+dev CLIの実行時に参照されない。バイナリにも同梱しない。
 
-開発時にはリポジトリ内のファイルを直接参照できるよう、
-展開先を上書きする手段（環境変数など）を用意してよい。
+再利用可能なprovisioning資産を共有したい場合は、devkitとは別の
+Ansible Collectionやリポジトリとして配布し、各プロジェクトが
+明示的に取り込む形とする。
 
 ---
 
-## 2.4 ビルドと配布
+## 2.4 同梱アセット
+
+バイナリへ同梱するのはJSON Schemaのみとする。
+
+```go
+//go:embed schemas
+var schemaFS embed.FS
+```
+
+Schemaはメモリ上で読み込むだけであり、ファイルとして展開する必要がない。
+
+Playbook・Role・Profileを同梱しないため、
+
+- 実行時のアセット展開処理
+- バージョンごとのキャッシュディレクトリ管理
+- 展開先とリポジトリの不整合
+
+といった機構は一切不要になる。
+
+これはdevkitを「実行機構に特化させる」ことによる直接的な利点である。
+
+---
+
+## 2.5 ビルドと配布
 
 ```bash
 go build ./cmd/dev            # ローカルビルド
@@ -156,9 +154,9 @@ CGOは不要とし、`CGO_ENABLED=0` でビルド可能な実装を維持する�
 
 ---
 
-## 2.5 プロジェクト側構成
+## 2.6 プロジェクト側構成
 
-基本形：
+最小形：
 
 ```text
 my-project/
@@ -166,27 +164,36 @@ my-project/
 │   └── dev.yml
 │
 ├── src/
-├── tests/
-├── README.md
 └── ...
 ```
 
-多くのプロジェクトでは `.incus-dev/dev.yml` だけで環境を定義できることを目標とする。
+`dev.yml` 1ファイルだけで環境を定義できる。
 
-特殊なプロビジョニングが必要な場合のみ以下を追加する。
+provisioningを伴う場合の例：
 
 ```text
 my-project/
 ├── .incus-dev/
 │   ├── dev.yml
 │   │
+│   ├── scripts/
+│   │   └── prepare.sh
+│   │
 │   └── ansible/
-│       ├── project.yml
+│       ├── ansible.cfg
+│       ├── site.yml
 │       ├── vars.yml
+│       ├── requirements.yml
+│       ├── roles/
 │       ├── files/
 │       └── templates/
 │
 └── ...
 ```
 
-プロジェクト固有のAnsible Roleを必須としてはならない。
+devkitは `dev.yml` 以外のディレクトリ名・構成を規定しない。
+`dev.yml` から参照されたパスのみを使用する。
+
+**この配下のファイルだけで、その開発環境が完全に再現できる状態を維持する。**
+
+具体例は [10-examples.md](10-examples.md) を参照。

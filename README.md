@@ -10,9 +10,42 @@ dev up
 dev shell
 ```
 
-- インフラ（コンテナ・リソース・マウント）は **Incus** が管理する
-- コンテナ内部（OS設定・パッケージ・ランタイム）は **Ansible** が管理する
-- `dev` CLIは **Go** で実装し、単一バイナリとして配布する
+## 設計方針
+
+devkitは以下に特化する。
+
+- Incus instanceのライフサイクル管理
+- workspace（プロジェクトのworking tree）のマウント
+- コンテナのbootstrap
+- `.incus-dev/` に宣言された手順の実行
+
+**devkitは環境固有の内容を持たない。**
+Ansible Role・Incus Profile・言語ランタイムの導入手順は同梱せず、
+すべてプロジェクトの `.incus-dev/` が所有する。
+
+```yaml
+# .incus-dev/dev.yml
+schema: 1
+
+project:
+  name: my-project
+
+instance:
+  image: images:ubuntu/24.04
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+
+provision:
+  - name: setup
+    run: sh /workspace/.incus-dev/scripts/setup.sh
+
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+```
+
+dev CLIは Go で実装し、単一バイナリとして配布する。
 
 ## ドキュメント
 
