@@ -20,7 +20,8 @@ const (
 const idmapConfigKey = "raw.idmap"
 
 // desiredConfig は dev.yml から適用すべきinstance configを組み立てる。
-func desiredConfig(cfg *config.Config) map[string]string {
+// mode は解決済みのidmap方式。
+func desiredConfig(cfg *config.Config, mode config.IDMapMode) map[string]string {
 	out := make(map[string]string, len(cfg.Instance.Config)+4)
 	for k, v := range cfg.Instance.Config {
 		out[k] = v
@@ -30,19 +31,17 @@ func desiredConfig(cfg *config.Config) map[string]string {
 	out[managedRootKey] = cfg.Root
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
 
-	// workspace.idmap: auto の場合、ホストの実行ユーザーをコンテナのrootへ対応付ける。
+	// raw方式ではホストの実行ユーザーをコンテナのrootへ対応付ける。
 	// プロジェクトが raw.idmap を明示している場合は尊重する。
-	if _, explicit := cfg.Instance.Config[idmapConfigKey]; !explicit {
-		if cfg.WorkspaceOrDefault().IDMap == config.IDMapAuto {
-			out[idmapConfigKey] = fmt.Sprintf("both %d 0", os.Getuid())
-		}
+	if _, explicit := cfg.Instance.Config[idmapConfigKey]; !explicit && mode == config.IDMapRaw {
+		out[idmapConfigKey] = fmt.Sprintf("both %d 0", os.Getuid())
 	}
 	return out
 }
 
 // desiredDevices は dev.yml から適用すべきdeviceを組み立てる。
 // workspaceは予約名のdisk deviceとして追加する。
-func desiredDevices(cfg *config.Config) map[string]incus.Device {
+func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.Device {
 	out := make(map[string]incus.Device, len(cfg.Instance.Devices)+1)
 
 	for name, dev := range cfg.Instance.Devices {
@@ -58,16 +57,21 @@ func desiredDevices(cfg *config.Config) map[string]incus.Device {
 	}
 
 	ws := cfg.WorkspaceOrDefault()
-	out[config.WorkspaceDeviceName] = incus.Device{
+	workspace := incus.Device{
 		"type":   "disk",
 		"source": cfg.WorkspaceSourcePath(),
 		"path":   ws.Target,
 	}
+	// shift方式ではidmapped mountを使い、ホスト側の追加設定を不要にする。
+	if mode == config.IDMapShift {
+		workspace["shift"] = "true"
+	}
+	out[config.WorkspaceDeviceName] = workspace
 	return out
 }
 
 // instanceSpec はinstance作成時の指定を組み立てる。
-func instanceSpec(cfg *config.Config, name string) incus.InstanceSpec {
+func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
 	return incus.InstanceSpec{
 		Name:       name,
@@ -75,8 +79,8 @@ func instanceSpec(cfg *config.Config, name string) incus.InstanceSpec {
 		Type:       cfg.Instance.TypeOrDefault(),
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg),
-		Devices:    desiredDevices(cfg),
+		Config:     desiredConfig(cfg, mode),
+		Devices:    desiredDevices(cfg, mode),
 	}
 }
 

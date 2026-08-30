@@ -62,7 +62,7 @@
       "properties": {
         "source": { "type": "string", "minLength": 1 },
         "target": { "type": "string", "minLength": 1 },
-        "idmap": { "enum": ["auto", "none"] }
+        "idmap": { "enum": ["auto", "raw", "shift", "none"] }
       }
     },
     "bootstrap": {

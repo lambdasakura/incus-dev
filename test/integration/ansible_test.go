@@ -76,6 +76,52 @@ provision:
 	f.mustRun("provision")
 }
 
+// 既定bootstrapがPythonを導入し、ansibleステップが動作すること
+// （仕様 06-provisioning.md 6.3.2、REQ-007の唯一の例外）
+func TestDefaultBootstrapInstallsPython(t *testing.T) {
+	requireCommand(t, "ansible-playbook")
+	if err := exec.Command("ansible-doc", "-t", "connection", "community.general.incus").Run(); err != nil {
+		t.Skip("community.general collection が無いためスキップします")
+	}
+
+	// python3 を含まないDebian系イメージを使う
+	f := newFixture(t, `
+schema: 1
+project:
+  name: {{PROJECT}}
+instance:
+  image: `+bootstrapImage+`
+workspace:
+  idmap: shift
+provision:
+  - name: apply playbook
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+`)
+	writeFile(t, filepath.Join(f.root, ".incus-dev", "ansible", "site.yml"), `---
+- name: Provision
+  hosts: dev
+  gather_facts: false
+
+  tasks:
+    - name: Write marker
+      ansible.builtin.copy:
+        content: "bootstrapped
+"
+        dest: /etc/idev-bootstrap-marker
+        mode: "0644"
+`)
+
+	f.mustRun("up")
+
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-bootstrap-marker"); !strings.Contains(got, "bootstrapped") {
+		t.Errorf("marker = %q", got)
+	}
+	if _, err := f.run("shell", "--", "sh", "-c", "command -v python3"); err != nil {
+		t.Error("既定bootstrapがpython3を導入していない")
+	}
+}
+
 // bootstrap: [] は既定bootstrapを無効化する（仕様 06-provisioning.md 6.3.3）
 func TestBootstrapCanBeDisabled(t *testing.T) {
 	f := newFixture(t, `

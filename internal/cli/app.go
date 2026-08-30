@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
@@ -111,8 +110,12 @@ func (a *App) Up(ctx context.Context) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
 	// instanceを作る前に、ホスト側の前提を確認する。
-	if err := a.checkIDMapAllowed(); err != nil {
+	mode, warn, err := a.idmapMode()
+	if err != nil {
 		return err
+	}
+	if warn != "" {
+		a.log.Warn(warn)
 	}
 	if err := a.checkProfiles(ctx); err != nil {
 		return err
@@ -125,12 +128,12 @@ func (a *App) Up(ctx context.Context) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
-		if err := a.client.ApplyConfig(ctx, a.instance, desiredConfig(a.cfg)); err != nil {
+		if err := a.client.ApplyConfig(ctx, a.instance, desiredConfig(a.cfg, mode)); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.log.Info("Creating instance " + a.instance)
-		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance)); err != nil {
+		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, mode)); err != nil {
 			return err
 		}
 	default:
@@ -139,7 +142,7 @@ func (a *App) Up(ctx context.Context) error {
 
 	ws := a.cfg.WorkspaceOrDefault()
 	a.log.Info(fmt.Sprintf("Mounting workspace %s -> %s", a.cfg.WorkspaceSourcePath(), ws.Target))
-	if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg)); err != nil {
+	if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, mode)); err != nil {
 		return err
 	}
 
@@ -303,16 +306,15 @@ func (a *App) Validate() error {
 	return err
 }
 
-// checkIDMapAllowed は workspace.idmap: auto がホストで利用可能かを確認する。
-func (a *App) checkIDMapAllowed() error {
-	if a.cfg.WorkspaceOrDefault().IDMap != config.IDMapAuto {
-		return nil
-	}
+// idmapMode は適用するidmap方式を解決する。
+func (a *App) idmapMode() (config.IDMapMode, string, error) {
+	declared := a.cfg.WorkspaceOrDefault().IDMap
+
+	// プロジェクトが raw.idmap を明示している場合は尊重し、検査しない。
 	if _, explicit := a.cfg.Instance.Config[idmapConfigKey]; explicit {
-		// プロジェクトが明示した対応付けは尊重し、検査しない。
-		return nil
+		return config.IDMapNone, "", nil
 	}
-	return a.checkIDMap(os.Getuid(), os.Getgid())
+	return resolveIDMapMode(declared, a.checkIDMap)
 }
 
 // checkProfiles は指定Profileの存在を確認する。devkitはProfileを作成しない。

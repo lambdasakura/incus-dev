@@ -68,11 +68,18 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 | ホスト（ansibleステップを使う場合） | `ansible-playbook`、`community.general` collection |
 | コンテナ | なし（SSH Serverは不要） |
 
-`workspace.idmap: auto`（既定）を使う場合、ホストの `/etc/subuid`・`/etc/subgid` に
-以下が必要となる。不足している場合、`idev up` が対処方法を表示して停止する。
+ホスト側の追加設定は不要。既定（`workspace.idmap: auto`）では、
+利用可能ならホストの実行ユーザーをコンテナのrootへ対応付け（`raw.idmap`）、
+利用できなければidmapped mount（`shift`）へ退避する。
+
+コンテナ内で作られたファイルをホスト側でも自分の所有にしたい場合は、
+`/etc/subuid`・`/etc/subgid` へ以下を追加してincusを再起動する。
+（一般的なIncusセットアップ手順に含まれる `root:1000000:1000000000` とは
+別に必要になる。）
 
 ```text
 root:<uid>:1
+root:<gid>:1
 ```
 
 ## ビルド
@@ -99,7 +106,8 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 | --- | --- |
 | `validate` / `up` / `status` / `shell` / `provision` / `rebuild` / `destroy` | 実装済み |
 | run / ansible ステップ、bootstrap（既定・上書き・無効化） | 実装済み |
-| instance config / devices の素通し、workspace mount、idmap | 実装済み |
+| instance config / devices の素通し、workspace mount | 実装済み |
+| idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
 | `status --json` | 実装済み |
 | `up --dry-run` | 未実装 |
 | `provision --step` / `--from`（部分実行） | 未実装 |
