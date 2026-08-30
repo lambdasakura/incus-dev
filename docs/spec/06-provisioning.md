@@ -23,7 +23,7 @@ provision[1]
 完了
 ```
 
-`idk up` と `idk provision` はいずれもbootstrapから実行する。
+`idev up` と `idev provision` はいずれもbootstrapから実行する。
 
 bootstrapは軽量かつ冪等であることを前提とし、毎回実行される。
 
@@ -121,7 +121,7 @@ incus exec <instance> --env KEY=VALUE ... -- <shell> -c '<script>'
   - 通常モードでは要約、`--verbose` では全量
 - `env` は 3.10.1 のdevkit変数に追記される（プロジェクト指定が優先）
 - 対話的入力は行わない（stdinは接続しない）
-- TTYは割り当てない（`idk shell` とは異なる）
+- TTYは割り当てない（`idev shell` とは異なる）
 
 `cwd` が指定された場合、シェル起動時に当該ディレクトリへ移動する。
 存在しない場合は明示的なエラーとする。

@@ -25,7 +25,7 @@ instance:
   image: images:ubuntu/24.04
 ```
 
-`idk up` により、`/workspace` にソースがマウントされた素のコンテナが起動する。
+`idev up` により、`/workspace` にソースがマウントされた素のコンテナが起動する。
 
 provisioningは行われず、bootstrapも実行されない。
 
@@ -85,7 +85,7 @@ export PATH=$PATH:/usr/local/go/bin
 PROFILE
 ```
 
-Ansibleを使わない場合、ホスト側に必要なのはIncusと`idk` のみとなる。
+Ansibleを使わない場合、ホスト側に必要なのはIncusと`idev` のみとなる。
 
 冪等性はスクリプト側で担保する（REQ-005）。
 
@@ -241,7 +241,7 @@ instance:
     - my-host-gpu       # ホスト管理者が用意したProfile
 ```
 
-この場合、当該Profileが存在しないホストでは `idk up` が
+この場合、当該Profileが存在しないホストでは `idev up` が
 明示的に失敗する（[05-incus.md](05-incus.md) 5.3）。
 
 ---

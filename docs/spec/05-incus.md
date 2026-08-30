@@ -22,7 +22,7 @@ dev-example-project
 ```
 
 プレフィックス `dev-` は「開発環境用instance」を意味するものであり、
-コマンド名 `idk` とは独立している。`incus list` での可読性を優先する。
+コマンド名 `idev` とは独立している。`incus list` での可読性を優先する。
 
 ただし同一マシン上で複数checkoutを利用する可能性を考慮する。
 
@@ -56,7 +56,7 @@ user.incus-devkit.schema  = 1
 - 既存instanceが本当にこのプロジェクトのものかを確認する
 - 名前衝突時に、無関係なinstanceを破壊しないようにする
 
-`idk destroy` および `idk rebuild` は、対象instanceが
+`idev destroy` および `idev rebuild` は、対象instanceが
 devkit管理下でない場合、明示的に失敗する。
 
 `user.incus-devkit.*` 名前空間はdevkitの予約とする。
@@ -69,7 +69,7 @@ devkit管理下でない場合、明示的に失敗する。
 
 - devkitはProfileを同梱しない
 - devkitはProfileを作成・更新・削除しない
-- 指定されたProfileが存在しない場合、`idk up` は明示的に失敗する
+- 指定されたProfileが存在しない場合、`idev up` は明示的に失敗する
   - エラーには不足しているProfile名を含める
 
 省略時は `["default"]` を使用する。
@@ -98,7 +98,7 @@ CPUやメモリも `limits.cpu` / `limits.memory` として素通しする。
 
 ### 5.4.2 適用タイミング
 
-`idk up` は、instanceが既に存在する場合も宣言内容を再適用する。
+`idev up` は、instanceが既に存在する場合も宣言内容を再適用する。
 
 これにより `dev.yml` の変更（リソース増減、device追加）が反映される。
 
@@ -109,7 +109,7 @@ MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunset�
 理由：devkitが管理していない設定（利用者が手動で追加したもの）を
 誤って削除する危険があるため。
 
-クリーンな状態が必要な場合は `idk rebuild` を使用する。
+クリーンな状態が必要な場合は `idev rebuild` を使用する。
 
 将来的には、devkitが適用したキーの一覧を
 
@@ -202,7 +202,7 @@ type ExecOptions struct {
     Env         map[string]string
     Cwd         string
     User        string
-    TTY         bool      // idk shell のみ true
+    TTY         bool      // idev shell のみ true
     Stdin       io.Reader
     Stdout      io.Writer
     Stderr      io.Writer
@@ -221,7 +221,7 @@ MVPでは `incus` CLIをラップした実装 (`internal/incus/cli.go`) を用�
 理由：
 
 - 対象Incus versionのCLI互換性を確認しやすい
-- `idk shell` のような端末を伴う操作を扱いやすい
+- `idev shell` のような端末を伴う操作を扱いやすい
 
 将来的に、公式Go client library
 
@@ -235,7 +235,7 @@ github.com/lxc/incus/client
 - 型付きのAPIレスポンスを扱える
 - CLIのバージョン差異の影響を受けにくい
 
-ただし `idk shell` は端末制御の都合上、CLI呼び出しを維持してよい。
+ただし `idev shell` は端末制御の都合上、CLI呼び出しを維持してよい。
 
 ### 5.7.2 出力パース
 

@@ -3,27 +3,27 @@
 実行コマンド名：
 
 ```text
-idk
+idev
 ```
 
 初期実装では以下を提供する。
 
 ```text
-idk up
-idk provision
-idk shell
-idk status
-idk destroy
-idk rebuild
-idk validate
+idev up
+idev provision
+idev shell
+idev status
+idev destroy
+idev rebuild
+idev validate
 ```
 
 ---
 
-## 4.1 `idk up`
+## 4.1 `idev up`
 
 ```bash
-idk up
+idev up
 ```
 
 以下を実行する。
@@ -53,10 +53,10 @@ idk up
 
 ---
 
-## 4.2 `idk provision`
+## 4.2 `idev provision`
 
 ```bash
-idk provision
+idev provision
 ```
 
 Incus instanceを再作成せず、bootstrapとprovisionステップのみ再実行する。
@@ -70,26 +70,26 @@ Incus instanceを再作成せず、bootstrapとprovisionステップのみ再実
 ### 制約
 
 - 実行対象instanceが存在しない場合は明示的なエラーとする
-- 暗黙的に `idk up` へ切り替えてはならない
-- instance config / devices の変更は行わない（それは `idk up` の責務）
+- 暗黙的に `idev up` へ切り替えてはならない
+- instance config / devices の変更は行わない（それは `idev up` の責務）
 
 ### 部分実行
 
 ステップ数が増えると全体再実行が重くなるため、以下を提供することを推奨する。
 
 ```bash
-idk provision --step <name>      # 特定ステップのみ実行
-idk provision --from <name>      # 指定ステップ以降を実行
+idev provision --step <name>      # 特定ステップのみ実行
+idev provision --from <name>      # 指定ステップ以降を実行
 ```
 
 MVPではoptionalとする。
 
 ---
 
-## 4.3 `idk shell`
+## 4.3 `idev shell`
 
 ```bash
-idk shell
+idev shell
 ```
 
 対象コンテナへinteractive shellを開く。
@@ -112,15 +112,15 @@ shell:
 引数を与えた場合は、そのコマンドを実行して終了する形も検討する。
 
 ```bash
-idk shell -- make test
+idev shell -- make test
 ```
 
 ---
 
-## 4.4 `idk status`
+## 4.4 `idev status`
 
 ```bash
-idk status
+idev status
 ```
 
 最低限以下を表示する。
@@ -145,10 +145,10 @@ Workspace:  /home/user/src/example-project -> /workspace
 
 ---
 
-## 4.5 `idk destroy`
+## 4.5 `idev destroy`
 
 ```bash
-idk destroy
+idev destroy
 ```
 
 対象プロジェクトのIncus instanceを削除する。
@@ -160,24 +160,24 @@ idk destroy
 - 破壊操作のため、既定では確認を求める
 
 ```bash
-idk destroy --force
+idev destroy --force
 ```
 
 将来的にpersistent volumeを追加する場合、削除ポリシーを明示的に管理する。
 
 ---
 
-## 4.6 `idk rebuild`
+## 4.6 `idev rebuild`
 
 ```bash
-idk rebuild
+idev rebuild
 ```
 
 概念的には、
 
 ```text
-idk destroy
-idk up
+idev destroy
+idev up
 ```
 
 を実行する。
@@ -187,7 +187,7 @@ idk up
 非interactive用途のため、以下をサポートする。
 
 ```bash
-idk rebuild --force
+idev rebuild --force
 ```
 
 `dev.yml` から削除した設定を確実に消したい場合の正規手段でもある
@@ -195,10 +195,10 @@ idk rebuild --force
 
 ---
 
-## 4.7 `idk validate`
+## 4.7 `idev validate`
 
 ```bash
-idk validate
+idev validate
 ```
 
 以下だけを確認し、Incusへ一切変更を加えない。
@@ -225,7 +225,7 @@ Incus daemonへの問い合わせ（Profileの実在確認など）は行わな�
 それが必要な場合は明示的なオプションとする。
 
 ```bash
-idk validate --check-host
+idev validate --check-host
 ```
 
 ---
@@ -235,7 +235,7 @@ idk validate --check-host
 可能であれば、
 
 ```bash
-idk up --dry-run
+idev up --dry-run
 ```
 
 をサポートする。
@@ -263,7 +263,7 @@ Provision step 2/2: main playbook (ansible .incus-dev/ansible/site.yml)
 通常モード：
 
 ```bash
-idk up
+idev up
 ```
 
 では、人間が読みやすい簡潔な出力とする。
@@ -271,14 +271,14 @@ idk up
 例：
 
 ```text
-[idk] Project: example-project
-[idk] Creating instance dev-example-project
-[idk] Mounting workspace /home/user/src/example-project -> /workspace
-[idk] Starting instance
-[idk] Bootstrap (default)
-[idk] Step 1/2: prepare
-[idk] Step 2/2: main playbook
-[idk] Development environment is ready
+[idev] Project: example-project
+[idev] Creating instance dev-example-project
+[idev] Mounting workspace /home/user/src/example-project -> /workspace
+[idev] Starting instance
+[idev] Bootstrap (default)
+[idev] Step 1/2: prepare
+[idev] Step 2/2: main playbook
+[idev] Development environment is ready
 ```
 
 ステップ実行中の出力は、通常モードでは要約し、失敗時には全量を表示する。
@@ -286,8 +286,8 @@ idk up
 詳細確認用に以下を提供する。
 
 ```bash
-idk up --verbose
-idk -v up
+idev up --verbose
+idev -v up
 ```
 
 実装には標準ライブラリの `log/slog` を用いる。
@@ -346,7 +346,7 @@ non-zero = failure
 将来的なAIやツール連携のため、
 
 ```bash
-idk status --json
+idev status --json
 ```
 
 のようなmachine-readable outputを追加可能な構造にする。
@@ -371,9 +371,9 @@ MVPで `--json` を実装する場合、最低限以下を返す。
 AIエージェントは原則として、
 
 ```bash
-idk up
-idk provision
-idk shell
+idev up
+idev provision
+idev shell
 ```
 
 を使用する。
@@ -393,22 +393,22 @@ CLIはinteractive promptを必要最小限にする。
 特に以下は非interactiveで実行可能であること。
 
 ```bash
-idk up
-idk provision
-idk status
-idk validate
+idev up
+idev provision
+idev status
+idev validate
 ```
 
 破壊操作のみ確認を入れる。
 
 ```bash
-idk destroy
-idk rebuild
+idev destroy
+idev rebuild
 ```
 
 非interactive用途として、以下を提供する。
 
 ```bash
-idk destroy --force
-idk rebuild --force
+idev destroy --force
+idev rebuild --force
 ```
