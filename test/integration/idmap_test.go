@@ -19,29 +19,23 @@ instance:
   image: {{IMAGE}}
 `
 
-// workspace.idmap: auto（既定）の挙動を、ホストの設定に応じて検証する。
-//
-//   - 許可されている場合: コンテナからworkspaceへ書き込め、ホスト側の所有者が実行ユーザーになる
-//   - 許可されていない場合: instanceを作る前に、対処方法を含むエラーで失敗する
-func TestWorkspaceIDMap(t *testing.T) {
+// workspace.idmap: auto（既定）は、どちらのホストでもworkspaceを
+// 書き込み可能にする。所有者の扱いだけがホスト設定に依存する。
+func TestWorkspaceIDMapAuto(t *testing.T) {
 	f := newFixture(t, idmapYAML)
 
-	if !idmapPermitted(t) {
-		out := f.mustFail("up")
+	out := f.mustRun("up")
 
-		for _, want := range []string{"/etc/subuid", "idmap: none"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("output = %q, %q を含むこと", out, want)
-			}
+	if !idmapPermitted(t) {
+		// rawが使えないホストでは shift へ退避し、その旨を伝えること
+		if !strings.Contains(out, "shift") {
+			t.Errorf("output = %q, 退避したことを伝えること", out)
 		}
-		if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-			t.Errorf("検査前にinstanceを作成している: %q", got)
+		if got := incusOut(t, "config", "get", f.instance, "raw.idmap"); got != "" {
+			t.Errorf("raw.idmap = %q, 使えない場合は設定しないこと", got)
 		}
-		t.Logf("このホストは raw.idmap を許可していないため、失敗経路のみ検証しました")
-		return
 	}
 
-	f.mustRun("up")
 	f.mustRun("shell", "--", "sh", "-c", "echo written > /workspace/from-container.txt")
 
 	path := filepath.Join(f.root, "from-container.txt")
@@ -49,8 +43,50 @@ func TestWorkspaceIDMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("コンテナからホスト側へ書き込めていない: %v", err)
 	}
-	if uid := fileUID(info); uid != os.Getuid() {
-		t.Errorf("uid = %d, want %d (ホストの実行ユーザーが所有すること)", uid, os.Getuid())
+
+	// rawが使える場合のみ、ホスト側の所有者が実行ユーザーになる
+	if idmapPermitted(t) {
+		if uid := fileUID(info); uid != os.Getuid() {
+			t.Errorf("uid = %d, want %d (ホストの実行ユーザーが所有すること)", uid, os.Getuid())
+		}
+	}
+}
+
+// idmap: shift は追加のホスト設定なしでworkspaceを読み書き可能にする
+func TestWorkspaceIDMapShift(t *testing.T) {
+	f := newFixture(t, idmapYAML+"workspace:\n  idmap: shift\n")
+
+	f.mustRun("up")
+
+	if got := incusOut(t, "config", "get", f.instance, "raw.idmap"); got != "" {
+		t.Errorf("raw.idmap = %q, shiftでは設定しないこと", got)
+	}
+	if got := f.mustRun("shell", "--", "cat", "/workspace/src/marker.txt"); !strings.Contains(got, "hello from host") {
+		t.Errorf("ホストのファイルが読めない: %q", got)
+	}
+	f.mustRun("shell", "--", "sh", "-c", "echo written > /workspace/shift.txt")
+
+	if _, err := os.Stat(filepath.Join(f.root, "shift.txt")); err != nil {
+		t.Errorf("コンテナからホスト側へ書き込めていない: %v", err)
+	}
+}
+
+// idmap: raw はホストが許可していない場合、instanceを作る前に失敗する
+func TestWorkspaceIDMapRawRequiresHostSetup(t *testing.T) {
+	if idmapPermitted(t) {
+		t.Skip("このホストは raw.idmap を許可しているためスキップします")
+	}
+	f := newFixture(t, idmapYAML+"workspace:\n  idmap: raw\n")
+
+	out := f.mustFail("up")
+
+	for _, want := range []string{"/etc/subuid", "root:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, %q を含むこと", out, want)
+		}
+	}
+	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+		t.Errorf("検査前にinstanceを作成している: %q", got)
 	}
 }
 

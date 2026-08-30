@@ -490,22 +490,45 @@ func TestShellRunsGivenCommand(t *testing.T) {
 	}
 }
 
-// idmapが使えないホストでは、instanceを作る前に対処方法付きで失敗する
-func TestUpFailsEarlyWhenIDMapNotAllowed(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, ".incus-dev", "dev.yml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(baseYAML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
+// idmap: auto でrawが使えないホストでは、shiftへ退避して動作を継続する
+func TestUpFallsBackToShiftWhenRawIDMapNotAllowed(t *testing.T) {
+	cfg := loadTestConfig(t, baseYAML)
+	client := incustest.New()
+	errOut := &bytes.Buffer{}
+
+	app := cli.NewApp(cli.AppOptions{
+		Config:     cfg,
+		Client:     client,
+		Runner:     &runnertest.Fake{},
+		Out:        &bytes.Buffer{},
+		ErrOut:     errOut,
+		CheckIDMap: func(int, int) error { return errors.New("subuid is not configured") },
+	})
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v, shiftへ退避して継続すること", err)
 	}
 
+	dev := client.Instances["dev-example-project"].Devices["workspace"]
+	if dev["shift"] != "true" {
+		t.Errorf("workspace device = %v, shift=true を使うこと", dev)
+	}
+	if _, ok := client.Instances["dev-example-project"].Config["raw.idmap"]; ok {
+		t.Error("raw.idmap を設定している")
+	}
+	// 退避したことと、より良い設定方法を利用者へ伝えること
+	for _, want := range []string{"shift", "root:"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("warning = %q, %q を含むこと", errOut.String(), want)
+		}
+	}
+}
+
+// idmap: raw を明示した場合は、使えなければinstanceを作る前に失敗する
+func TestUpFailsWhenExplicitRawIDMapNotAllowed(t *testing.T) {
+	cfg := loadTestConfig(t, baseYAML+"workspace:\n  idmap: raw\n")
 	client := incustest.New()
+
 	app := cli.NewApp(cli.AppOptions{
 		Config:     cfg,
 		Client:     client,
@@ -514,9 +537,9 @@ func TestUpFailsEarlyWhenIDMapNotAllowed(t *testing.T) {
 		CheckIDMap: func(int, int) error { return errors.New("subuid is not configured") },
 	})
 
-	err = app.Up(context.Background())
+	err := app.Up(context.Background())
 	if err == nil {
-		t.Fatal("Up() = nil error, idmapが使えなければ失敗すること")
+		t.Fatal("Up() = nil error, rawを明示した場合は失敗すること")
 	}
 	if !strings.Contains(err.Error(), "subuid") {
 		t.Errorf("error = %q", err.Error())
@@ -528,19 +551,7 @@ func TestUpFailsEarlyWhenIDMapNotAllowed(t *testing.T) {
 
 // idmap: none の場合は検査しない
 func TestUpSkipsIDMapCheckWhenDisabled(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, ".incus-dev", "dev.yml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := baseYAML + "workspace:\n  idmap: none\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadTestConfig(t, baseYAML+"workspace:\n  idmap: none\n")
 
 	app := cli.NewApp(cli.AppOptions{
 		Config:     cfg,
@@ -553,4 +564,23 @@ func TestUpSkipsIDMapCheckWhenDisabled(t *testing.T) {
 	if err := app.Up(context.Background()); err != nil {
 		t.Fatalf("Up() error = %v, idmap: none では検査しないこと", err)
 	}
+}
+
+// loadTestConfig は一時プロジェクトを作って設定を読み込む。
+func loadTestConfig(t *testing.T, body string) *config.Config {
+	t.Helper()
+
+	root := t.TempDir()
+	path := filepath.Join(root, ".incus-dev", "dev.yml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	return cfg
 }

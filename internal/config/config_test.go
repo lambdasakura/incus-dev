@@ -533,3 +533,35 @@ func TestValidateAcceptsExplicitRootDevice(t *testing.T) {
 func TestValidateDoesNotRequireRootDeviceWithProfiles(t *testing.T) {
 	parse(t, minimal)
 }
+
+// idmapの各モード（仕様 03-configuration.md 3.7.3）
+func TestWorkspaceIDMapModes(t *testing.T) {
+	tests := []struct {
+		value string
+		want  config.IDMapMode
+		ok    bool
+	}{
+		{"auto", config.IDMapAuto, true},
+		{"raw", config.IDMapRaw, true},
+		{"shift", config.IDMapShift, true},
+		{"none", config.IDMapNone, true},
+		{"magic", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			c, err := config.Parse([]byte(minimal+"workspace:\n  idmap: "+tt.value+"\n"), config.Options{})
+			if !tt.ok {
+				if err == nil {
+					t.Fatal("Parse() = nil error, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if got := c.WorkspaceOrDefault().IDMap; got != tt.want {
+				t.Errorf("IDMap = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -22,6 +22,8 @@ var (
 	testImage = envOr("IDEV_TEST_IMAGE", "images:alpine/3.21")
 	// ansibleImage は python3 を含むイメージ（ansibleステップの検証用）。
 	ansibleImage = envOr("IDEV_TEST_ANSIBLE_IMAGE", "images:ubuntu/noble")
+	// bootstrapImage は python3 を含まないDebian系イメージ（既定bootstrapの検証用）。
+	bootstrapImage = envOr("IDEV_TEST_BOOTSTRAP_IMAGE", "images:debian/12")
 )
 
 func envOr(key, fallback string) string {

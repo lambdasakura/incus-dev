@@ -31,7 +31,15 @@ const WorkspaceDeviceName = "workspace"
 type IDMapMode string
 
 const (
+	// IDMapAuto は環境に応じて raw / shift を選ぶ（既定）。
 	IDMapAuto IDMapMode = "auto"
+	// IDMapRaw は raw.idmap でホストのuid/gidをコンテナのrootへ対応付ける。
+	// ホスト側で root:<uid>:1 の許可が必要。
+	IDMapRaw IDMapMode = "raw"
+	// IDMapShift は disk device の shift でidmapped mountを使う。
+	// 追加のホスト設定を要さないが、コンテナが作ったファイルはホスト側でrootの所有となる。
+	IDMapShift IDMapMode = "shift"
+	// IDMapNone は何も設定しない。
 	IDMapNone IDMapMode = "none"
 )
 

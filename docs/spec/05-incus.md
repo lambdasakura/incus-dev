@@ -93,7 +93,7 @@ devkit管理下でない場合、明示的に失敗する。
 | --- | --- |
 | `instance.config` | 宣言されたkey-valueをそのまま設定 |
 | `instance.devices` | 宣言されたdeviceをそのまま設定 |
-| `workspace` | `workspace` という名前のdisk deviceとして設定 |
+| `workspace` | `workspace` という名前のdisk deviceとして設定（`shift` 方式では `shift=true` を付与） |
 | devkit管理情報 | `user.incus-devkit.*` |
 
 devkitはconfigキーの意味を解釈しない。

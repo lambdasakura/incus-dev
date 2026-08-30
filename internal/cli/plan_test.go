@@ -28,7 +28,7 @@ instance:
 func TestDesiredDevicesIncludesWorkspace(t *testing.T) {
 	cfg := mustParse(t, planBase)
 
-	devices := desiredDevices(cfg)
+	devices := desiredDevices(cfg, config.IDMapRaw)
 
 	want := map[string]string{
 		"type":   "disk",
@@ -48,7 +48,7 @@ func TestDesiredDevicesResolvesRelativeSource(t *testing.T) {
       source: ./assets
       path: /data
 `)
-	devices := desiredDevices(cfg)
+	devices := desiredDevices(cfg, config.IDMapRaw)
 
 	if got := devices["data"]["source"]; got != "/home/u/src/example/assets" {
 		t.Errorf("source = %q, project rootを基準に解決すること", got)
@@ -63,7 +63,7 @@ func TestDesiredDevicesKeepsAbsoluteSource(t *testing.T) {
       source: /srv/data
       path: /data
 `)
-	if got := desiredDevices(cfg)["data"]["source"]; got != "/srv/data" {
+	if got := desiredDevices(cfg, config.IDMapRaw)["data"]["source"]; got != "/srv/data" {
 		t.Errorf("source = %q", got)
 	}
 }
@@ -73,7 +73,7 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
   config:
     limits.cpu: "8"
 `)
-	got := desiredConfig(cfg)
+	got := desiredConfig(cfg, config.IDMapRaw)
 
 	if got["limits.cpu"] != "8" {
 		t.Errorf("limits.cpu = %q", got["limits.cpu"])
@@ -86,36 +86,13 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
 	}
 }
 
-// idmap: auto はホストのuidをコンテナのrootへ対応付ける（仕様 3.7.3）
-func TestDesiredConfigSetsIDMapWhenAuto(t *testing.T) {
-	cfg := mustParse(t, planBase)
-
-	got := desiredConfig(cfg)["raw.idmap"]
-	if got == "" {
-		t.Fatal("raw.idmap が設定されていない")
-	}
-	if want := "both "; got[:len(want)] != want {
-		t.Errorf("raw.idmap = %q, %q で始まること", got, want)
-	}
-}
-
-func TestDesiredConfigSkipsIDMapWhenNone(t *testing.T) {
-	cfg := mustParse(t, planBase+`
-workspace:
-  idmap: none
-`)
-	if got, ok := desiredConfig(cfg)["raw.idmap"]; ok {
-		t.Errorf("raw.idmap = %q, idmap: none では設定しないこと", got)
-	}
-}
-
 // プロジェクトが raw.idmap を明示した場合はそちらを尊重する
 func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   config:
     raw.idmap: "both 1234 0"
 `)
-	if got := desiredConfig(cfg)["raw.idmap"]; got != "both 1234 0" {
+	if got := desiredConfig(cfg, config.IDMapRaw)["raw.idmap"]; got != "both 1234 0" {
 		t.Errorf("raw.idmap = %q, 明示指定を上書きしないこと", got)
 	}
 }
