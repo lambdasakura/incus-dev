@@ -77,6 +77,9 @@ devkit管理下でない場合、明示的に失敗する。
 明示的な空リストはProfileを一切適用しないことを意味する。
 実装は対象Incus versionの該当フラグ（例: `--no-profiles`）を用いる。
 
+この場合、Profileが提供していたroot diskとネットワークも失われるため、
+`instance.devices` で明示する必要がある（[03-configuration.md](03-configuration.md) 3.6.3）。
+
 環境依存を避けたいプロジェクトは、Profileを使わず
 `instance.config` と `instance.devices` にすべて記述できる。
 
@@ -96,13 +99,33 @@ devkit管理下でない場合、明示的に失敗する。
 devkitはconfigキーの意味を解釈しない。
 CPUやメモリも `limits.cpu` / `limits.memory` として素通しする。
 
-### 5.4.2 適用タイミング
+### 5.4.2 作成時の適用
+
+`instance.config` と `instance.devices` はinstance作成時に適用する。
+
+`incus create` の `-c` / `-d` フラグはProfile上に既にあるdeviceの
+上書きしか行えず、新規deviceを作成できない。このため作成時の指定は
+標準入力へYAMLで渡す。
+
+```bash
+incus create <image> <name> -p <profile> <<'YAML'
+config:
+  limits.cpu: "8"
+devices:
+  workspace:
+    type: disk
+    source: /home/u/src/example
+    path: /workspace
+YAML
+```
+
+### 5.4.3 適用タイミング
 
 `idev up` は、instanceが既に存在する場合も宣言内容を再適用する。
 
 これにより `dev.yml` の変更（リソース増減、device追加）が反映される。
 
-### 5.4.3 削除の扱い
+### 5.4.4 削除の扱い
 
 MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunsetは行わない。
 
@@ -119,7 +142,7 @@ user.incus-devkit.managed
 
 に記録し、差分をunsetする方式を検討する。
 
-### 5.4.4 再起動を要する設定
+### 5.4.5 再起動を要する設定
 
 一部の設定は変更にinstance再起動を要する。
 

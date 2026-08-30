@@ -155,6 +155,14 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 }
 
 func validateInstance(c *Config, ps *problems) {
+	// profiles: [] はProfileを一切適用しないため、Incusが必要とする
+	// root diskをプロジェクト側で宣言しなければならない。
+	if c.Instance.Profiles != nil && len(*c.Instance.Profiles) == 0 && !hasRootDisk(c.Instance.Devices) {
+		ps.add("instance.devices",
+			"a root disk device is required because instance.profiles is empty; "+
+				"declare one (type: disk, path: /, pool: <storage pool>) or use a profile that provides it")
+	}
+
 	for _, k := range sortedKeys(c.Instance.Config) {
 		if strings.HasPrefix(k, ReservedConfigPrefix) {
 			ps.add("instance.config."+k, "%s* is reserved for devkit", ReservedConfigPrefix)
@@ -164,6 +172,16 @@ func validateInstance(c *Config, ps *problems) {
 		ps.add("instance.devices."+WorkspaceDeviceName,
 			"%q is reserved for the workspace mount; use the workspace section instead", WorkspaceDeviceName)
 	}
+}
+
+// hasRootDisk はコンテナのrootを提供するdiskがあるかを返す。
+func hasRootDisk(devices map[string]StringMap) bool {
+	for _, dev := range devices {
+		if dev["type"] == "disk" && dev["path"] == "/" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateWorkspace(c *Config, ps *problems) {

@@ -215,8 +215,24 @@ profiles:
 profiles: []
 ```
 
-この場合、ネットワークデバイス等も継承されないため、
-必要なものは `devices` で明示すること。
+この場合、Incusが必要とする **root disk device も継承されない** ため、
+`devices` で明示しなければならない。ネットワークも同様である。
+
+```yaml
+instance:
+  profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
+    eth0:
+      type: nic
+      network: incusbr0
+```
+
+`profiles: []` かつ root disk（`type: disk` かつ `path: /`）が
+宣言されていない場合、`idev validate` および `idev up` は失敗する。
 
 **推奨：** 環境依存を避けたい場合はProfileに依存せず、
 `config` と `devices` にすべて記述する。
@@ -305,8 +321,22 @@ source: .
 | `auto`（既定） | devkitが実行ユーザーのuid/gidに基づき対応付けを設定する |
 | `none` | 何も設定しない。プロジェクトが `instance.config` で自前設定する |
 
-`auto` の場合にdevkitが設定する内容（`raw.idmap` 等）は、
-対象Incus versionの仕様に従う。実装時に確認すること。
+`auto` の場合、devkitは実行ユーザーのuid/gidをコンテナのrootへ対応付ける
+`raw.idmap` を設定する。
+
+これはホスト側で、Incus daemonを動かすrootに対して当該IDの使用が
+許可されている必要がある。
+
+```text
+/etc/subuid: root:<uid>:1
+/etc/subgid: root:<gid>:1
+```
+
+devkitはinstanceを作成する前にこれを検査し、許可されていない場合は
+追加すべき行と `idmap: none` という代替手段を示して失敗する。
+
+`idmap: none` を選んだ場合、コンテナからホスト側のファイルへ
+書き込めない点に注意すること。
 
 ### 3.7.4 mount方式
 

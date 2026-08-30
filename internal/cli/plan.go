@@ -76,6 +76,7 @@ func instanceSpec(cfg *config.Config, name string) incus.InstanceSpec {
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
 		Config:     desiredConfig(cfg),
+		Devices:    desiredDevices(cfg),
 	}
 }
 

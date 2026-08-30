@@ -7,6 +7,7 @@ package runnertest
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
@@ -23,11 +24,21 @@ type Fake struct {
 
 	// Calls は実行されたコマンドの記録。
 	Calls []runner.Command
+	// Stdins は各コマンドへ渡された標準入力の内容（Callsと同じ順序）。
+	Stdins []string
 }
 
 // Run はコマンドを記録し、設定された応答を返す。
 func (f *Fake) Run(_ context.Context, c runner.Command) (runner.Result, error) {
 	f.Calls = append(f.Calls, c)
+
+	input := ""
+	if c.Stdin != nil {
+		if b, err := io.ReadAll(c.Stdin); err == nil {
+			input = string(b)
+		}
+	}
+	f.Stdins = append(f.Stdins, input)
 
 	if f.Handler != nil {
 		return f.Handler(c)
@@ -67,5 +78,16 @@ func (f *Fake) LastCommand() string {
 	return f.Calls[len(f.Calls)-1].String()
 }
 
+// LastStdin は最後のコマンドへ渡された標準入力を返す。
+func (f *Fake) LastStdin() string {
+	if len(f.Stdins) == 0 {
+		return ""
+	}
+	return f.Stdins[len(f.Stdins)-1]
+}
+
 // Reset は記録を消去する。
-func (f *Fake) Reset() { f.Calls = nil }
+func (f *Fake) Reset() {
+	f.Calls = nil
+	f.Stdins = nil
+}

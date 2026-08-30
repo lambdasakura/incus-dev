@@ -204,6 +204,11 @@ func TestUpFailsWhenProfileMissing(t *testing.T) {
 func TestUpAppliesNoProfiles(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+`
   profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
 `)
 	if err := app.Up(context.Background()); err != nil {
 		t.Fatalf("Up() error = %v", err)

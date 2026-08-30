@@ -86,13 +86,17 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 	for k, v := range spec.Config {
 		config[k] = v
 	}
+	devices := map[string]incus.Device{}
+	for name, dev := range spec.Devices {
+		devices[name] = dev
+	}
 	f.Instances[spec.Name] = &incus.Instance{
 		Name:     spec.Name,
 		Status:   "Stopped",
 		Type:     spec.Type,
 		Profiles: spec.Profiles,
 		Config:   config,
-		Devices:  map[string]incus.Device{},
+		Devices:  devices,
 	}
 	return nil
 }

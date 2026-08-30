@@ -1,6 +1,7 @@
 package incus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
+	"sigs.k8s.io/yaml"
 )
 
 // CLI は incus コマンドを呼び出す Client 実装。
@@ -84,6 +86,10 @@ func isNotFound(err error) bool {
 }
 
 // CreateInstance はinstanceを作成する（起動はしない）。
+//
+// config と devices は標準入力へYAMLで渡す。
+// incus create の -c / -d フラグはprofile上の既存deviceの上書きしか行えず、
+// 新規deviceを作成できないため。
 func (c *CLI) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	args := c.args([]string{"create"}, spec.Image, c.qualify(spec.Name))
 
@@ -95,15 +101,46 @@ func (c *CLI) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 			args = append(args, "-p", p)
 		}
 	}
-	for _, k := range sortedKeys(spec.Config) {
-		args = append(args, "-c", k+"="+spec.Config[k])
-	}
 	if spec.Type == "virtual-machine" {
 		args = append(args, "--vm")
 	}
 
-	_, err := c.run(ctx, "create instance "+spec.Name, args)
+	payload, err := createPayload(spec)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.Runner.Run(ctx, runner.Command{
+		Label: "create instance " + spec.Name,
+		Name:  "incus",
+		Args:  args,
+		Stdin: bytes.NewReader(payload),
+	})
 	return err
+}
+
+// createPayload は incus create へ渡すYAMLを組み立てる。
+func createPayload(spec InstanceSpec) ([]byte, error) {
+	doc := map[string]any{}
+	if len(spec.Config) > 0 {
+		doc["config"] = spec.Config
+	}
+	if len(spec.Devices) > 0 {
+		devices := make(map[string]map[string]string, len(spec.Devices))
+		for name, dev := range spec.Devices {
+			devices[name] = dev
+		}
+		doc["devices"] = devices
+	}
+	if len(doc) == 0 {
+		return nil, nil
+	}
+
+	data, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("build instance payload: %w", err)
+	}
+	return data, nil
 }
 
 // StartInstance はinstanceを起動する。
