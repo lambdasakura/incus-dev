@@ -19,6 +19,17 @@ Incusでプロジェクト単位の開発環境を構築・管理するCLIツー
 「便利だから共通Roleを追加する」は仕様違反である。判断に迷ったら
 `docs/spec/01-overview.md` の REQ-007 を読むこと。
 
+## ドキュメント
+
+| 文書 | 用途 |
+| --- | --- |
+| `docs/spec/` | 設計仕様。実装判断の基準 |
+| `docs/manual/` | 利用者向けマニュアル。CLIの挙動を変えたら追従させる |
+| `docs/troubleshooting.md` | ホスト環境起因の問題 |
+
+CLIのフラグ・出力・既定値を変更した場合、`docs/manual/03-commands.md` と
+`docs/manual/04-dev-yml.md` の該当箇所も更新する。
+
 ## 仕様書
 
 `docs/spec/` が実装判断の基準。実装前に該当章を読むこと。

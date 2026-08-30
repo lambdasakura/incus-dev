@@ -58,7 +58,8 @@ idev rebuild       # 破棄して作り直す
 idev destroy       # instanceを削除する（ホスト側のソースは削除しない）
 ```
 
-構成例は [examples/](examples/) を参照。
+詳しい使い方は **[マニュアル](docs/manual/README.md)** を参照。
+構成例は [examples/](examples/) にもある。
 
 ## 前提
 
@@ -97,6 +98,14 @@ make test-integration   # Incus実機に対する統合テスト
 ```
 
 開発方針は [CLAUDE.md](CLAUDE.md)、仕様は [docs/spec/](docs/spec/README.md) を参照。
+
+## ドキュメント
+
+| | |
+| --- | --- |
+| [マニュアル](docs/manual/README.md) | 使い方。導入、チュートリアル、リファレンス、構成例 |
+| [トラブルシューティング](docs/troubleshooting.md) | ホスト環境に起因する問題への対処 |
+| [仕様書](docs/spec/README.md) | 設計仕様 |
 
 ## 困ったときは
 
