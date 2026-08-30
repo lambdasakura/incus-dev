@@ -44,6 +44,9 @@ type InstanceSpec struct {
 	// NoProfiles が真の場合、Profileを一切適用しない（profiles: [] に対応）。
 	NoProfiles bool
 	Config     map[string]string
+	// Devices は作成時に設定するdevice。
+	// profileを適用しない場合、root diskは作成時に必要となる。
+	Devices map[string]Device
 }
 
 // ExecOptions はコンテナ内でのコマンド実行オプション。

@@ -246,7 +246,32 @@ instance:
 
 ---
 
-## 10.7 bootstrapの上書き
+## 10.7 Profileに依存しない構成
+
+ホスト側のProfileに一切依存させたい場合、`profiles: []` として
+必要なdeviceをすべて宣言する。
+
+```yaml
+instance:
+  image: images:ubuntu/24.04
+  profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
+    eth0:
+      type: nic
+      network: incusbr0
+```
+
+root diskとネットワークもProfile由来であるため、明示が必要になる。
+storage poolやnetwork名はホストに依存するため、多くの場合は
+`default` profileを参照する方が可搬性が高い。
+
+---
+
+## 10.8 bootstrapの上書き
 
 Debian系以外のイメージを使う場合、既定bootstrapは通用しない。
 

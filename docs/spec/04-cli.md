@@ -191,7 +191,7 @@ idev rebuild --force
 ```
 
 `dev.yml` から削除した設定を確実に消したい場合の正規手段でもある
-（[05-incus.md](05-incus.md) 5.4.3 参照）。
+（[05-incus.md](05-incus.md) 5.4.4 参照）。
 
 ---
 
@@ -216,6 +216,7 @@ idev validate
   - `workspace.source`
   - 相対パスで指定されたdeviceの `source`
 - Profile名の構文
+- `profiles: []` の場合に root disk device が宣言されていること
 - `instance.config` の値がスカラであること
 - `user.incus-devkit.*` を使用していないこと
 

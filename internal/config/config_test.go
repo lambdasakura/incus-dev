@@ -76,6 +76,11 @@ func TestDefaults(t *testing.T) {
 func TestExplicitEmptyProfiles(t *testing.T) {
 	c := parse(t, minimal+`
   profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
 `)
 	if got := c.ProfileNames(); len(got) != 0 {
 		t.Errorf("ProfileNames() = %v, want []", got)
@@ -499,4 +504,32 @@ func mustWrite(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// profiles: [] の場合、root diskはプロジェクト側で宣言する必要がある
+func TestValidateRequiresRootDeviceWhenNoProfiles(t *testing.T) {
+	err := parseErr(t, minimal+`
+  profiles: []
+`)
+	for _, want := range []string{"root", "profiles"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+		}
+	}
+}
+
+func TestValidateAcceptsExplicitRootDevice(t *testing.T) {
+	parse(t, minimal+`
+  profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
+`)
+}
+
+// Profileを使う場合はroot diskの宣言を要求しない
+func TestValidateDoesNotRequireRootDeviceWithProfiles(t *testing.T) {
+	parse(t, minimal)
 }

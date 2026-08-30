@@ -88,9 +88,10 @@ func TestInstanceExists(t *testing.T) {
 
 func TestCreateInstance(t *testing.T) {
 	tests := []struct {
-		name string
-		spec incus.InstanceSpec
-		want string
+		name      string
+		spec      incus.InstanceSpec
+		want      string
+		wantStdin []string
 	}{
 		{
 			name: "profileとconfig",
@@ -100,8 +101,8 @@ func TestCreateInstance(t *testing.T) {
 				Profiles: []string{"default", "gpu"},
 				Config:   map[string]string{"limits.memory": "16GiB", "limits.cpu": "8"},
 			},
-			// configキーは決定性のためソートする
-			want: "incus create --project default images:ubuntu/24.04 dev-example -p default -p gpu -c limits.cpu=8 -c limits.memory=16GiB",
+			want:      "incus create --project default images:ubuntu/24.04 dev-example -p default -p gpu",
+			wantStdin: []string{"limits.cpu: \"8\"", "limits.memory: 16GiB"},
 		},
 		{
 			name: "profileなし",
@@ -111,6 +112,19 @@ func TestCreateInstance(t *testing.T) {
 				NoProfiles: true,
 			},
 			want: "incus create --project default images:ubuntu/24.04 dev-example --no-profiles",
+		},
+		{
+			// -d フラグは新規deviceを作成できないため、標準入力のYAMLで渡す
+			name: "device付き",
+			spec: incus.InstanceSpec{
+				Name:  "dev-example",
+				Image: "images:ubuntu/24.04",
+				Devices: map[string]incus.Device{
+					"workspace": {"type": "disk", "source": "/src", "path": "/workspace"},
+				},
+			},
+			want:      "incus create --project default images:ubuntu/24.04 dev-example",
+			wantStdin: []string{"workspace:", "type: disk", "source: /src", "path: /workspace"},
 		},
 		{
 			name: "仮想マシン",
@@ -133,6 +147,11 @@ func TestCreateInstance(t *testing.T) {
 			}
 			if got := f.LastCommand(); got != tt.want {
 				t.Errorf("command =\n  %q\nwant\n  %q", got, tt.want)
+			}
+			for _, want := range tt.wantStdin {
+				if !strings.Contains(f.LastStdin(), want) {
+					t.Errorf("stdin =\n%s\n%q を含むこと", f.LastStdin(), want)
+				}
 			}
 		})
 	}
