@@ -1,0 +1,26 @@
+# Ansibleで構成する例
+schema: 1
+
+runtime:
+  version: "1.0"
+
+project:
+  name: ansible-example
+
+instance:
+  image: images:ubuntu/24.04
+  profiles:
+    - default
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+
+workspace:
+  source: .
+  target: /workspace
+
+provision:
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+      vars: .incus-dev/ansible/vars.yml

@@ -1,0 +1,17 @@
+# Incusを必要としない検証のみを実行する。
+# 統合テスト（make test-integration）はIncusが利用可能なランナーで実行する。
+default:
+  image: golang:1.25
+
+stages:
+  - check
+
+lint:
+  stage: check
+  script:
+    - make lint
+
+test:
+  stage: check
+  script:
+    - make test

@@ -1,0 +1,31 @@
+# シェルスクリプトだけで構成する例（Ansibleを必要としない）
+schema: 1
+
+runtime:
+  version: "1.0"
+
+project:
+  name: shell-example
+
+instance:
+  image: images:ubuntu/24.04
+  config:
+    limits.cpu: "4"
+    limits.memory: 8GiB
+
+workspace:
+  source: .
+  target: /workspace
+
+provision:
+  - name: base packages
+    run: |
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends git make jq
+
+  - name: project setup
+    run: sh /workspace/.incus-dev/scripts/setup.sh
+    cwd: /workspace
+    env:
+      SETUP_MODE: full
