@@ -11,6 +11,8 @@ build:
 test:
 	go test ./...
 
+# examples/ の各サンプルが妥当であることの確認は go test ./test/... に含まれる。
+
 test-integration:
 	go test -tags integration -count=1 -timeout 20m ./test/integration/...
 

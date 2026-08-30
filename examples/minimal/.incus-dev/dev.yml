@@ -1,0 +1,8 @@
+# 最小構成: workspaceがマウントされた素のコンテナ
+schema: 1
+
+project:
+  name: minimal-example
+
+instance:
+  image: images:ubuntu/24.04
