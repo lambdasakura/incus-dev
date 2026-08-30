@@ -6,8 +6,8 @@ Incusを利用して、プロジェクト単位の開発環境を再現可能な
 git clone <repository>
 cd <repository>
 
-dev up
-dev shell
+idk up
+idk shell
 ```
 
 ## 設計方針
@@ -45,7 +45,7 @@ provision:
       playbook: .incus-dev/ansible/site.yml
 ```
 
-dev CLIは Go で実装し、単一バイナリとして配布する。
+`idk` は Go で実装し、単一バイナリとして配布する。
 
 ## ドキュメント
 

@@ -2,7 +2,7 @@
 
 ## 1.1 概要
 
-本プロジェクトは、Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理するためのCLIツール（dev CLI / devkit）を提供する。
+本プロジェクトは、Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理するためのCLIツール（`idk` / devkit）を提供する。
 
 各ソフトウェアプロジェクトは、自身のGitリポジトリ内に開発環境定義を保持する。
 
@@ -12,8 +12,8 @@
 git clone <repository>
 cd <repository>
 
-dev up
-dev shell
+idk up
+idk shell
 ```
 
 ### 責務分担
@@ -23,7 +23,7 @@ dev shell
 - プロジェクトリポジトリ (`.incus-dev/`)
   - **どのようなコンテナを作るか** を宣言する
   - **コンテナ内部をどう構成するか** の手順を保持する
-- dev CLI (devkit)
+- `idk`（devkit CLI）
   - Incus instanceのライフサイクルを管理する
   - workspaceをコンテナへマウントする
   - コンテナをbootstrapする
@@ -36,7 +36,7 @@ dev shell
 devkitはAnsible Role、Incus Profile、言語ランタイムの定義などを同梱しない。
 それらはすべてプロジェクト側の `.incus-dev/` に存在する。
 
-dev CLIはGoで実装し、単一バイナリとして配布する。詳細は [07-implementation.md](07-implementation.md) を参照。
+`idk` はGoで実装し、単一バイナリとして配布する。詳細は [07-implementation.md](07-implementation.md) を参照。
 
 ---
 
@@ -68,13 +68,13 @@ my-project/
 ```bash
 git clone <repository>
 cd <repository>
-dev up
+idk up
 ```
 
 ホスト側に必要なのは、少なくとも以下とする。
 
 - Incus
-- dev CLI（単一バイナリ）
+- `idk`（単一バイナリ）
 - プロジェクトが利用するprovisionerの実行環境（Ansibleを使う場合はAnsible）
 
 プロジェクトごとの手作業によるIncus設定は要求しない。
@@ -122,7 +122,7 @@ provisioning用のスクリプトはコンテナ内から直接参照できる�
 コンテナ内でのコマンド実行はIncusの提供する経路のみを使用する。
 
 ```text
-dev CLI
+idk CLI
    │
    ▼
 Incus CLI / Incus daemon
@@ -141,9 +141,9 @@ SSHを経由しない。
 以下を複数回実行しても、同じ手順が同じ順序で再実行されること。
 
 ```bash
-dev provision
-dev provision
-dev provision
+idk provision
+idk provision
+idk provision
 ```
 
 devkitが保証するのは「同じ手順を同じ順序で再実行すること」までである。
@@ -157,11 +157,11 @@ Ansible Moduleを使用することを推奨する。
 
 ### REQ-006: 単一バイナリでの配布
 
-dev CLI本体は、実行時に言語ランタイムやパッケージマネージャを要求してはならない。
+`idk` 本体は、実行時に言語ランタイムやパッケージマネージャを要求してはならない。
 
 Goで実装し、静的リンクされた単一バイナリとして配布する。
 
-（Ansibleを使うかどうかはプロジェクトの選択であり、dev CLI本体の依存ではない。）
+（Ansibleを使うかどうかはプロジェクトの選択であり、`idk` 本体の依存ではない。）
 
 ---
 
@@ -235,7 +235,7 @@ Ansible CollectionやGitリポジトリとして配布し、プロジェクト�
                             │
                             ▼
               ┌─────────────────────────┐
-              │      dev CLI (Go)       │
+              │      idk CLI (Go)       │
               │                         │
               │ up / provision / shell  │
               │ status / destroy        │
@@ -275,7 +275,7 @@ Project repository (.incus-dev/)
        │
        │ What & How
        ▼
-    dev CLI
+    idk CLI
        │
        │ Orchestration only
        │
@@ -298,9 +298,9 @@ Project repository (.incus-dev/)
 
 **Projectは「何が必要か」と「どう構成するか」を定義する。**
 
-**dev CLIは「どの順序で構築・実行するか」だけを管理する。**
+**`idk` は「どの順序で構築・実行するか」だけを管理する。**
 
 **Incusは「コンテナをどう実行するか」を管理する。**
 
-dev CLIが「どう構成するか」を持ち始めた時点でこの境界は崩れる。
+`idk` が「どう構成するか」を持ち始めた時点でこの境界は崩れる。
 これを避けることを、本システムの最重要設計原則とする。
