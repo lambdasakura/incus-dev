@@ -2,7 +2,7 @@
 
 ## 2.1 実装言語
 
-`idk` はGoで実装する。
+`idev` はGoで実装する。
 
 理由：
 
@@ -34,7 +34,7 @@ incus-devkit/
 ├── Makefile
 │
 ├── cmd/
-│   └── idk/
+│   └── idev/
 │       └── main.go             # エントリポイント / exit code のみ担当
 │
 ├── internal/
@@ -104,7 +104,7 @@ requirements.yml       共通collection定義
 これらはすべてプロジェクト側の `.incus-dev/` に属する。
 
 `examples/` 配下のサンプルは **ドキュメントとしてのみ** 存在し、
-`idk` の実行時に参照されない。バイナリにも同梱しない。
+`idev` の実行時に参照されない。バイナリにも同梱しない。
 
 再利用可能なprovisioning資産を共有したい場合は、devkitとは別の
 Ansible Collectionやリポジトリとして配布し、各プロジェクトが
@@ -138,14 +138,14 @@ Playbook・Role・Profileを同梱しないため、
 ## 2.5 ビルドと配布
 
 ```bash
-go build ./cmd/idk            # ローカルビルド
-go install ./cmd/idk          # $GOBIN へインストール
+go build ./cmd/idev            # ローカルビルド
+go install ./cmd/idev          # $GOBIN へインストール
 ```
 
 バージョン情報は `-ldflags` で埋め込む。
 
 ```bash
-go build -ldflags "-X main.version=$(git describe --tags)" ./cmd/idk
+go build -ldflags "-X main.version=$(git describe --tags)" ./cmd/idev
 ```
 
 リリース成果物は各プラットフォーム向けの単一バイナリとする。
