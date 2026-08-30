@@ -630,3 +630,110 @@ workspace:
 		t.Errorf("error = %v", err)
 	}
 }
+
+func TestLoadReadError(t *testing.T) {
+	_, err := config.Load(filepath.Join(t.TempDir(), "no-such-file.yml"))
+	if err == nil || !strings.Contains(err.Error(), "read") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestParseRejectsNonMappingDocument(t *testing.T) {
+	for _, in := range []string{"- a\n- b\n", "just a string\n", "42\n"} {
+		if _, err := config.Parse([]byte(in), config.Options{}); err == nil {
+			t.Errorf("Parse(%q) = nil error, want error", in)
+		}
+	}
+}
+
+func TestParseRejectsNonNumericSchema(t *testing.T) {
+	err := parseErr(t, "schema: \"1\"\nproject:\n  name: p\ninstance:\n  image: i\n")
+	if !strings.Contains(err.Error(), "integer") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestInstanceTypeExplicit(t *testing.T) {
+	c := parse(t, minimal+"  type: virtual-machine\n")
+
+	if got := c.Instance.TypeOrDefault(); got != "virtual-machine" {
+		t.Errorf("TypeOrDefault() = %q", got)
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	c := parse(t, minimal)
+	c.Root = "/root"
+
+	tests := map[string]string{
+		"":           "/root",
+		"rel":        "/root/rel",
+		"/absolute":  "/absolute",
+		"./nested/x": "/root/nested/x",
+	}
+	for in, want := range tests {
+		if got := c.ResolvePath(in); got != want {
+			t.Errorf("ResolvePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestWorkspaceOrDefaultPartialOverride(t *testing.T) {
+	c := parse(t, minimal+"workspace:\n  target: /src\n")
+
+	ws := c.WorkspaceOrDefault()
+	if ws.Target != "/src" || ws.Source != "." || ws.IDMap != config.IDMapAuto {
+		t.Errorf("WorkspaceOrDefault() = %+v", ws)
+	}
+}
+
+// bootstrap 内のパスも検査する
+func TestLoadChecksBootstrapPaths(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+bootstrap:
+  - run: echo hi
+provision:
+  - ansible:
+      playbook: .incus-dev/ansible/site.yml
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "site.yml") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestWorkspaceTargetMustBeAbsolute(t *testing.T) {
+	err := parseErr(t, minimal+"workspace:\n  target: relative/path\n")
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestWorkspaceSourceMustBeDirectory(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "afile"), "x")
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+workspace:
+  source: ./afile
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// Profile名の構文を検査する（仕様 04-cli.md 4.7）
+func TestValidateProfileNameSyntax(t *testing.T) {
+	invalid := []string{"bad name", "../escape", "-leading", "with/slash", ""}
+	for _, name := range invalid {
+		t.Run(name, func(t *testing.T) {
+			err := parseErr(t, minimal+"  profiles:\n    - \""+name+"\"\n")
+			if !strings.Contains(err.Error(), "profile") && !strings.Contains(err.Error(), "profiles") {
+				t.Errorf("error = %q", err.Error())
+			}
+		})
+	}
+
+	parse(t, minimal+"  profiles:\n    - default\n    - gpu-nvidia\n    - my.profile_1\n")
+}

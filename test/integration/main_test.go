@@ -33,14 +33,27 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// skipReason はIncusが利用できない理由。空なら利用可能。
+var skipReason string
+
+// requireIncus はIncusが利用できない場合にテストをスキップする。
+// 実行されなかったことが結果から分かるよう、passではなくskipにする。
+func requireIncus(t *testing.T) {
+	t.Helper()
+
+	if skipReason != "" {
+		t.Skip(skipReason)
+	}
+}
+
 func TestMain(m *testing.M) {
 	if _, err := exec.LookPath("incus"); err != nil {
-		fmt.Fprintln(os.Stderr, "incus が見つからないため統合テストをスキップします")
-		os.Exit(0)
+		skipReason = "incus コマンドが見つかりません"
+	} else if out, err := exec.Command("incus", "info").CombinedOutput(); err != nil {
+		skipReason = fmt.Sprintf("Incus daemonへ接続できません: %v\n%s", err, out)
 	}
-	if out, err := exec.Command("incus", "info").CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "Incus daemonへ接続できないためスキップします: %v\n%s", err, out)
-		os.Exit(0)
+	if skipReason != "" {
+		os.Exit(m.Run())
 	}
 
 	dir, err := os.MkdirTemp("", "idev-integration-")
@@ -71,6 +84,8 @@ type fixture struct {
 // devYAML 中の {{IMAGE}} と {{PROJECT}} は置換される。
 func newFixture(t *testing.T, devYAML string) *fixture {
 	t.Helper()
+
+	requireIncus(t)
 
 	root := t.TempDir()
 	project := fmt.Sprintf("idev-it-%d", time.Now().UnixNano()%1e9)

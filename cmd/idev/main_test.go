@@ -45,3 +45,21 @@ func TestRunValidatesProject(t *testing.T) {
 		t.Errorf("run() = %d, want 0 (%s)", code, stderr.String())
 	}
 }
+
+func TestMainUsesRunExitCode(t *testing.T) {
+	original := osExit
+	defer func() { osExit = original }()
+
+	var got int
+	osExit = func(code int) { got = code }
+
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+	os.Args = []string{"idev", "validate", "-C", t.TempDir()}
+
+	main()
+
+	if got != 1 {
+		t.Errorf("exit code = %d, want 1", got)
+	}
+}

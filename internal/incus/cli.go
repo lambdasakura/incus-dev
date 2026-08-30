@@ -354,9 +354,6 @@ func (c *CLI) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 // numericUser は数値のユーザー指定を返す。
 // incus exec --user はUIDのみを受け付けるため、名前指定は呼び出し側で扱う。
 func numericUser(user string) (string, bool) {
-	if user == "" {
-		return "", false
-	}
 	if _, err := strconv.Atoi(user); err != nil {
 		return "", false
 	}

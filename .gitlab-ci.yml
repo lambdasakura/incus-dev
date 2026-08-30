@@ -1,13 +1,11 @@
-# Incusを必要としない検証のみを実行する。
-# 統合テスト（make test-integration）はIncusが利用可能なランナーで実行する。
-default:
-  image: golang:1.25
-
+# lint と unit test はIncus不要。統合テストはIncusが使えるランナーで実行する。
 stages:
   - check
+  - integration
 
 lint:
   stage: check
+  image: golang:1.25
   before_script:
     - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
   script:
@@ -15,6 +13,22 @@ lint:
 
 test:
   stage: check
+  image: golang:1.25
   script:
     - make cover
   coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+
+# Incusが利用可能なランナーで実行する。
+# tags は環境に合わせて設定すること。incus が無い場合、テストはskipされる。
+integration:
+  stage: integration
+  image: golang:1.25
+  tags:
+    - incus
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+  script:
+    - make test-integration

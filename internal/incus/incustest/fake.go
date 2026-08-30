@@ -25,6 +25,9 @@ type Fake struct {
 	// FailOn は操作名のprefixに対して返すエラー。
 	// 例: {"create": errBoom} とすると CreateInstance が失敗する。
 	FailOn map[string]error
+	// Hook は各操作の直前に呼ばれる。非nilのエラーを返すとその操作が失敗する。
+	// 「2回目の呼び出しだけ失敗させる」といった制御に使う。
+	Hook func(call string) error
 
 	// Calls は呼び出し順の記録（例: "create dev-x", "start dev-x"）。
 	Calls []string
@@ -63,6 +66,9 @@ func (f *Fake) record(format string, args ...any) error {
 		if strings.HasPrefix(call, prefix) {
 			return err
 		}
+	}
+	if f.Hook != nil {
+		return f.Hook(call)
 	}
 	return nil
 }
@@ -201,8 +207,16 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
+	// 本物の ApplyDevices は want に無いキーを消さない。fakeも同じ挙動にする。
 	for devName, dev := range devices {
-		inst.Devices[devName] = dev
+		current, ok := inst.Devices[devName]
+		if !ok || current.Type() != dev.Type() {
+			inst.Devices[devName] = maps.Clone(dev)
+			continue
+		}
+		for k, v := range dev {
+			current[k] = v
+		}
 	}
 	return nil
 }
@@ -225,6 +239,16 @@ func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.Exe
 	if err := f.record("exec %s %s", name, strings.Join(argv, " ")); err != nil {
 		return 1, err
 	}
+
+	// 本物は停止中・不在のinstanceに対して失敗する。
+	inst, ok := f.Instances[name]
+	if !ok {
+		return 1, fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
+	}
+	if !inst.IsRunning() {
+		return 1, fmt.Errorf("instance %s is not running", name)
+	}
+
 	f.Execs = append(f.Execs, argv)
 	if f.ExecFunc != nil {
 		return f.ExecFunc(name, argv, opt)

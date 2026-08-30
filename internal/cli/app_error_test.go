@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus/incustest"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"
 )
 
@@ -443,5 +447,224 @@ func TestUpDoesNotWarnWhenStopped(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "restart") {
 		t.Errorf("停止中は再起動の警告を出さないこと: %q", errOut.String())
+	}
+}
+
+// ready待ちに失敗した場合、provisionへ進まない（仕様 06-provisioning.md 6.2）
+func TestUpFailsWhenInstanceNotReady(t *testing.T) {
+	client := incustest.New()
+	client.FailReady = true
+
+	err := appWith(t, rootYAML+"provision:\n  - run: never\n", client).Up(context.Background())
+	if err == nil {
+		t.Fatal("Up() = nil error, ready待ちの失敗を報告すること")
+	}
+	if !strings.Contains(err.Error(), "ready") {
+		t.Errorf("error = %q", err.Error())
+	}
+	if len(client.Execs) != 0 {
+		t.Errorf("execs = %v, ready前にステップを実行しないこと", client.Execs)
+	}
+}
+
+// ansibleステップの失敗も位置と名前で特定できること
+func TestAnsibleStepFailureIdentifiesStep(t *testing.T) {
+	root := t.TempDir()
+	playbook := filepath.Join(root, ".incus-dev", "ansible", "site.yml")
+	if err := os.MkdirAll(filepath.Dir(playbook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playbook, []byte("---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Parse([]byte(rootYAML+`
+provision:
+  - run: "true"
+  - name: playbook step
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+`), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = root
+
+	client := incustest.New()
+	managed(client, "Running")
+
+	cmdRunner := &runnertest.Fake{Err: map[string]error{"ansible-playbook": errBoom}}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: cmdRunner,
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err = app.Provision(context.Background())
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
+	}
+	for _, want := range []string{"playbook step", "2/2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+		}
+	}
+}
+
+// idmap方式の切り替えで unset に失敗した場合、その原因が伝わること
+func TestUpPropagatesUnsetError(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Stopped",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			idmapConfigKey:    "uid 1000 0",
+		},
+	})
+	client.FailOn = map[string]error{"unset": errBoom}
+
+	err := appWith(t, rootYAML+"workspace:\n  idmap: shift\n", client).Up(context.Background())
+	if !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// 稼働中でも再起動を要する変更が無ければ警告しない
+func TestUpDoesNotWarnWithoutRestartRequiredChanges(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			idmapConfigKey:    fmt.Sprintf("uid %d 0\ngid %d 0", os.Getuid(), os.Getgid()),
+		},
+	})
+
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart") {
+		t.Errorf("変更が無いのに警告している: %q", errOut.String())
+	}
+}
+
+// devkitが設定した raw.idmap を取り消す場合も再起動が必要である
+func TestUpWarnsWhenIDMapRemoved(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			idmapConfigKey:    "uid 1000 0",
+		},
+	})
+
+	cfg, err := config.Parse([]byte(rootYAML+"workspace:\n  idmap: shift\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), idmapConfigKey) {
+		t.Errorf("warning = %q", errOut.String())
+	}
+}
+
+// up の provision 失敗も伝播すること
+func TestUpPropagatesProvisionError(t *testing.T) {
+	client := incustest.New()
+	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, errBoom }
+
+	err := appWith(t, rootYAML+"provision:\n  - run: failing\n", client).Up(context.Background())
+	if !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// shell はコンテナ内コマンドの終了コードを ExitCodeError として返す
+func TestShellConvertsExitErrorToExitCode(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) {
+		return 0, &runner.ExitError{Cmd: "incus exec", ExitCode: 42}
+	}
+
+	err := appWith(t, rootYAML, client).Shell(context.Background(), []string{"false"})
+
+	var exitErr *ExitCodeError
+	if !errors.As(err, &exitErr) || exitErr.Code != 42 {
+		t.Errorf("error = %v, want ExitCodeError{42}", err)
+	}
+}
+
+// Profile が空の場合、status の該当行を出さない
+func TestStatusSkipsEmptyRows(t *testing.T) {
+	out := &bytes.Buffer{}
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	client := incustest.New().AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Status(context.Background(), false); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if strings.Contains(out.String(), "Profiles:") {
+		t.Errorf("status = %q, 空の項目は表示しないこと", out.String())
+	}
+}
+
+// 起動前の状態取得に失敗した場合
+func TestUpPropagatesEnsureRunningLookupError(t *testing.T) {
+	client := incustest.New()
+	calls := 0
+	client.Hook = func(call string) error {
+		if !strings.HasPrefix(call, "instance") {
+			return nil
+		}
+		calls++
+		if calls >= 2 {
+			return errBoom
+		}
+		return nil
+	}
+
+	if err := appWith(t, rootYAML, client).Up(context.Background()); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }

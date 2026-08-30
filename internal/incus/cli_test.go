@@ -406,3 +406,198 @@ func TestWaitReadyTimeout(t *testing.T) {
 		t.Errorf("error = %q, instance名を含むこと", err.Error())
 	}
 }
+
+// incus の出力が壊れている場合はパースエラーとして報告する
+func TestInstanceReportsMalformedJSON(t *testing.T) {
+	f := &runnertest.Fake{Stdout: map[string]string{"incus list": "not json"}}
+
+	_, err := newCLI(f).Instance(context.Background(), "dev-x")
+	if err == nil || !strings.Contains(err.Error(), "parse instance list") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestProfileExistsReportsMalformedJSON(t *testing.T) {
+	f := &runnertest.Fake{Stdout: map[string]string{"incus profile list": "{"}}
+
+	_, err := newCLI(f).ProfileExists(context.Background(), "default")
+	if err == nil || !strings.Contains(err.Error(), "parse profile list") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// incus コマンド自体が失敗した場合、そのまま伝播すること
+func TestCommandFailuresPropagate(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*incus.CLI) error
+	}{
+		{"list", func(c *incus.CLI) error { _, err := c.Instance(context.Background(), "dev-x"); return err }},
+		{"start", func(c *incus.CLI) error { return c.StartInstance(context.Background(), "dev-x") }},
+		{"stop", func(c *incus.CLI) error { return c.StopInstance(context.Background(), "dev-x") }},
+		{"delete", func(c *incus.CLI) error { return c.DeleteInstance(context.Background(), "dev-x") }},
+		{"create", func(c *incus.CLI) error {
+			return c.CreateInstance(context.Background(), incus.InstanceSpec{Name: "dev-x", Image: "i"})
+		}},
+		{"config set", func(c *incus.CLI) error {
+			return c.ApplyConfig(context.Background(), "dev-x", map[string]string{"a": "b"})
+		}},
+		{"config unset", func(c *incus.CLI) error {
+			return c.UnsetConfig(context.Background(), "dev-x", []string{"a"})
+		}},
+		{"profile list", func(c *incus.CLI) error { _, err := c.ProfileExists(context.Background(), "p"); return err }},
+		{"exec", func(c *incus.CLI) error {
+			_, err := c.Exec(context.Background(), "dev-x", []string{"true"}, incus.ExecOptions{})
+			return err
+		}},
+	}
+
+	wantErr := errors.New("incus failed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &runnertest.Fake{Err: map[string]error{"incus": wantErr}}
+
+			if err := tt.call(newCLI(f)); !errors.Is(err, wantErr) {
+				t.Errorf("error = %v, want %v", err, wantErr)
+			}
+		})
+	}
+}
+
+func TestUnsetConfig(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	if err := newCLI(f).UnsetConfig(context.Background(), "dev-x", []string{"raw.idmap"}); err != nil {
+		t.Fatalf("UnsetConfig() error = %v", err)
+	}
+	want := "incus config unset --project default dev-x raw.idmap"
+	if got := f.LastArgv(); got != want {
+		t.Errorf("command = %q, want %q", got, want)
+	}
+}
+
+func TestUnsetConfigEmptyIsNoop(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	if err := newCLI(f).UnsetConfig(context.Background(), "dev-x", nil); err != nil {
+		t.Fatalf("UnsetConfig() error = %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Errorf("commands = %v, 空なら実行しないこと", f.Commands())
+	}
+}
+
+// ユーザー名は incus exec --user へ渡せない（UIDのみ）
+func TestExecRejectsNonNumericUser(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	_, err := newCLI(f).Exec(context.Background(), "dev-x", []string{"true"}, incus.ExecOptions{User: "developer"})
+	if err == nil || !strings.Contains(err.Error(), "numeric uid") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestApplyDevicesPropagatesLookupError(t *testing.T) {
+	f := &runnertest.Fake{Err: map[string]error{"incus list": errors.New("nope")}}
+
+	err := newCLI(f).ApplyDevices(context.Background(), "dev-x", map[string]incus.Device{
+		"data": {"type": "disk"},
+	})
+	if err == nil {
+		t.Error("error = nil, want error")
+	}
+}
+
+func TestApplyDevicesEmptyIsNoop(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	if err := newCLI(f).ApplyDevices(context.Background(), "dev-x", nil); err != nil {
+		t.Fatalf("ApplyDevices() error = %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Errorf("commands = %v", f.Commands())
+	}
+}
+
+func TestWaitReadyStopsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f := &runnertest.Fake{Err: map[string]error{"incus": errors.New("not running")}}
+	err := newCLI(f).WaitReady(ctx, "dev-x", incus.WaitOptions{
+		Timeout:  time.Minute,
+		Interval: time.Millisecond,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestInstanceIsRunning(t *testing.T) {
+	if !(&incus.Instance{Status: "Running"}).IsRunning() {
+		t.Error("Running を実行中と判定すること")
+	}
+	if (&incus.Instance{Status: "Stopped"}).IsRunning() {
+		t.Error("Stopped を実行中と判定しないこと")
+	}
+}
+
+func TestApplyDevicesPropagatesCommandErrors(t *testing.T) {
+	existing := `[{"name":"dev-x","devices":{"data":{"type":"disk","source":"/old"}}}]`
+
+	tests := []struct {
+		name   string
+		prefix string
+		want   map[string]incus.Device
+	}{
+		{"追加の失敗", "incus config device add", map[string]incus.Device{"new": {"type": "nic"}}},
+		{"更新の失敗", "incus config device set", map[string]incus.Device{"data": {"type": "disk", "source": "/new"}}},
+		{"削除の失敗", "incus config device remove", map[string]incus.Device{"data": {"type": "proxy"}}},
+	}
+
+	wantErr := errors.New("device failed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &runnertest.Fake{
+				Stdout: map[string]string{"incus list": existing},
+				Err:    map[string]error{tt.prefix: wantErr},
+			}
+
+			if err := newCLI(f).ApplyDevices(context.Background(), "dev-x", tt.want); !errors.Is(err, wantErr) {
+				t.Errorf("error = %v, want %v", err, wantErr)
+			}
+		})
+	}
+}
+
+func TestInstanceExistsPropagatesError(t *testing.T) {
+	wantErr := errors.New("incus failed")
+	f := &runnertest.Fake{Err: map[string]error{"incus list": wantErr}}
+
+	if _, err := newCLI(f).InstanceExists(context.Background(), "dev-x"); !errors.Is(err, wantErr) {
+		t.Errorf("error = %v, want %v", err, wantErr)
+	}
+}
+
+// remote指定時は profile list にもremoteを渡す（渡さないとローカルを見てしまう）
+func TestProfileExistsUsesRemote(t *testing.T) {
+	f := &runnertest.Fake{Stdout: map[string]string{"incus profile list": `[{"name":"default"}]`}}
+	c := &incus.CLI{Runner: f, Project: "default", Remote: "dev-server"}
+
+	if _, err := c.ProfileExists(context.Background(), "default"); err != nil {
+		t.Fatalf("ProfileExists() error = %v", err)
+	}
+	want := "incus profile list --project default --format json dev-server:"
+	if got := f.LastArgv(); got != want {
+		t.Errorf("command = %q, want %q", got, want)
+	}
+}
+
+func TestWaitReadyUsesDefaults(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	// 既定値でも即座に成功すること（fakeは成功を返す）
+	if err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{}); err != nil {
+		t.Errorf("WaitReady() error = %v", err)
+	}
+}

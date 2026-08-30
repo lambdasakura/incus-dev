@@ -191,8 +191,12 @@ my-project/
 └── ...
 ```
 
-devkitは `dev.yml` 以外のディレクトリ名・構成を規定しない。
+devkitは `dev.yml` 以外のディレクトリ名・構成を原則として規定しない。
 `dev.yml` から参照されたパスのみを使用する。
+
+唯一の例外は `.incus-dev/ansible/ansible.cfg` で、
+存在する場合にansibleステップの設定として使用する
+（[06-provisioning.md](06-provisioning.md) 6.5.3）。置かなくてもよい。
 
 **この配下のファイルだけで、その開発環境が完全に再現できる状態を維持する。**
 

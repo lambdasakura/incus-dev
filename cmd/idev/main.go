@@ -14,8 +14,11 @@ import (
 // version はビルド時に -ldflags で埋め込む。
 var version = "dev"
 
+// osExit はテストから差し替えるための間接参照。
+var osExit = os.Exit
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr))
+	osExit(run(os.Args[1:], os.Stderr))
 }
 
 // run はCLIを実行し、プロセスの終了コードを返す。

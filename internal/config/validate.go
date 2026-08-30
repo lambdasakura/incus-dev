@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -155,7 +156,19 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 	}
 }
 
+// profileNamePattern はIncusのProfile名として妥当な形。
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 func validateInstance(c *Config, ps *problems) {
+	if c.Instance.Profiles != nil {
+		for i, name := range *c.Instance.Profiles {
+			if !profileNamePattern.MatchString(name) {
+				ps.add(fmt.Sprintf("instance.profiles[%d]", i),
+					"%q is not a valid profile name", name)
+			}
+		}
+	}
+
 	// "-" で始まるキーはincusコマンドのフラグとして解釈されうる。
 	for _, k := range sortedKeys(c.Instance.Config) {
 		if strings.HasPrefix(k, "-") {

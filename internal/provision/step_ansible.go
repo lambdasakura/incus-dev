@@ -33,12 +33,12 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	inventoryPath := filepath.Join(dir, "inventory.yml")
-	if err := writeInventory(inventoryPath, env); err != nil {
-		return err
+	if err := writeYAML(inventoryPath, inventoryFor(env)); err != nil {
+		return fmt.Errorf("write inventory: %w", err)
 	}
 	varsPath := filepath.Join(dir, "devkit-vars.json")
-	if err := writeVars(varsPath, env); err != nil {
-		return err
+	if err := writeJSON(varsPath, env.AnsibleVars()); err != nil {
+		return fmt.Errorf("write devkit vars: %w", err)
 	}
 
 	args := []string{"-i", inventoryPath}
@@ -71,15 +71,15 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	return err
 }
 
-// writeInventory はdevkitが生成する一時inventoryを書き出す。
-func writeInventory(path string, env Env) error {
+// inventoryFor はdevkitが生成する一時inventoryの内容を組み立てる。
+func inventoryFor(env Env) map[string]any {
 	host := map[string]any{
 		"ansible_host":          env.Instance,
 		"ansible_connection":    ConnectionPlugin,
 		"ansible_incus_remote":  orDefault(env.Remote, "local"),
 		"ansible_incus_project": orDefault(env.IncusProject, "default"),
 	}
-	inventory := map[string]any{
+	return map[string]any{
 		"all": map[string]any{
 			"children": map[string]any{
 				InventoryGroup: map[string]any{
@@ -88,26 +88,24 @@ func writeInventory(path string, env Env) error {
 			},
 		},
 	}
-
-	data, err := yaml.Marshal(inventory)
-	if err != nil {
-		return fmt.Errorf("build inventory: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write inventory: %w", err)
-	}
-	return nil
 }
 
-func writeVars(path string, env Env) error {
-	data, err := json.Marshal(env.AnsibleVars())
+// writeYAML は値をYAMLとして書き出す。一時ファイルなので所有者のみ読める。
+func writeYAML(path string, v any) error {
+	data, err := yaml.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("build devkit vars: %w", err)
+		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write devkit vars: %w", err)
+	return os.WriteFile(path, data, 0o600)
+}
+
+// writeJSON は値をJSONとして書き出す。
+func writeJSON(path string, v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
 	}
-	return nil
+	return os.WriteFile(path, data, 0o600)
 }
 
 // ansibleEnv はプロジェクトの ansible.cfg があればそれを使わせる（仕様 6.5.3）。

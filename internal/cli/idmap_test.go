@@ -93,3 +93,52 @@ func TestCheckSubIDAllowed(t *testing.T) {
 		}
 	})
 }
+
+func TestParseSubIDsSkipsMalformedCount(t *testing.T) {
+	ranges := parseSubIDs(strings.NewReader("root:1000:notanumber\nroot:2000:1\n"))
+
+	if len(ranges) != 1 || ranges[0].Start != 2000 {
+		t.Errorf("parseSubIDs() = %+v", ranges)
+	}
+}
+
+func TestCheckSubIDAllowedReportsGIDOnly(t *testing.T) {
+	dir := t.TempDir()
+	uidPath := filepath.Join(dir, "subuid")
+	gidPath := filepath.Join(dir, "subgid")
+	if err := os.WriteFile(uidPath, []byte("root:1000:1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gidPath, []byte("root:9999:1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := checkSubIDAllowed(uidPath, gidPath, 1000, 1000)
+	if err == nil {
+		t.Fatal("error = nil, gidが許可されていなければ失敗すること")
+	}
+	if !strings.Contains(err.Error(), "subgid") {
+		t.Errorf("error = %v, subgid を示すこと", err)
+	}
+	if strings.Contains(err.Error(), "/etc/subuid: root:1000:1") {
+		t.Errorf("error = %v, 満たしている側は挙げないこと", err)
+	}
+}
+
+// 既定の検査はホストの /etc/subuid を読む（結果は環境依存なので呼べることのみ確認）
+func TestDefaultIDMapCheckRuns(t *testing.T) {
+	_ = defaultIDMapCheck(os.Getuid(), os.Getgid())
+}
+
+// gid側のファイルが読めない場合も判定できないため通す
+func TestCheckSubIDAllowedSkipsWhenGIDFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	uidPath := filepath.Join(dir, "subuid")
+	if err := os.WriteFile(uidPath, []byte("root:1000:1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkSubIDAllowed(uidPath, filepath.Join(dir, "missing"), 1000, 1000); err != nil {
+		t.Errorf("checkSubIDAllowed() error = %v, 判定不能なら通すこと", err)
+	}
+}

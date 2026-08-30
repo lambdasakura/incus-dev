@@ -593,3 +593,75 @@ provision:
 		t.Errorf("実引数 = %q, 実際の値を渡すこと", raw)
 	}
 }
+
+// run も ansible も持たないステップは実行時にエラーとする
+// （通常はvalidationで弾かれるため、防御的な検査）
+func TestRunStepsRejectsEmptyStep(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	err := newExecutor(f).RunSteps(context.Background(), []config.Step{{Name: "empty"}}, "provision", testEnv())
+	if err == nil {
+		t.Fatal("RunSteps() = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error = %q, ステップ名を含むこと", err.Error())
+	}
+}
+
+// コンテナ内でのコマンド実行が失敗した場合
+func TestRunStepReportsNonZeroExit(t *testing.T) {
+	f := &runnertest.Fake{}
+	f.Handler = func(runner.Command) (runner.Result, error) {
+		return runner.Result{ExitCode: 5}, nil
+	}
+	cfg := parseConfig(t, base+"provision:\n  - run: failing\n")
+
+	err := newExecutor(f).Provision(context.Background(), cfg, testEnv())
+	if err == nil || !strings.Contains(err.Error(), "5") {
+		t.Errorf("error = %v, 終了コードを報告すること", err)
+	}
+}
+
+// 既定bootstrapが失敗した場合、bootstrapを明示するよう促すこと
+// （仕様 06-provisioning.md 6.3.2、REQ-007例外の成立条件）
+func TestDefaultBootstrapFailureGuidesUser(t *testing.T) {
+	f := &runnertest.Fake{}
+	f.Handler = func(runner.Command) (runner.Result, error) {
+		return runner.Result{ExitCode: 127}, nil
+	}
+	cfg := parseConfig(t, base+`
+provision:
+  - ansible:
+      playbook: p.yml
+`)
+
+	err := newExecutor(f).Bootstrap(context.Background(), cfg, testEnv())
+	if err == nil {
+		t.Fatal("Bootstrap() = nil error, want error")
+	}
+	for _, want := range []string{"bootstrap", "dev.yml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error =\n%v\n%q を含むこと", err, want)
+		}
+	}
+}
+
+// 明示されたbootstrapの失敗には案内を付けない
+func TestExplicitBootstrapFailureHasNoGuidance(t *testing.T) {
+	f := &runnertest.Fake{}
+	f.Handler = func(runner.Command) (runner.Result, error) {
+		return runner.Result{ExitCode: 1}, nil
+	}
+	cfg := parseConfig(t, base+`
+bootstrap:
+  - run: dnf install -y python3
+`)
+
+	err := newExecutor(f).Bootstrap(context.Background(), cfg, testEnv())
+	if err == nil {
+		t.Fatal("Bootstrap() = nil error, want error")
+	}
+	if strings.Contains(err.Error(), "dev.yml") {
+		t.Errorf("error = %v, 明示済みの場合は案内しないこと", err)
+	}
+}
