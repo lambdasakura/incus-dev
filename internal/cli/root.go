@@ -87,12 +87,23 @@ func newApp(g *globalFlags) (*App, error) {
 		Config:       cfg,
 		Client:       client,
 		Runner:       cmdRunner,
+		In:           os.Stdin,
 		Out:          os.Stdout,
 		ErrOut:       os.Stderr,
 		Verbose:      g.verbose,
+		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
 		Remote:       g.incusRemote,
 		IncusProject: g.incusProject,
 	}), nil
+}
+
+// isTerminal はファイルが端末に接続されているかを返す。
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func newUpCommand(g *globalFlags) *cobra.Command {

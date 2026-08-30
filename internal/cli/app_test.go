@@ -584,3 +584,104 @@ func loadTestConfig(t *testing.T, body string) *config.Config {
 	}
 	return cfg
 }
+
+// idev shell -- cmd はコマンドの終了コードをそのまま返す
+func TestShellPropagatesExitCode(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+	})
+	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) {
+		return 42, nil
+	}
+
+	err := app.Shell(context.Background(), []string{"sh", "-c", "exit 42"})
+
+	var exitErr *cli.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %v (%T), want *cli.ExitCodeError", err, err)
+	}
+	if exitErr.Code != 42 {
+		t.Errorf("Code = %d, want 42", exitErr.Code)
+	}
+}
+
+// 端末に接続されていない場合、擬似端末を割り当てない（出力に\rが混入するため）
+func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
+	tests := []struct {
+		name        string
+		interactive bool
+		wantTTY     bool
+	}{
+		{"端末あり", true, true},
+		{"パイプ経由", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := loadTestConfig(t, baseYAML)
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{"user.incus-devkit.project": "example-project"},
+			})
+
+			var gotTTY bool
+			client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+				gotTTY = opt.TTY
+				return 0, nil
+			}
+
+			app := cli.NewApp(cli.AppOptions{
+				Config:      cfg,
+				Client:      client,
+				Runner:      &runnertest.Fake{},
+				Out:         &bytes.Buffer{},
+				Interactive: tt.interactive,
+				CheckIDMap:  func(int, int) error { return nil },
+			})
+
+			if err := app.Shell(context.Background(), []string{"pwd"}); err != nil {
+				t.Fatalf("Shell() error = %v", err)
+			}
+			if gotTTY != tt.wantTTY {
+				t.Errorf("TTY = %v, want %v", gotTTY, tt.wantTTY)
+			}
+		})
+	}
+}
+
+// 非対話時も出力が中継されること
+func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
+	cfg := loadTestConfig(t, baseYAML)
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+	})
+
+	var gotStdout bool
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		gotStdout = opt.Stdout != nil
+		return 0, nil
+	}
+
+	app := cli.NewApp(cli.AppOptions{
+		Config:     cfg,
+		Client:     client,
+		Runner:     &runnertest.Fake{},
+		Out:        &bytes.Buffer{},
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Shell(context.Background(), []string{"pwd"}); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+	if !gotStdout {
+		t.Error("非対話時は標準出力を中継すること")
+	}
+}
