@@ -13,10 +13,11 @@ import (
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/schemas"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"sigs.k8s.io/yaml"
+
+	"gitlab.light-of-moe.com/sakura/incus-devkit/schemas"
 )
 
 // Options は Parse の挙動を制御する。
@@ -29,7 +30,7 @@ type Options struct {
 // Load は dev.yml を読み込み、validationを行う。
 // configPath は <root>/.incus-dev/dev.yml を想定する。
 func Load(configPath string) (*Config, error) {
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // 利用者が指定した設定ファイルを読むことが目的
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", configPath, err)
 	}

@@ -47,7 +47,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	idevBin = filepath.Join(dir, "idev")
 	build := exec.Command("go", "build", "-o", idevBin, "../../cmd/idev")

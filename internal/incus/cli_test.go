@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"

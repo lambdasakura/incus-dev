@@ -53,7 +53,7 @@ func (f *Fake) Run(_ context.Context, c runner.Command) (runner.Result, error) {
 	for prefix, out := range f.Stdout {
 		if strings.HasPrefix(cmd, prefix) {
 			if c.Stdout != nil {
-				fmt.Fprint(c.Stdout, out)
+				_, _ = fmt.Fprint(c.Stdout, out)
 			}
 			return runner.Result{Stdout: []byte(out)}, nil
 		}

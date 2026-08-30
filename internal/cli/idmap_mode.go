@@ -24,6 +24,8 @@ func resolveIDMapMode(declared config.IDMapMode, check func(uid, gid int) error)
 
 	case config.IDMapAuto:
 		if err := check(os.Getuid(), os.Getgid()); err != nil {
+			// ホストへ手を入れなくても動くよう、エラーとせずshiftへ退避する。
+			//nolint:nilerr // 退避は意図した動作であり、警告として利用者へ伝える
 			return config.IDMapShift, fallbackWarning(os.Getuid(), os.Getgid()), nil
 		}
 		return config.IDMapRaw, "", nil

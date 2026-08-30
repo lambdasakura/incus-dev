@@ -1,0 +1,63 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: standard
+  enable:
+    - errorlint      # errors.Is/As を使うべき箇所の検出
+    - gocritic       # 一般的なアンチパターン
+    - gosec          # セキュリティ上の問題
+    - misspell       # 綴り誤り
+    - nilerr         # err が非nilなのに nil を返す
+    - predeclared    # 組み込み識別子の隠蔽
+    - revive         # スタイルと可読性
+    - unconvert      # 不要な型変換
+    - usestdlibvars  # 標準ライブラリの定数を使うべき箇所
+    - wastedassign   # 使われない代入
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    gosec:
+      excludes:
+        - G204  # 外部コマンド実行はこのツールの目的そのもの（internal/runner に集約済み）
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: increment-decrement
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+  exclusions:
+    rules:
+      # テストでは長い関数や重複を許容する
+      - path: _test\.go
+        linters:
+          - gosec
+          - gocritic
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - gitlab.light-of-moe.com/sakura/incus-devkit

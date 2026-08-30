@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/project"
@@ -229,7 +230,7 @@ func newValidateCommand(g *globalFlags) *cobra.Command {
 
 // confirm は破壊操作の確認を求める。
 func confirm(in io.Reader, out io.Writer, prompt string) bool {
-	fmt.Fprintf(out, "%s [y/N]: ", prompt)
+	_, _ = fmt.Fprintf(out, "%s [y/N]: ", prompt)
 
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil {

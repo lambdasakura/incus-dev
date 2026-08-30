@@ -63,6 +63,7 @@ func (f *Fake) Called(prefix string) bool {
 	return false
 }
 
+// Instance は登録済みinstanceを返す。存在しなければ incus.ErrInstanceNotFound を返す。
 func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error) {
 	f.record("instance %s", name)
 	inst, ok := f.Instances[name]
@@ -72,14 +73,16 @@ func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error)
 	return inst, nil
 }
 
+// InstanceExists はinstanceの存在を返す。
 func (f *Fake) InstanceExists(ctx context.Context, name string) (bool, error) {
-	_, err := f.Instance(ctx, name)
-	if err != nil {
+	if _, err := f.Instance(ctx, name); err != nil {
+		//nolint:nilerr // 存在しないことはエラーではない
 		return false, nil
 	}
 	return true, nil
 }
 
+// CreateInstance はinstanceを登録する。状態は Stopped になる。
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
 	f.record("create %s image=%s profiles=%v noprofiles=%v", spec.Name, spec.Image, spec.Profiles, spec.NoProfiles)
 	config := map[string]string{}
@@ -101,6 +104,7 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 	return nil
 }
 
+// StartInstance はinstanceの状態を Running にする。
 func (f *Fake) StartInstance(_ context.Context, name string) error {
 	f.record("start %s", name)
 	if inst, ok := f.Instances[name]; ok {
@@ -109,6 +113,7 @@ func (f *Fake) StartInstance(_ context.Context, name string) error {
 	return nil
 }
 
+// StopInstance はinstanceの状態を Stopped にする。
 func (f *Fake) StopInstance(_ context.Context, name string) error {
 	f.record("stop %s", name)
 	if inst, ok := f.Instances[name]; ok {
@@ -117,12 +122,14 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 	return nil
 }
 
+// DeleteInstance はinstanceを削除する。
 func (f *Fake) DeleteInstance(_ context.Context, name string) error {
 	f.record("delete %s", name)
 	delete(f.Instances, name)
 	return nil
 }
 
+// ApplyConfig は指定されたconfigキーを反映する。
 func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]string) error {
 	if len(config) == 0 {
 		return nil
@@ -138,6 +145,7 @@ func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]str
 	return nil
 }
 
+// ApplyDevices は指定されたdeviceを反映する。
 func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]incus.Device) error {
 	if len(devices) == 0 {
 		return nil
@@ -153,6 +161,7 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	return nil
 }
 
+// ProfileExists は Profiles に含まれるかを返す。
 func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	for _, p := range f.Profiles {
 		if p == name {
@@ -162,6 +171,7 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	return false, nil
 }
 
+// Exec は実行内容を記録し、ExecFunc があればその結果を返す。
 func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.ExecOptions) (int, error) {
 	f.record("exec %s %s", name, strings.Join(argv, " "))
 	f.Execs = append(f.Execs, argv)
@@ -171,6 +181,7 @@ func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.Exe
 	return 0, nil
 }
 
+// WaitReady は FailReady が真の場合にエラーを返す。
 func (f *Fake) WaitReady(_ context.Context, name string, _ incus.WaitOptions) error {
 	f.record("waitready %s", name)
 	if f.FailReady {

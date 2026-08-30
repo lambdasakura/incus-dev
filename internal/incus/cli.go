@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 	"sigs.k8s.io/yaml"
+
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
 // CLI は incus コマンドを呼び出す Client 実装。

@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"sigs.k8s.io/yaml"
+
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/project"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -29,7 +30,7 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, la
 	if err != nil {
 		return fmt.Errorf("create temporary directory: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	inventoryPath := filepath.Join(dir, "inventory.yml")
 	if err := writeInventory(inventoryPath, env); err != nil {
