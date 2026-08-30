@@ -35,6 +35,7 @@ func TestDesiredDevicesIncludesWorkspace(t *testing.T) {
 		"type":   "disk",
 		"source": "/home/u/src/example",
 		"path":   "/workspace",
+		"shift":  "false",
 	}
 	if diff := cmp.Diff(want, map[string]string(devices["workspace"])); diff != "" {
 		t.Errorf("workspace device mismatch (-want +got):\n%s", diff)
@@ -74,7 +75,7 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
   config:
     limits.cpu: "8"
 `)
-	got := desiredConfig(cfg, config.IDMapRaw)
+	got := desiredConfig(cfg, config.IDMapRaw, 1000, 1000)
 
 	if got["limits.cpu"] != "8" {
 		t.Errorf("limits.cpu = %q", got["limits.cpu"])
@@ -93,7 +94,7 @@ func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
   config:
     raw.idmap: "both 1234 0"
 `)
-	if got := desiredConfig(cfg, config.IDMapRaw)["raw.idmap"]; got != "both 1234 0" {
+	if got := desiredConfig(cfg, config.IDMapRaw, 1000, 1000)["raw.idmap"]; got != "both 1234 0" {
 		t.Errorf("raw.idmap = %q, 明示指定を上書きしないこと", got)
 	}
 }

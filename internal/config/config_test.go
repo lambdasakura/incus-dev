@@ -566,3 +566,67 @@ func TestWorkspaceIDMapModes(t *testing.T) {
 		})
 	}
 }
+
+// incusコマンドのフラグとして解釈されうるキーを拒否する
+func TestValidateRejectsFlagLikeKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{"config キー", minimal + "  config:\n    \"--project\": other\n"},
+		{"device 名", minimal + "  devices:\n    \"--help\":\n      type: none\n"},
+		{"device キー", minimal + "  devices:\n    data:\n      type: disk\n      \"--force\": \"1\"\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := parseErr(t, tt.yaml)
+			if !strings.Contains(err.Error(), "must not start with") {
+				t.Errorf("error = %q", err.Error())
+			}
+		})
+	}
+}
+
+// pool を伴う disk の source はストレージボリューム名なので、パスとして検査しない
+func TestLoadAllowsStorageVolumeSource(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+  devices:
+    data:
+      type: disk
+      pool: default
+      source: myvolume
+      path: /data
+`)
+	if _, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml")); err != nil {
+		t.Errorf("Load() error = %v, ボリューム名をパスとして扱わないこと", err)
+	}
+}
+
+// 予約されたdevice名は使えない
+func TestValidateRejectsReservedDeviceName(t *testing.T) {
+	err := parseErr(t, minimal+`
+  devices:
+    workspace:
+      type: disk
+      source: /tmp
+      path: /elsewhere
+`)
+	if !strings.Contains(err.Error(), "workspace") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+// 参照先の問題は「存在しない」以外の理由も報告する
+func TestLoadReportsStatError(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+workspace:
+  source: ./missing
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Errorf("error = %v", err)
+	}
+}

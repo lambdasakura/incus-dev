@@ -149,7 +149,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastCommand()
+	cmd := f.LastArgv()
 	for _, want := range []string{
 		"--env DEVKIT_INSTANCE=dev-example-project",
 		"--env DEVKIT_PROJECT_NAME=example-project",
@@ -177,7 +177,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastCommand()
+	cmd := f.LastArgv()
 	if !strings.Contains(cmd, "--env DEVKIT_WORKSPACE=/elsewhere") {
 		t.Errorf("command = %q, ステップのenvが優先されること", cmd)
 	}
@@ -570,4 +570,26 @@ func containsString(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// 環境変数の値はSecretを含みうるため、表示用文字列ではマスクされる
+// （仕様 04-cli.md 4.10）
+func TestRunStepEnvIsRedactedInDisplay(t *testing.T) {
+	f := &runnertest.Fake{}
+	cfg := parseConfig(t, base+`
+provision:
+  - run: deploy
+    env:
+      API_TOKEN: s3cret-value
+`)
+	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv()); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	if display := f.LastCommand(); strings.Contains(display, "s3cret-value") {
+		t.Errorf("表示 = %q, 環境変数の値を含めないこと", display)
+	}
+	if raw := f.LastArgv(); !strings.Contains(raw, "API_TOKEN=s3cret-value") {
+		t.Errorf("実引数 = %q, 実際の値を渡すこと", raw)
+	}
 }

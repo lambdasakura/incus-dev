@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
@@ -20,8 +19,8 @@ const (
 const idmapConfigKey = "raw.idmap"
 
 // desiredConfig は dev.yml から適用すべきinstance configを組み立てる。
-// mode は解決済みのidmap方式。
-func desiredConfig(cfg *config.Config, mode config.IDMapMode) map[string]string {
+// mode は解決済みのidmap方式、uid/gid はホストの実行ユーザー。
+func desiredConfig(cfg *config.Config, mode config.IDMapMode, uid, gid int) map[string]string {
 	out := make(map[string]string, len(cfg.Instance.Config)+4)
 	for k, v := range cfg.Instance.Config {
 		out[k] = v
@@ -32,9 +31,10 @@ func desiredConfig(cfg *config.Config, mode config.IDMapMode) map[string]string 
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
 
 	// raw方式ではホストの実行ユーザーをコンテナのrootへ対応付ける。
+	// uidとgidは異なりうるため個別に指定する。
 	// プロジェクトが raw.idmap を明示している場合は尊重する。
 	if _, explicit := cfg.Instance.Config[idmapConfigKey]; !explicit && mode == config.IDMapRaw {
-		out[idmapConfigKey] = fmt.Sprintf("both %d 0", os.Getuid())
+		out[idmapConfigKey] = fmt.Sprintf("uid %d 0\ngid %d 0", uid, gid)
 	}
 	return out
 }
@@ -62,16 +62,29 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 		"source": cfg.WorkspaceSourcePath(),
 		"path":   ws.Target,
 	}
-	// shift方式ではidmapped mountを使い、ホスト側の追加設定を不要にする。
-	if mode == config.IDMapShift {
-		workspace["shift"] = "true"
-	}
+	// workspace deviceはdevkitの所有物なので、shiftは常に明示する。
+	// 方式を切り替えたときに古い設定が残らないようにするため。
+	workspace["shift"] = strconv.FormatBool(mode == config.IDMapShift)
 	out[config.WorkspaceDeviceName] = workspace
 	return out
 }
 
+// staleIDMapKeys は現在の方式では不要になった、devkit設定のconfigキーを返す。
+func staleIDMapKeys(cfg *config.Config, current map[string]string, mode config.IDMapMode) []string {
+	if _, explicit := cfg.Instance.Config[idmapConfigKey]; explicit {
+		return nil // 利用者が書いたキーには触れない
+	}
+	if mode == config.IDMapRaw {
+		return nil
+	}
+	if _, ok := current[idmapConfigKey]; !ok {
+		return nil
+	}
+	return []string{idmapConfigKey}
+}
+
 // instanceSpec はinstance作成時の指定を組み立てる。
-func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode) incus.InstanceSpec {
+func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode, uid, gid int) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
 	return incus.InstanceSpec{
 		Name:       name,
@@ -79,7 +92,7 @@ func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode) incus.
 		Type:       cfg.Instance.TypeOrDefault(),
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg, mode),
+		Config:     desiredConfig(cfg, mode, uid, gid),
 		Devices:    desiredDevices(cfg, mode),
 	}
 }

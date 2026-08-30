@@ -105,16 +105,16 @@ func TestPlanUsesResolvedIDMapMode(t *testing.T) {
 	cfg := mustParse(t, planBase)
 
 	t.Run("raw", func(t *testing.T) {
-		if got := desiredConfig(cfg, config.IDMapRaw)[idmapConfigKey]; !strings.HasPrefix(got, "both ") {
+		if got := desiredConfig(cfg, config.IDMapRaw, 1000, 1001)[idmapConfigKey]; got != "uid 1000 0\ngid 1001 0" {
 			t.Errorf("raw.idmap = %q", got)
 		}
-		if got := desiredDevices(cfg, config.IDMapRaw)["workspace"]["shift"]; got != "" {
-			t.Errorf("shift = %q, rawではshiftを使わないこと", got)
+		if got := desiredDevices(cfg, config.IDMapRaw)["workspace"]["shift"]; got != "false" {
+			t.Errorf("shift = %q, rawではshiftを明示的に無効化すること", got)
 		}
 	})
 
 	t.Run("shift", func(t *testing.T) {
-		if got, ok := desiredConfig(cfg, config.IDMapShift)[idmapConfigKey]; ok {
+		if got, ok := desiredConfig(cfg, config.IDMapShift, 1000, 1000)[idmapConfigKey]; ok {
 			t.Errorf("raw.idmap = %q, shiftではraw.idmapを設定しないこと", got)
 		}
 		if got := desiredDevices(cfg, config.IDMapShift)["workspace"]["shift"]; got != "true" {
@@ -123,11 +123,52 @@ func TestPlanUsesResolvedIDMapMode(t *testing.T) {
 	})
 
 	t.Run("none", func(t *testing.T) {
-		if _, ok := desiredConfig(cfg, config.IDMapNone)[idmapConfigKey]; ok {
+		if _, ok := desiredConfig(cfg, config.IDMapNone, 1000, 1000)[idmapConfigKey]; ok {
 			t.Error("noneではraw.idmapを設定しないこと")
 		}
-		if got := desiredDevices(cfg, config.IDMapNone)["workspace"]["shift"]; got != "" {
-			t.Errorf("shift = %q, noneではshiftを使わないこと", got)
+		if got := desiredDevices(cfg, config.IDMapNone)["workspace"]["shift"]; got != "false" {
+			t.Errorf("shift = %q, noneではshiftを明示的に無効化すること", got)
 		}
 	})
+}
+
+// idmap方式を切り替えたとき、devkitが設定した古いキーを残さない
+func TestStaleIDMapKeys(t *testing.T) {
+	cfg := mustParse(t, planBase)
+	withRaw := map[string]string{idmapConfigKey: "uid 1000 0"}
+
+	tests := []struct {
+		name    string
+		cfg     *config.Config
+		current map[string]string
+		mode    config.IDMapMode
+		want    []string
+	}{
+		{"shiftへ切り替え", cfg, withRaw, config.IDMapShift, []string{idmapConfigKey}},
+		{"noneへ切り替え", cfg, withRaw, config.IDMapNone, []string{idmapConfigKey}},
+		{"rawのまま", cfg, withRaw, config.IDMapRaw, nil},
+		{"元々設定が無い", cfg, map[string]string{}, config.IDMapShift, nil},
+		{
+			name:    "利用者が明示したキーには触れない",
+			cfg:     mustParse(t, planBase+"  config:\n    raw.idmap: \"both 1234 0\"\n"),
+			current: withRaw,
+			mode:    config.IDMapShift,
+			want:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := staleIDMapKeys(tt.cfg, tt.current, tt.mode)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("staleIDMapKeys() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("staleIDMapKeys()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
 }

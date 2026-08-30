@@ -4,6 +4,8 @@ package incustest
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
@@ -20,6 +22,9 @@ type Fake struct {
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
 	// FailReady が真の場合 WaitReady が失敗する。
 	FailReady bool
+	// FailOn は操作名のprefixに対して返すエラー。
+	// 例: {"create": errBoom} とすると CreateInstance が失敗する。
+	FailOn map[string]error
 
 	// Calls は呼び出し順の記録（例: "create dev-x", "start dev-x"）。
 	Calls []string
@@ -49,8 +54,17 @@ func (f *Fake) AddInstance(inst *incus.Instance) *Fake {
 	return f
 }
 
-func (f *Fake) record(format string, args ...any) {
-	f.Calls = append(f.Calls, fmt.Sprintf(format, args...))
+// record は呼び出しを記録し、FailOn に一致すればそのエラーを返す。
+func (f *Fake) record(format string, args ...any) error {
+	call := fmt.Sprintf(format, args...)
+	f.Calls = append(f.Calls, call)
+
+	for prefix, err := range f.FailOn {
+		if strings.HasPrefix(call, prefix) {
+			return err
+		}
+	}
+	return nil
 }
 
 // Called は指定のprefixで始まる呼び出しがあったかを返す。
@@ -65,7 +79,9 @@ func (f *Fake) Called(prefix string) bool {
 
 // Instance は登録済みinstanceを返す。存在しなければ incus.ErrInstanceNotFound を返す。
 func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error) {
-	f.record("instance %s", name)
+	if err := f.record("instance %s", name); err != nil {
+		return nil, err
+	}
 	inst, ok := f.Instances[name]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
@@ -84,7 +100,9 @@ func (f *Fake) InstanceExists(ctx context.Context, name string) (bool, error) {
 
 // CreateInstance はinstanceを登録する。状態は Stopped になる。
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
-	f.record("create %s image=%s profiles=%v noprofiles=%v", spec.Name, spec.Image, spec.Profiles, spec.NoProfiles)
+	if err := f.record("create %s image=%s profiles=%v noprofiles=%v", spec.Name, spec.Image, spec.Profiles, spec.NoProfiles); err != nil {
+		return err
+	}
 	config := map[string]string{}
 	for k, v := range spec.Config {
 		config[k] = v
@@ -106,7 +124,9 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 
 // StartInstance はinstanceの状態を Running にする。
 func (f *Fake) StartInstance(_ context.Context, name string) error {
-	f.record("start %s", name)
+	if err := f.record("start %s", name); err != nil {
+		return err
+	}
 	if inst, ok := f.Instances[name]; ok {
 		inst.Status = "Running"
 	}
@@ -115,7 +135,9 @@ func (f *Fake) StartInstance(_ context.Context, name string) error {
 
 // StopInstance はinstanceの状態を Stopped にする。
 func (f *Fake) StopInstance(_ context.Context, name string) error {
-	f.record("stop %s", name)
+	if err := f.record("stop %s", name); err != nil {
+		return err
+	}
 	if inst, ok := f.Instances[name]; ok {
 		inst.Status = "Stopped"
 	}
@@ -124,7 +146,9 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 
 // DeleteInstance はinstanceを削除する。
 func (f *Fake) DeleteInstance(_ context.Context, name string) error {
-	f.record("delete %s", name)
+	if err := f.record("delete %s", name); err != nil {
+		return err
+	}
 	delete(f.Instances, name)
 	return nil
 }
@@ -134,7 +158,9 @@ func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]str
 	if len(config) == 0 {
 		return nil
 	}
-	f.record("config %s %v", name, sortedPairs(config))
+	if err := f.record("config %s %v", name, sortedPairs(config)); err != nil {
+		return err
+	}
 	inst, ok := f.Instances[name]
 	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
@@ -145,12 +171,32 @@ func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]str
 	return nil
 }
 
+// UnsetConfig は指定されたconfigキーを削除する。
+func (f *Fake) UnsetConfig(_ context.Context, name string, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if err := f.record("unset %s %v", name, keys); err != nil {
+		return err
+	}
+	inst, ok := f.Instances[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
+	}
+	for _, k := range keys {
+		delete(inst.Config, k)
+	}
+	return nil
+}
+
 // ApplyDevices は指定されたdeviceを反映する。
 func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]incus.Device) error {
 	if len(devices) == 0 {
 		return nil
 	}
-	f.record("devices %s %v", name, sortedDeviceNames(devices))
+	if err := f.record("devices %s %v", name, sortedDeviceNames(devices)); err != nil {
+		return err
+	}
 	inst, ok := f.Instances[name]
 	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
@@ -163,6 +209,9 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 
 // ProfileExists は Profiles に含まれるかを返す。
 func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
+	if err := f.record("profile %s", name); err != nil {
+		return false, err
+	}
 	for _, p := range f.Profiles {
 		if p == name {
 			return true, nil
@@ -173,7 +222,9 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 
 // Exec は実行内容を記録し、ExecFunc があればその結果を返す。
 func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.ExecOptions) (int, error) {
-	f.record("exec %s %s", name, strings.Join(argv, " "))
+	if err := f.record("exec %s %s", name, strings.Join(argv, " ")); err != nil {
+		return 1, err
+	}
 	f.Execs = append(f.Execs, argv)
 	if f.ExecFunc != nil {
 		return f.ExecFunc(name, argv, opt)
@@ -183,7 +234,9 @@ func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.Exe
 
 // WaitReady は FailReady が真の場合にエラーを返す。
 func (f *Fake) WaitReady(_ context.Context, name string, _ incus.WaitOptions) error {
-	f.record("waitready %s", name)
+	if err := f.record("waitready %s", name); err != nil {
+		return err
+	}
 	if f.FailReady {
 		return fmt.Errorf("instance %s did not become ready", name)
 	}
@@ -203,14 +256,5 @@ func sortedDeviceNames(m map[string]incus.Device) []string {
 }
 
 func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }

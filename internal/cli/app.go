@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"os"
+	"slices"
 	"strings"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
@@ -41,6 +44,10 @@ type AppOptions struct {
 
 	// CheckIDMap は workspace.idmap: auto の事前検査。nilの場合は既定の検査を使う。
 	CheckIDMap func(uid, gid int) error
+	// UID / GID はworkspaceの対応付けに使うホスト側のID。
+	// 0値の場合は実行ユーザーのものを使う。
+	UID int
+	GID int
 }
 
 // App はコマンドの実処理を保持する。
@@ -59,6 +66,7 @@ type App struct {
 	incusProject string
 
 	checkIDMap func(uid, gid int) error
+	uid, gid   int
 }
 
 // NewApp は App を構成する。
@@ -76,6 +84,11 @@ func NewApp(opt AppOptions) *App {
 	checkIDMap := opt.CheckIDMap
 	if checkIDMap == nil {
 		checkIDMap = defaultIDMapCheck
+	}
+
+	uid, gid := opt.UID, opt.GID
+	if uid == 0 && gid == 0 {
+		uid, gid = os.Getuid(), os.Getgid()
 	}
 
 	return &App{
@@ -97,6 +110,8 @@ func NewApp(opt AppOptions) *App {
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
+		uid:          uid,
+		gid:          gid,
 	}
 }
 
@@ -139,12 +154,12 @@ func (a *App) Up(ctx context.Context) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
-		if err := a.client.ApplyConfig(ctx, a.instance, desiredConfig(a.cfg, mode)); err != nil {
+		if err := a.reapplyInstance(ctx, inst, mode); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.log.Info("Creating instance " + a.instance)
-		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, mode)); err != nil {
+		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, mode, a.uid, a.gid)); err != nil {
 			return err
 		}
 	default:
@@ -332,6 +347,55 @@ func (a *App) Validate() error {
 	return err
 }
 
+// reapplyInstance は既存instanceへ宣言内容を再適用する。
+func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, mode config.IDMapMode) error {
+	desired := desiredConfig(a.cfg, mode, a.uid, a.gid)
+	// 適用前の状態を控える。適用後は差分が分からなくなるため。
+	before := maps.Clone(inst.Config)
+
+	// idmap方式を切り替えた場合、devkitが以前設定したキーを残さない。
+	if stale := staleIDMapKeys(a.cfg, inst.Config, mode); len(stale) > 0 {
+		if err := a.client.UnsetConfig(ctx, a.instance, stale); err != nil {
+			return err
+		}
+	}
+	if err := a.client.ApplyConfig(ctx, a.instance, desired); err != nil {
+		return err
+	}
+
+	a.warnRestartRequired(inst.IsRunning(), before, desired)
+	return nil
+}
+
+// restartRequiredKeys は変更に再起動を要するconfigキー。
+var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
+
+// warnRestartRequired は稼働中instanceで即座に反映されない変更を警告する
+// （仕様 05-incus.md 5.4.5）。
+func (a *App) warnRestartRequired(running bool, before, desired map[string]string) {
+	if !running {
+		return
+	}
+
+	var changed []string
+	for _, k := range restartRequiredKeys {
+		want, declared := desired[k]
+		switch {
+		case declared && before[k] != want:
+			changed = append(changed, k)
+		case !declared && before[k] != "":
+			changed = append(changed, k)
+		}
+	}
+	if len(changed) == 0 {
+		return
+	}
+
+	a.log.Warn(fmt.Sprintf(
+		"%s changed but the instance is running; restart it to apply (idev rebuild --force, or incus restart %s)",
+		strings.Join(changed, ", "), a.instance))
+}
+
 // idmapMode は適用するidmap方式を解決する。
 func (a *App) idmapMode() (config.IDMapMode, string, error) {
 	declared := a.cfg.WorkspaceOrDefault().IDMap
@@ -414,9 +478,9 @@ type ExitCodeError struct{ Code int }
 func (e *ExitCodeError) Error() string { return fmt.Sprintf("exited with code %d", e.Code) }
 
 // limitsOf は表示対象のconfigキーを抽出する。
-func limitsOf(config map[string]string) map[string]string {
+func limitsOf(instanceConfig map[string]string) map[string]string {
 	out := map[string]string{}
-	for k, v := range config {
+	for k, v := range instanceConfig {
 		if strings.HasPrefix(k, "limits.") {
 			out[k] = v
 		}
@@ -432,14 +496,5 @@ func yesNo(b bool) string {
 }
 
 func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }

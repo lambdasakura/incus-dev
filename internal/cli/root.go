@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
@@ -25,8 +26,15 @@ type globalFlags struct {
 	incusProject string
 }
 
+// appFactory はコマンドが使う App を生成する。テストでは差し替える。
+type appFactory func(*globalFlags) (*App, error)
+
 // NewRootCommand は idev のルートコマンドを構成する。
 func NewRootCommand(version string) *cobra.Command {
+	return newRootCommand(version, newApp)
+}
+
+func newRootCommand(version string, factory appFactory) *cobra.Command {
 	g := &globalFlags{}
 
 	root := &cobra.Command{
@@ -46,13 +54,13 @@ func NewRootCommand(version string) *cobra.Command {
 	pf.StringVar(&g.incusProject, "incus-project", "default", "Incus project")
 
 	root.AddCommand(
-		newUpCommand(g),
-		newProvisionCommand(g),
-		newShellCommand(g),
-		newStatusCommand(g),
-		newDestroyCommand(g),
-		newRebuildCommand(g),
-		newValidateCommand(g),
+		newUpCommand(g, factory),
+		newProvisionCommand(g, factory),
+		newShellCommand(g, factory),
+		newStatusCommand(g, factory),
+		newDestroyCommand(g, factory),
+		newRebuildCommand(g, factory),
+		newValidateCommand(g, factory),
 	)
 	return root
 }
@@ -99,15 +107,14 @@ func newApp(g *globalFlags) (*App, error) {
 }
 
 // isTerminal はファイルが端末に接続されているかを返す。
+//
+// 端末でない場合に擬似端末を割り当てると出力へCRが混入するため、
+// idev shell の判断に使う。
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
-func newUpCommand(g *globalFlags) *cobra.Command {
+func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "up",
 		Short: "instanceを用意し、bootstrapとprovisionを実行する",
@@ -122,7 +129,7 @@ func newUpCommand(g *globalFlags) *cobra.Command {
 	}
 }
 
-func newProvisionCommand(g *globalFlags) *cobra.Command {
+func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "provision",
 		Short: "instanceを作り直さずにprovisionのみ再実行する",
@@ -137,8 +144,8 @@ func newProvisionCommand(g *globalFlags) *cobra.Command {
 	}
 }
 
-func newShellCommand(g *globalFlags) *cobra.Command {
-	return &cobra.Command{
+func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	c := &cobra.Command{
 		Use:   "shell [-- command...]",
 		Short: "コンテナ内でshell（または指定コマンド）を実行する",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -149,9 +156,13 @@ func newShellCommand(g *globalFlags) *cobra.Command {
 			return app.Shell(cmd.Context(), args)
 		},
 	}
+	// idev shell -- bash -lc "..." の -lc を idev のフラグと解釈させない。
+	c.Flags().SetInterspersed(false)
+
+	return c
 }
 
-func newStatusCommand(g *globalFlags) *cobra.Command {
+func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	var asJSON bool
 	c := &cobra.Command{
 		Use:   "status",
@@ -169,7 +180,7 @@ func newStatusCommand(g *globalFlags) *cobra.Command {
 	return c
 }
 
-func newDestroyCommand(g *globalFlags) *cobra.Command {
+func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	var force bool
 	c := &cobra.Command{
 		Use:   "destroy",
@@ -191,7 +202,7 @@ func newDestroyCommand(g *globalFlags) *cobra.Command {
 	return c
 }
 
-func newRebuildCommand(g *globalFlags) *cobra.Command {
+func newRebuildCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	var force bool
 	c := &cobra.Command{
 		Use:   "rebuild",
@@ -213,7 +224,7 @@ func newRebuildCommand(g *globalFlags) *cobra.Command {
 	return c
 }
 
-func newValidateCommand(g *globalFlags) *cobra.Command {
+func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate",
 		Short: "dev.ymlを検証する（Incusへは一切変更を加えない）",
@@ -232,10 +243,12 @@ func newValidateCommand(g *globalFlags) *cobra.Command {
 func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	_, _ = fmt.Fprintf(out, "%s [y/N]: ", prompt)
 
+	// EOF でも、読み取れた内容があれば回答として扱う（末尾改行なしの入力）。
 	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil {
+	if err != nil && line == "" {
 		return false
 	}
+
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
 		return true
@@ -249,4 +262,22 @@ func Execute(ctx context.Context, version string, args []string) error {
 	root := NewRootCommand(version)
 	root.SetArgs(args)
 	return root.ExecuteContext(ctx)
+}
+
+// Report はエラーを出力し、プロセスの終了コードを返す。
+//
+// コンテナ内コマンドが異常終了しただけの場合は、その終了コードを返し、
+// devkit自身のエラーとしては表示しない（出力は既に中継済みであるため）。
+func Report(w io.Writer, err error) int {
+	if err == nil {
+		return 0
+	}
+
+	var exitErr *ExitCodeError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code
+	}
+
+	_, _ = fmt.Fprintf(w, "[idev] error: %v\n", err)
+	return 1
 }

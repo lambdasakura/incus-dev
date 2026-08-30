@@ -3,8 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -26,18 +24,5 @@ func run(args []string, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := cli.Execute(ctx, version, args)
-	if err == nil {
-		return 0
-	}
-
-	// コンテナ内コマンドが異常終了しただけの場合は、
-	// その終了コードをそのまま返す（出力は既に中継済み）。
-	var exitErr *cli.ExitCodeError
-	if errors.As(err, &exitErr) {
-		return exitErr.Code
-	}
-
-	_, _ = fmt.Fprintf(stderr, "[idev] error: %v\n", err)
-	return 1
+	return cli.Report(stderr, cli.Execute(ctx, version, args))
 }

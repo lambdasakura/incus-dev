@@ -25,7 +25,7 @@ const (
 )
 
 // execAnsible はホスト側で ansible-playbook を実行する（仕様 06-provisioning.md 6.5）。
-func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, label string, env Env) error {
+func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, env Env) error {
 	dir, err := os.MkdirTemp("", "idev-ansible-")
 	if err != nil {
 		return fmt.Errorf("create temporary directory: %w", err)
@@ -59,8 +59,8 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, la
 	args = append(args, step.ExtraArgs...)
 	args = append(args, resolve(env.ProjectRoot, step.Playbook))
 
+	// ラベルは RunSteps 側で付与するため、ここでは付けない（二重表示になる）。
 	_, err = e.Runner.Run(ctx, runner.Command{
-		Label:  label,
 		Name:   "ansible-playbook",
 		Args:   args,
 		Dir:    env.ProjectRoot,

@@ -50,18 +50,6 @@ func (s Step) DisplayName(index int) string {
 	return fmt.Sprintf("step %d", index)
 }
 
-// Kind はステップ種別を返す。
-func (s Step) Kind() string {
-	switch {
-	case s.Run != nil:
-		return "run"
-	case s.Ansible != nil:
-		return "ansible"
-	default:
-		return "unknown"
-	}
-}
-
 // stepJSON は run 短縮形とフル形式の両方を受けるための中間表現。
 type stepJSON struct {
 	Name    string       `json:"name"`

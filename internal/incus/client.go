@@ -78,6 +78,7 @@ type Client interface {
 	DeleteInstance(ctx context.Context, name string) error
 
 	ApplyConfig(ctx context.Context, name string, config map[string]string) error
+	UnsetConfig(ctx context.Context, name string, keys []string) error
 	ApplyDevices(ctx context.Context, name string, devices map[string]Device) error
 
 	ProfileExists(ctx context.Context, name string) (bool, error)

@@ -67,19 +67,19 @@ func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind strin
 		label := fmt.Sprintf("%s step %d/%d: %s", kind, i+1, total, step.DisplayName(i+1))
 		e.log(label)
 
-		if err := e.runStep(ctx, step, label, env); err != nil {
+		if err := e.runStep(ctx, step, env); err != nil {
 			return fmt.Errorf("%s: %w", label, err)
 		}
 	}
 	return nil
 }
 
-func (e *Executor) runStep(ctx context.Context, step config.Step, label string, env Env) error {
+func (e *Executor) runStep(ctx context.Context, step config.Step, env Env) error {
 	switch {
 	case step.Run != nil:
-		return e.execRun(ctx, step.Run, label, env)
+		return e.execRun(ctx, step.Run, env)
 	case step.Ansible != nil:
-		return e.execAnsible(ctx, step.Ansible, label, env)
+		return e.execAnsible(ctx, step.Ansible, env)
 	default:
 		return fmt.Errorf("step has neither run nor ansible")
 	}

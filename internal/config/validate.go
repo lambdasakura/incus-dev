@@ -2,9 +2,10 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -155,6 +156,24 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 }
 
 func validateInstance(c *Config, ps *problems) {
+	// "-" で始まるキーはincusコマンドのフラグとして解釈されうる。
+	for _, k := range sortedKeys(c.Instance.Config) {
+		if strings.HasPrefix(k, "-") {
+			ps.add("instance.config."+k, "key must not start with %q", "-")
+		}
+	}
+	for _, name := range sortedKeys(c.Instance.Devices) {
+		if strings.HasPrefix(name, "-") {
+			ps.add("instance.devices."+name, "device name must not start with %q", "-")
+		}
+		for _, k := range sortedKeys(c.Instance.Devices[name]) {
+			if strings.HasPrefix(k, "-") {
+				ps.add(fmt.Sprintf("instance.devices.%s.%s", name, k),
+					"key must not start with %q", "-")
+			}
+		}
+	}
+
 	// profiles: [] はProfileを一切適用しないため、Incusが必要とする
 	// root diskをプロジェクト側で宣言しなければならない。
 	if c.Instance.Profiles != nil && len(*c.Instance.Profiles) == 0 && !hasRootDisk(c.Instance.Devices) {
@@ -172,6 +191,11 @@ func validateInstance(c *Config, ps *problems) {
 		ps.add("instance.devices."+WorkspaceDeviceName,
 			"%q is reserved for the workspace mount; use the workspace section instead", WorkspaceDeviceName)
 	}
+}
+
+// isVolumeSource は source がホストのパスではなくストレージボリューム名かを返す。
+func isVolumeSource(dev StringMap) bool {
+	return dev["type"] == "disk" && dev["pool"] != ""
 }
 
 // hasRootDisk はコンテナのrootを提供するdiskがあるかを返す。
@@ -195,21 +219,24 @@ func validatePaths(c *Config, ps *problems) {
 	ws := c.WorkspaceOrDefault()
 	src := c.ResolvePath(ws.Source)
 	if info, err := os.Stat(src); err != nil {
-		ps.add("workspace.source", "%s does not exist", src)
+		ps.add("workspace.source", "%v", err)
 	} else if !info.IsDir() {
 		ps.add("workspace.source", "%s is not a directory", src)
 	}
 
-	for _, name := range sortedDeviceNames(c.Instance.Devices) {
+	for _, name := range sortedKeys(c.Instance.Devices) {
 		dev := c.Instance.Devices[name]
 		source, ok := dev["source"]
 		if !ok || source == "" || filepath.IsAbs(source) {
 			// ホスト側の絶対パスは環境依存のため検査しない。
 			continue
 		}
+		if isVolumeSource(dev) {
+			// pool を伴うdiskの source はストレージボリューム名であり、パスではない。
+			continue
+		}
 		if _, err := os.Stat(c.ResolvePath(source)); err != nil {
-			ps.add(fmt.Sprintf("instance.devices.%s.source", name),
-				"%s does not exist", c.ResolvePath(source))
+			ps.add(fmt.Sprintf("instance.devices.%s.source", name), "%v", err)
 		}
 	}
 
@@ -235,26 +262,12 @@ func checkStepPaths(c *Config, steps []Step, key string, ps *problems) {
 				continue
 			}
 			if _, err := os.Stat(c.ResolvePath(value)); err != nil {
-				ps.add(path+"."+field, "%s does not exist", c.ResolvePath(value))
+				ps.add(path+"."+field, "%v", err)
 			}
 		}
 	}
 }
 
-func sortedKeys(m StringMap) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedDeviceNames(m map[string]StringMap) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }

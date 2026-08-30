@@ -196,7 +196,7 @@ func TestApplyConfig(t *testing.T) {
 		t.Fatalf("ApplyConfig() error = %v", err)
 	}
 	want := "incus config set --project default dev-x limits.cpu=8 limits.memory=16GiB"
-	if got := f.LastCommand(); got != want {
+	if got := f.LastArgv(); got != want {
 		t.Errorf("command = %q, want %q", got, want)
 	}
 }
@@ -224,7 +224,7 @@ func TestApplyDevicesAddsMissingDevice(t *testing.T) {
 		t.Fatalf("ApplyDevices() error = %v", err)
 	}
 	want := "incus config device add --project default dev-x workspace disk path=/workspace source=/src"
-	if got := f.LastCommand(); got != want {
+	if got := f.LastArgv(); got != want {
 		t.Errorf("command = %q, want %q", got, want)
 	}
 }
@@ -241,7 +241,7 @@ func TestApplyDevicesUpdatesExistingDevice(t *testing.T) {
 		t.Fatalf("ApplyDevices() error = %v", err)
 	}
 	want := "incus config device set --project default dev-x workspace source=/new"
-	if got := f.LastCommand(); got != want {
+	if got := f.LastArgv(); got != want {
 		t.Errorf("command = %q, want %q (変更されたキーのみ設定すること)", got, want)
 	}
 }
@@ -321,7 +321,7 @@ func TestExecBuildsCommand(t *testing.T) {
 				Env: map[string]string{"B": "2", "A": "1"},
 			},
 			argv: []string{"sh", "-c", "echo hi"},
-			want: `incus exec --project default dev-x --cwd /workspace --env A=1 --env B=2 -T -- sh -c "echo hi"`,
+			want: "incus exec --project default dev-x --cwd /workspace --env A=1 --env B=2 -T -- sh -c echo hi",
 		},
 		{
 			name: "数値ユーザー",
@@ -344,7 +344,7 @@ func TestExecBuildsCommand(t *testing.T) {
 			if _, err := c.Exec(context.Background(), "dev-x", tt.argv, tt.opt); err != nil {
 				t.Fatalf("Exec() error = %v", err)
 			}
-			if got := f.LastCommand(); got != tt.want {
+			if got := f.LastArgv(); got != tt.want {
 				t.Errorf("command =\n  %q\nwant\n  %q", got, tt.want)
 			}
 		})

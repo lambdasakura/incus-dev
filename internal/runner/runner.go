@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // Command は実行する外部コマンド。
@@ -33,14 +34,39 @@ type Command struct {
 
 	// Interactive が真の場合、プロセスの標準入出力を直接引き継ぐ（TTY用途）。
 	Interactive bool
+
+	// Redact は String() で値を隠す Args のindex。
+	// Secretを含みうる引数（環境変数や利用者が指定した設定値）に指定する。
+	// 実行される引数そのものは変わらない。
+	Redact []int
+}
+
+// redacted は表示用に値を隠した引数を返す。
+// KEY=VALUE 形式は KEY=*** とし、それ以外は全体を隠す。
+func (c Command) redacted(i int, arg string) string {
+	for _, r := range c.Redact {
+		if r != i {
+			continue
+		}
+		if key, _, ok := strings.Cut(arg, "="); ok {
+			return key + "=***"
+		}
+		return "***"
+	}
+	return arg
 }
 
 // String はログ・エラー表示用のコマンド文字列を返す。
-// 環境変数はSecretを含みうるため含めない。
+//
+// 環境変数（Env）は含めず、Redact で指定された引数の値は隠す。
+// Secretを無条件に出力しないための表示専用の表現であり、
+// 実行される引数はこれとは独立している（仕様 04-cli.md 4.10）。
 func (c Command) String() string {
 	parts := make([]string, 0, len(c.Args)+1)
 	parts = append(parts, c.Name)
-	for _, a := range c.Args {
+
+	for i, a := range c.Args {
+		a = c.redacted(i, a)
 		if strings.ContainsAny(a, " \t\n\"'") {
 			parts = append(parts, fmt.Sprintf("%q", a))
 			continue
@@ -82,6 +108,23 @@ func (e *ExitError) Error() string {
 	return sb.String()
 }
 
+// exitCode はプロセスの終了コードを返す。
+//
+// シグナルで終了した場合 os は -1 を返すが、そのまま os.Exit へ渡すと
+// 255 になってしまうため、シェルの慣例に合わせて 128+シグナル番号とする。
+func exitCode(state *os.ProcessState) int {
+	if state == nil {
+		return -1
+	}
+	if code := state.ExitCode(); code >= 0 {
+		return code
+	}
+	if ws, ok := state.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return 1
+}
+
 // Exec は os/exec による実装。
 type Exec struct {
 	Logger *slog.Logger
@@ -95,6 +138,13 @@ func NewWithLogger(l *slog.Logger) *Exec { return &Exec{Logger: l} }
 
 // Run はコマンドを実行する。
 func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
+	if c.Interactive {
+		// 対話実行では、端末からのCtrl-Cは子プロセスへ直接届く。
+		// ここで親のcontextに追従して子を殺すと、コンテナ内のコマンドを
+		// 止めようとしただけでシェルごと落ちてしまう。
+		ctx = context.WithoutCancel(ctx)
+	}
+
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Dir = c.Dir
 	if len(c.Env) > 0 {
@@ -125,7 +175,7 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 
 	err := cmd.Run()
 	res := Result{
-		ExitCode: cmd.ProcessState.ExitCode(),
+		ExitCode: exitCode(cmd.ProcessState),
 		Stdout:   stdout.Bytes(),
 		Stderr:   stderr.Bytes(),
 	}
@@ -135,12 +185,16 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return res, &ExitError{
+		e := &ExitError{
 			Label:    c.Label,
 			Cmd:      c.String(),
 			ExitCode: res.ExitCode,
-			Stderr:   string(res.Stderr),
 		}
+		// 呼び出し側へ中継済みの場合、同じ内容を二重に見せない。
+		if c.Stderr == nil && !c.Interactive {
+			e.Stderr = string(res.Stderr)
+		}
+		return res, e
 	}
 	if c.Label != "" {
 		return res, fmt.Errorf("%s: run %s: %w", c.Label, c.String(), err)

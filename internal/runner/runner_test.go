@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -169,5 +171,174 @@ func TestCommandString(t *testing.T) {
 	want := `incus exec dev-x -- sh -c "echo hi"`
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestRunInteractivePassesThroughStdio(t *testing.T) {
+	r := runner.New()
+
+	// Interactive では親プロセスの標準入出力を引き継ぐ。
+	// ここでは何も出力しないコマンドで、経路が動作することのみ確認する。
+	res, err := r.Run(context.Background(), runner.Command{
+		Name:        "true",
+		Interactive: true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", res.ExitCode)
+	}
+}
+
+func TestRunLogsCommandWhenLoggerSet(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	r := runner.NewWithLogger(logger)
+	if _, err := r.Run(context.Background(), runner.Command{Name: "true"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "true") {
+		t.Errorf("log = %q, 実行したコマンドを記録すること", buf.String())
+	}
+}
+
+// 起動そのものに失敗した場合は ExitError ではなくラップされたエラーを返す
+func TestRunStartFailureIsNotExitError(t *testing.T) {
+	r := runner.New()
+
+	_, err := r.Run(context.Background(), runner.Command{
+		Label: "operation",
+		Name:  "no-such-command-idev-test",
+	})
+	if err == nil {
+		t.Fatal("Run() = nil error, want error")
+	}
+
+	var exitErr *runner.ExitError
+	if errors.As(err, &exitErr) {
+		t.Error("起動失敗を ExitError として扱わないこと")
+	}
+	if !strings.Contains(err.Error(), "operation") {
+		t.Errorf("error = %q, 操作名を含むこと", err.Error())
+	}
+}
+
+func TestExitErrorWithoutLabel(t *testing.T) {
+	err := &runner.ExitError{Cmd: "incus list", ExitCode: 1}
+
+	got := err.Error()
+	if !strings.Contains(got, "incus list") || !strings.Contains(got, "exit code 1") {
+		t.Errorf("Error() = %q", got)
+	}
+}
+
+func TestCommandStringWithoutArgs(t *testing.T) {
+	if got := (runner.Command{Name: "incus"}).String(); got != "incus" {
+		t.Errorf("String() = %q, want %q", got, "incus")
+	}
+}
+
+// Secretを含みうる引数は表示用文字列でマスクする（仕様 04-cli.md 4.10）
+func TestCommandStringRedactsMarkedArgs(t *testing.T) {
+	c := runner.Command{
+		Name:   "incus",
+		Args:   []string{"exec", "dev-x", "--env", "TOKEN=s3cret", "--env", "MODE=debug", "--", "true"},
+		Redact: []int{3, 5},
+	}
+
+	got := c.String()
+
+	if strings.Contains(got, "s3cret") || strings.Contains(got, "debug") {
+		t.Errorf("String() = %q, 値を含めないこと", got)
+	}
+	for _, want := range []string{"TOKEN=***", "MODE=***", "incus exec dev-x"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("String() = %q, %q を含むこと", got, want)
+		}
+	}
+}
+
+func TestCommandStringRedactsValueWithoutKey(t *testing.T) {
+	c := runner.Command{Name: "tool", Args: []string{"--password", "hunter2"}, Redact: []int{1}}
+
+	if got := c.String(); strings.Contains(got, "hunter2") {
+		t.Errorf("String() = %q", got)
+	}
+}
+
+// マスクは表示用のみで、実行される引数は変わらない
+func TestRedactDoesNotChangeExecutedArgs(t *testing.T) {
+	r := runner.New()
+
+	res, err := r.Run(context.Background(), runner.Command{
+		Name:   "sh",
+		Args:   []string{"-c", "printf %s \"$TOKEN\""},
+		Env:    []string{"TOKEN=s3cret"},
+		Redact: []int{1},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if string(res.Stdout) != "s3cret" {
+		t.Errorf("Stdout = %q, 実行時の値は変えないこと", res.Stdout)
+	}
+}
+
+// 失敗時のエラーメッセージにもマスクが効くこと
+func TestExitErrorUsesRedactedCommand(t *testing.T) {
+	r := runner.New()
+
+	_, err := r.Run(context.Background(), runner.Command{
+		Name:   "sh",
+		Args:   []string{"-c", "exit 1", "SECRET=s3cret"},
+		Redact: []int{2},
+	})
+	if err == nil {
+		t.Fatal("Run() = nil error, want error")
+	}
+	if strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("error = %q, Secretを含めないこと", err.Error())
+	}
+}
+
+// 出力を中継している場合、エラーに同じstderrを重複させない
+func TestExitErrorOmitsStderrWhenStreamed(t *testing.T) {
+	var stderr bytes.Buffer
+	r := runner.New()
+
+	// stderrの内容がコマンド文字列に現れないようにする
+	_, err := r.Run(context.Background(), runner.Command{
+		Name:   "sh",
+		Args:   []string{"-c", "echo $((6 * 7)) >&2; exit 1"},
+		Stderr: &stderr,
+	})
+	if err == nil {
+		t.Fatal("Run() = nil error, want error")
+	}
+
+	if strings.TrimSpace(stderr.String()) != "42" {
+		t.Errorf("中継されていない: %q", stderr.String())
+	}
+	if strings.Contains(err.Error(), "42") {
+		t.Errorf("error = %q, 中継済みの内容を重複させないこと", err.Error())
+	}
+}
+
+// シグナルで終了した場合、シェルの慣例に合わせた終了コードを返す
+func TestExitCodeForSignaledProcess(t *testing.T) {
+	r := runner.New()
+
+	res, err := r.Run(context.Background(), runner.Command{
+		Name: "sh",
+		Args: []string{"-c", "kill -TERM $$"},
+	})
+	if err == nil {
+		t.Fatal("Run() = nil error, want error")
+	}
+	if res.ExitCode != 128+int(syscall.SIGTERM) {
+		t.Errorf("ExitCode = %d, want %d", res.ExitCode, 128+int(syscall.SIGTERM))
 	}
 }
