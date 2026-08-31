@@ -65,14 +65,32 @@ func (e *Executor) Bootstrap(ctx context.Context, cfg *config.Config, env Env) e
 }
 
 // Provision はprovisionステップを実行する。
-func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env) error {
-	return e.RunSteps(ctx, cfg.Provision, "provision", env)
+// sel が指定されていれば、その一部だけを実行する。
+func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env, sel Selection) error {
+	indices, err := Select(cfg.Provision, sel)
+	if err != nil {
+		return err
+	}
+	return e.runSteps(ctx, cfg.Provision, indices, "provision", env)
 }
 
 // RunSteps はステップを順に実行する。失敗した時点で後続を実行しない。
 func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind string, env Env) error {
+	indices := make([]int, len(steps))
+	for i := range steps {
+		indices[i] = i
+	}
+	return e.runSteps(ctx, steps, indices, kind, env)
+}
+
+// runSteps は indices で指定された位置のステップを、宣言順に実行する。
+//
+// ラベルには全体の中での位置を示す。一部だけを実行した場合に
+// "step 1/1" と表示されると、どれを流したのか分からなくなるため。
+func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []int, kind string, env Env) error {
 	total := len(steps)
-	for i, step := range steps {
+	for _, i := range indices {
+		step := steps[i]
 		label := fmt.Sprintf("%s step %d/%d: %s", kind, i+1, total, step.DisplayName(i+1))
 		e.log(label)
 

@@ -16,6 +16,7 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus/incustest"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"
 )
 
@@ -246,7 +247,7 @@ provision:
 func TestProvisionRequiresExistingInstance(t *testing.T) {
 	app, _, _ := newApp(t, baseYAML)
 
-	err := app.Provision(context.Background())
+	err := app.Provision(context.Background(), provision.Selection{})
 	if err == nil {
 		t.Fatal("Provision() = nil error, instanceが無ければ失敗すること")
 	}
@@ -259,7 +260,7 @@ func TestProvisionRequiresExistingInstance(t *testing.T) {
 func TestProvisionDoesNotCreateInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 
-	_ = app.Provision(context.Background())
+	_ = app.Provision(context.Background(), provision.Selection{})
 	if client.Called("create") {
 		t.Errorf("calls = %v, provisionはinstanceを作成しないこと", client.Calls)
 	}
@@ -276,7 +277,7 @@ provision:
 		Config: map[string]string{"user.incus-devkit.project": "example-project"},
 	})
 
-	if err := app.Provision(context.Background()); err != nil {
+	if err := app.Provision(context.Background(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if client.Called("config ") {
@@ -295,7 +296,7 @@ provision:
 		Config: map[string]string{"user.incus-devkit.project": "example-project"},
 	})
 
-	if err := app.Provision(context.Background()); err != nil {
+	if err := app.Provision(context.Background(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if !client.Called("start") {

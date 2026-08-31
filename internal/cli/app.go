@@ -184,7 +184,7 @@ func (a *App) Up(ctx context.Context) error {
 	if err := a.ensureRunning(ctx); err != nil {
 		return err
 	}
-	if err := a.runProvisioning(ctx); err != nil {
+	if err := a.runProvisioning(ctx, provision.Selection{}); err != nil {
 		return err
 	}
 
@@ -194,14 +194,45 @@ func (a *App) Up(ctx context.Context) error {
 
 // Provision はinstanceを作り直さず、bootstrapとprovisionのみ再実行する
 // （仕様 04-cli.md 4.2）。
-func (a *App) Provision(ctx context.Context) error {
+//
+// sel が指定されていれば、provisionの一部だけを実行する。
+func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
+	// 解決できない指定は、instanceに触れる前に弾く。
+	if _, err := provision.Select(a.cfg.Provision, sel); err != nil {
+		return err
+	}
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureRunning(ctx); err != nil {
 		return err
 	}
-	return a.runProvisioning(ctx)
+	return a.runProvisioning(ctx, sel)
+}
+
+// ListSteps はprovisionステップの一覧を表示する。
+// --step / --from で指定できる名前を確認するために使う。
+func (a *App) ListSteps() error {
+	if len(a.cfg.Provision) == 0 {
+		_, err := fmt.Fprintln(a.out, "no provision steps declared")
+		return err
+	}
+
+	for i, step := range a.cfg.Provision {
+		if _, err := fmt.Fprintf(a.out, "%d\t%s\t(%s)\n",
+			i+1, step.DisplayName(i+1), stepKind(step)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stepKind はステップの種別を返す。
+func stepKind(step config.Step) string {
+	if step.Ansible != nil {
+		return "ansible"
+	}
+	return "run"
 }
 
 // Destroy はinstanceを削除する。ホスト側のソースには触れない。
@@ -482,12 +513,15 @@ func (a *App) ensureRunning(ctx context.Context) error {
 }
 
 // runProvisioning はbootstrapとprovisionを順に実行する（仕様 06-provisioning.md 6.1）。
-func (a *App) runProvisioning(ctx context.Context) error {
+//
+// bootstrapは一部実行のときも省略しない。provisionerを動かすための
+// 準備であり、軽量かつ冪等であることを前提としているため。
+func (a *App) runProvisioning(ctx context.Context, sel provision.Selection) error {
 	env := a.env()
 	if err := a.exec.Bootstrap(ctx, a.cfg, env); err != nil {
 		return err
 	}
-	return a.exec.Provision(ctx, a.cfg, env)
+	return a.exec.Provision(ctx, a.cfg, env, sel)
 }
 
 // ExitCodeError は終了コードをそのまま伝播させたい場合に使う。

@@ -13,6 +13,7 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus/incustest"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"
 )
@@ -99,7 +100,7 @@ func TestProvisionPropagatesErrors(t *testing.T) {
 			managed(client, "Running")
 			client.FailOn = map[string]error{tt.failOn: errBoom}
 
-			if err := appWith(t, rootYAML, client).Provision(context.Background()); !errors.Is(err, errBoom) {
+			if err := appWith(t, rootYAML, client).Provision(context.Background(), provision.Selection{}); !errors.Is(err, errBoom) {
 				t.Errorf("error = %v, want %v", err, errBoom)
 			}
 		})
@@ -111,7 +112,7 @@ func TestProvisionPropagatesStartError(t *testing.T) {
 	managed(client, "Stopped")
 	client.FailOn = map[string]error{"start": errBoom}
 
-	if err := appWith(t, rootYAML, client).Provision(context.Background()); !errors.Is(err, errBoom) {
+	if err := appWith(t, rootYAML, client).Provision(context.Background(), provision.Selection{}); !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }
@@ -121,7 +122,7 @@ func TestProvisionPropagatesStepError(t *testing.T) {
 	managed(client, "Running")
 	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, errBoom }
 
-	err := appWith(t, rootYAML+"provision:\n  - run: failing\n", client).Provision(context.Background())
+	err := appWith(t, rootYAML+"provision:\n  - run: failing\n", client).Provision(context.Background(), provision.Selection{})
 	if !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
@@ -133,7 +134,7 @@ func TestBootstrapErrorStopsProvisioning(t *testing.T) {
 	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, errBoom }
 
 	body := rootYAML + "bootstrap:\n  - run: failing-bootstrap\nprovision:\n  - run: never\n"
-	err := appWith(t, body, client).Provision(context.Background())
+	err := appWith(t, body, client).Provision(context.Background(), provision.Selection{})
 
 	if !errors.Is(err, errBoom) {
 		t.Fatalf("error = %v, want %v", err, errBoom)
@@ -499,7 +500,7 @@ provision:
 		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	err = app.Provision(context.Background())
+	err = app.Provision(context.Background(), provision.Selection{})
 	if err == nil {
 		t.Fatal("Provision() = nil error, want error")
 	}
@@ -795,5 +796,86 @@ func TestUpContinuesWhenNetworkNotReady(t *testing.T) {
 	}
 	if len(client.Execs) == 0 {
 		t.Error("provisionステップが実行されていない")
+	}
+}
+
+// 解決できないステップ指定は、instanceに触れる前に弾く
+func TestProvisionRejectsUnknownStepBeforeTouchingInstance(t *testing.T) {
+	client := incustest.New()
+
+	err := appWith(t, rootYAML+"provision:\n  - name: only-one\n    run: \"true\"\n", client).
+		Provision(context.Background(), provision.Selection{Only: []string{"nope"}})
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
+	}
+	if len(client.Calls) != 0 {
+		t.Errorf("calls = %v, 指定を解決できない場合はIncusへ触れないこと", client.Calls)
+	}
+}
+
+func TestListSteps(t *testing.T) {
+	out := &bytes.Buffer{}
+	cfg, err := config.Parse([]byte(rootYAML+"provision:\n  - name: named\n    run: \"true\"\n  - run: \"true\"\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: out, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.ListSteps(); err != nil {
+		t.Fatalf("ListSteps() error = %v", err)
+	}
+	for _, want := range []string{"1", "named", "2", "step 2"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output = %q, %q を含むこと", out.String(), want)
+		}
+	}
+}
+
+func TestListStepsWithoutSteps(t *testing.T) {
+	out := &bytes.Buffer{}
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{}, Out: out,
+	})
+
+	if err := app.ListSteps(); err != nil {
+		t.Fatalf("ListSteps() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "no provision steps") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestListStepsWriteError(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML+"provision:\n  - run: \"true\"\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{}, Out: errWriter{},
+	})
+
+	if err := app.ListSteps(); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+
+	empty, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app = NewApp(AppOptions{
+		Config: empty, Client: incustest.New(), Runner: &runnertest.Fake{}, Out: errWriter{},
+	})
+	if err := app.ListSteps(); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }

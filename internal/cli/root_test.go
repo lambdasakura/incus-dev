@@ -386,3 +386,134 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 		t.Errorf("env = %+v, remote/project が一致しないこと", env)
 	}
 }
+
+// provision の部分実行フラグ（仕様 04-cli.md 4.2）
+func TestProvisionPartialExecutionFlags(t *testing.T) {
+	const yaml = rootYAML + `
+provision:
+  - name: first
+    run: echo 1
+  - name: second
+    run: echo 2
+  - name: third
+    run: echo 3
+`
+
+	tests := []struct {
+		name string
+		args []string
+		want []string // 実行されるべきステップ
+		skip []string // 実行されてはいけないステップ
+	}{
+		{"既定は全部", []string{"provision"}, []string{"echo 1", "echo 2", "echo 3"}, nil},
+		{"--step", []string{"provision", "--step", "second"}, []string{"echo 2"}, []string{"echo 1", "echo 3"}},
+		{"--step 複数", []string{"provision", "--step", "first", "--step", "3"}, []string{"echo 1", "echo 3"}, []string{"echo 2"}},
+		{"--from", []string{"provision", "--from", "second"}, []string{"echo 2", "echo 3"}, []string{"echo 1"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			cfg, err := config.Load(filepath.Join(testProject(t, yaml), ".incus-dev", "dev.yml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := incustest.New().AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+			app := NewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: out, CheckIDMap: func(int, int) error { return nil },
+			})
+
+			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root.SetArgs(tt.args)
+			root.SetOut(out)
+			root.SetErr(out)
+
+			if err := root.ExecuteContext(context.Background()); err != nil {
+				t.Fatalf("execute %v: %v", tt.args, err)
+			}
+
+			executed := strings.Join(client.Calls, "\n")
+			for _, want := range tt.want {
+				if !strings.Contains(executed, want) {
+					t.Errorf("%q が実行されていない: %v", want, client.Calls)
+				}
+			}
+			for _, skip := range tt.skip {
+				if strings.Contains(executed, skip) {
+					t.Errorf("%q を実行している: %v", skip, client.Calls)
+				}
+			}
+		})
+	}
+}
+
+func TestProvisionListFlag(t *testing.T) {
+	out := &bytes.Buffer{}
+
+	root := testProject(t, rootYAML+`
+provision:
+  - name: named step
+    run: echo 1
+  - ansible:
+      playbook: .incus-dev/site.yml
+`)
+	if err := os.WriteFile(filepath.Join(root, ".incus-dev", "site.yml"), []byte("---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := incustest.New()
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	cmd := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	cmd.SetArgs([]string{"provision", "--list"})
+	cmd.SetOut(out)
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("provision --list: %v", err)
+	}
+	for _, want := range []string{"1", "named step", "run", "2", "ansible"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output = %q, %q を含むこと", out.String(), want)
+		}
+	}
+	// Incusへは触れない
+	if len(client.Calls) != 0 {
+		t.Errorf("calls = %v, --list はIncusへ触れないこと", client.Calls)
+	}
+}
+
+// 排他のフラグを同時に指定した場合はエラーになる
+func TestProvisionFlagsAreMutuallyExclusive(t *testing.T) {
+	for _, args := range [][]string{
+		{"provision", "--step", "a", "--from", "b"},
+		{"provision", "--step", "a", "--list"},
+		{"provision", "--from", "a", "--list"},
+	} {
+		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
+			root := newRootCommand("test", func(*globalFlags) (*App, error) {
+				t.Fatal("フラグの検査より前にAppを生成している")
+				return nil, nil
+			})
+			root.SetArgs(args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+
+			if err := root.ExecuteContext(context.Background()); err == nil {
+				t.Error("error = nil, want error")
+			}
+		})
+	}
+}

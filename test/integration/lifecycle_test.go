@@ -314,3 +314,40 @@ provision:
 		t.Errorf("パッケージが導入されていない: %q", got)
 	}
 }
+
+// provision の部分実行（仕様 04-cli.md 4.2）
+func TestProvisionPartialExecution(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+provision:
+  - name: first
+    run: echo first >> /etc/idev-order
+  - name: second
+    run: echo second >> /etc/idev-order
+  - name: third
+    run: echo third >> /etc/idev-order
+`)
+	f.mustRun("up")
+	f.mustRun("shell", "--", "sh", "-c", ": > /etc/idev-order")
+
+	if out := f.mustRun("provision", "--list"); !strings.Contains(out, "second") {
+		t.Errorf("--list = %q, ステップ名を示すこと", out)
+	}
+
+	f.mustRun("provision", "--step", "second")
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-order"); strings.TrimSpace(got) != "second" {
+		t.Errorf("実行結果 = %q, 指定したステップのみ実行すること", got)
+	}
+
+	f.mustRun("shell", "--", "sh", "-c", ": > /etc/idev-order")
+	f.mustRun("provision", "--from", "2")
+
+	want := "second\nthird"
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-order"); strings.TrimSpace(got) != want {
+		t.Errorf("実行結果 = %q, want %q", got, want)
+	}
+
+	// 解決できない指定はその場で失敗する
+	if out := f.mustFail("provision", "--step", "no-such-step"); !strings.Contains(out, "available steps") {
+		t.Errorf("output = %q, 選べるステップを示すこと", out)
+	}
+}

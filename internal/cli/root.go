@@ -15,6 +15,7 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/project"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
@@ -130,7 +131,13 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 }
 
 func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	return &cobra.Command{
+	var (
+		only     []string
+		from     string
+		listOnly bool
+	)
+
+	c := &cobra.Command{
 		Use:   "provision",
 		Short: "instanceを作り直さずにprovisionのみ再実行する",
 		Args:  cobra.NoArgs,
@@ -139,9 +146,25 @@ func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.Provision(cmd.Context())
+			if listOnly {
+				return app.ListSteps()
+			}
+			return app.Provision(cmd.Context(), provision.Selection{Only: only, From: from})
 		},
 	}
+
+	c.Flags().StringArrayVar(&only, "step", nil,
+		"指定したステップのみ実行する（名前または番号。複数指定可）")
+	c.Flags().StringVar(&from, "from", "",
+		"指定したステップ以降を実行する（名前または番号）")
+	c.Flags().BoolVar(&listOnly, "list", false,
+		"provisionステップの一覧を表示する（Incusへは触れない）")
+
+	c.MarkFlagsMutuallyExclusive("step", "from")
+	c.MarkFlagsMutuallyExclusive("step", "list")
+	c.MarkFlagsMutuallyExclusive("from", "list")
+
+	return c
 }
 
 func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
