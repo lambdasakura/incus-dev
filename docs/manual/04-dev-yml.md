@@ -399,4 +399,4 @@ incus:
 CLIの `--incus-project` を指定した場合はそちらが優先される。
 どちらも無ければ `default` を使う。
 
-指定したprojectはIncus側に存在している必要がある（devkitは作成しない）。
+指定したprojectはIncus側に存在している必要がある（`idev` は作成しない）。

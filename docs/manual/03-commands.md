@@ -68,7 +68,7 @@ idev validate
 - provisionステップの構造（`run` と `ansible` の排他など）
 - 参照先ファイルの存在（playbook、vars、inventory、workspace source）
 - `profiles: []` の場合に root disk device が宣言されているか
-- devkit予約キー（`user.incus-devkit.*`）を使っていないか
+- 予約キー（`user.incus-devkit.*`）を使っていないか
 
 Profileがホストに実在するかどうかは確認しない（Incusへ問い合わせないため）。
 
@@ -96,7 +96,7 @@ idev up
 再実行すれば、リソースやdeviceの変更が反映される。
 
 `dev.yml` から設定やdeviceを削除した場合も追従する。ただし
-**devkitが適用したものだけ** が対象で、`incus config set` などで
+**`idev` が適用したものだけ** が対象で、`incus config set` などで
 手動追加した設定には触れない。
 
 | フラグ | 説明 |
@@ -285,7 +285,7 @@ idev rebuild --force
 ```
 
 コンテナ内の状態はすべて失われる。`idev up` も削除に追従するが、
-それはdevkitが適用した設定・deviceに限られる。手動で加えた設定ごと
+それは `idev` が適用した設定・deviceに限られる。手動で加えた設定ごと
 きれいな状態へ戻したいときに使う。
 
 ---

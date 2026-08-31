@@ -12,16 +12,19 @@ idev shell
 
 ## 設計方針
 
-devkitは以下に特化する。
+`idev` は以下に特化する。
 
 - Incus instanceのライフサイクル管理
 - workspace（プロジェクトのworking tree）のマウント
 - コンテナのbootstrap
 - `.incus-dev/` に宣言された手順の実行
 
-**devkitは環境固有の内容を持たない。**
-Ansible Role・Incus Profile・言語ランタイムの導入手順は同梱せず、
-すべてプロジェクトの `.incus-dev/` が所有する（REQ-007）。
+**`idev` は環境固有の内容を持たない。**
+Ansible Role・Incus Profile・言語ランタイムの導入手順は同梱しない。
+環境を再現するために必要なものは、すべてプロジェクトの `.incus-dev/` に置く。
+
+同梱すると、使う側にとって不要なものまで入り込み、
+「この環境が何でできているか」が2箇所に分かれてしまうためである。
 
 ## 使い方
 
@@ -104,7 +107,8 @@ make test-integration   # Incus実機に対する統合テスト
 `make lint` は golangci-lint を使い、無ければ gofmt / go vet で代替する
 （`make tools` で導入できる）。
 
-開発方針は [CLAUDE.md](CLAUDE.md)、仕様は [docs/spec/](docs/spec/README.md) を参照。
+変更を加える場合は、開発方針を [CLAUDE.md](CLAUDE.md) に、
+設計の判断基準を [docs/spec/](docs/spec/README.md) にまとめてある。
 
 ## ドキュメント
 
@@ -113,7 +117,7 @@ make test-integration   # Incus実機に対する統合テスト
 | [マニュアル](docs/manual/README.md) | 使い方。導入、チュートリアル、リファレンス、構成例 |
 | [トラブルシューティング](docs/troubleshooting.md) | ホスト環境に起因する問題への対処 |
 | [skills/incus-devkit](skills/incus-devkit/) | AIエージェント向けAgent Skill |
-| [仕様書](docs/spec/README.md) | 設計仕様 |
+| [設計仕様](docs/spec/README.md) | 内部設計。変更を加えるときの判断基準 |
 
 ## 困ったときは
 
@@ -122,7 +126,7 @@ make test-integration   # Incus実機に対する統合テスト
 
 ## 実装状況
 
-MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
+以下は実装済みで、Incus実機に対する統合テストで動作を確認している。
 
 | 機能 | 状態 |
 | --- | --- |

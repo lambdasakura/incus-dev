@@ -2,7 +2,7 @@
 
 ホスト側の環境に起因して `idev` が失敗する典型的なケースと対処。
 
-いずれも devkit 側の設定ではなく **ホストの前提** に関する問題である。
+いずれも `dev.yml` の書き方ではなく **ホスト側の前提** に関する問題である。
 
 | 症状 | 節 |
 | --- | --- |
@@ -32,7 +32,7 @@ WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.21/main: temporary er
 instanceが起動してコマンドを実行できるようになった時点では、
 まだIPv4が割り当てられておらずデフォルトルートも入っていない。
 
-devkitはIPv4の割り当てを待ってからprovisionを開始するため、
+`idev` はIPv4の割り当てを待ってからprovisionを開始するため、
 通常この問題は起きない。`idev up` が
 `network address not assigned` の警告を出していた場合は、
 ネットワーク構成側の問題を疑う。
@@ -157,7 +157,7 @@ Dockerのチェーンがufwのチェーンより先に評価されるため。
 ### 原因と対処
 
 非特権コンテナでホストのディレクトリを共有するには、uid/gidの対応付けが要る。
-`workspace.idmap` で方式を選べる（[03-configuration.md](spec/03-configuration.md) 3.7.3）。
+`workspace.idmap` で方式を選べる（[マニュアル 4.6](manual/04-dev-yml.md#46-workspace)）。
 
 | 値 | ホスト側の追加設定 | コンテナが作ったファイルのホスト側所有者 |
 | --- | --- | --- |
@@ -204,7 +204,7 @@ incus profile(s) not found on this host: gpu-nvidia
 devkit does not create profiles; create them or remove them from instance.profiles
 ```
 
-devkitはIncus Profileを同梱も作成もしない（REQ-007）。
+`idev` はIncus Profileを同梱も作成もしない。
 `instance.profiles` は **ホストに既に存在するProfileの名前参照** である。
 
 対処のいずれか。
@@ -239,8 +239,8 @@ storage pool名やnetwork名はホストに依存するため、
 instance dev-example exists but is not managed by devkit for project "example"
 ```
 
-devkitは自分が作成したinstanceに印を付けており、それが無いinstanceは
-破壊しないようにしている（[05-incus.md](spec/05-incus.md) 5.2）。
+`idev` は自分が作成したinstanceに印を付けており、印が無いinstanceは
+誤って壊さないよう触れない。
 
 ```bash
 incus config get dev-<project> user.incus-devkit.project
@@ -256,7 +256,7 @@ incus config get dev-<project> user.incus-devkit.project
 ### ホスト側
 
 `ansible-playbook` と `community.general` collection が必要である。
-devkitは同梱しない。
+`idev` は同梱しない。
 
 ```bash
 ansible-galaxy collection install community.general
@@ -267,7 +267,7 @@ ansible-doc -t connection community.general.incus   # 導入確認
 
 Ansible Moduleの実行にはコンテナ内のPythonが必要である。
 `bootstrap` を省略していて `provision` に ansible ステップがある場合、
-devkitはDebian系を前提とした既定bootstrapでPythonの導入を試みる。
+`idev` はDebian系を前提とした既定bootstrapでPythonの導入を試みる。
 
 Debian系以外のイメージではこれが失敗するため、`bootstrap` を明示する。
 
@@ -293,7 +293,7 @@ bootstrap:
 incus info | head -3        # 同じ設定で接続できるか
 ```
 
-`incus` コマンドでも接続できない場合は、devkitではなくIncus側の問題である。
+`incus` コマンドでも接続できない場合は、`idev` ではなくIncus側の問題である。
 
 ### 設定を確認する
 
