@@ -159,7 +159,7 @@ func TestDestroyPropagatesErrors(t *testing.T) {
 			managed(client, "Running")
 			client.FailOn = map[string]error{failOn: errBoom}
 
-			if err := appWith(t, rootYAML, client).Destroy(context.Background()); !errors.Is(err, errBoom) {
+			if err := appWith(t, rootYAML, client).Destroy(context.Background(), DestroyOptions{}); !errors.Is(err, errBoom) {
 				t.Errorf("error = %v, want %v", err, errBoom)
 			}
 		})
@@ -1397,5 +1397,225 @@ func TestListSnapshotsWriteError(t *testing.T) {
 	}
 	if err := app.ListSnapshots(context.Background()); !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// 永続ボリューム（仕様 03-configuration.md 3.16）
+func TestVolumeLifecycle(t *testing.T) {
+	client := incustest.New()
+	body := rootYAML + `
+volumes:
+  cache:
+    path: /home/dev/.cache
+    size: 10GiB
+`
+
+	// 作成時にボリュームを用意し、deviceとして接続する
+	if err := appWith(t, body, client).Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !client.Volumes["default/dev-example-project-cache"] {
+		t.Errorf("ボリュームが作られていない: %v", client.Volumes)
+	}
+	if !client.Called("volume create default dev-example-project-cache [size=10GiB]") {
+		t.Errorf("calls = %v, サイズを渡すこと", client.Calls)
+	}
+
+	dev := client.Instances["dev-example-project"].Devices["cache"]
+	if dev["type"] != "disk" || dev["pool"] != "default" ||
+		dev["source"] != "dev-example-project-cache" || dev["path"] != "/home/dev/.cache" {
+		t.Errorf("device = %v", dev)
+	}
+
+	// destroy では既定で残す
+	if err := appWith(t, body, client).Destroy(context.Background(), DestroyOptions{}); err != nil {
+		t.Fatalf("Destroy() error = %v", err)
+	}
+	if !client.Volumes["default/dev-example-project-cache"] {
+		t.Error("destroy でボリュームまで消している")
+	}
+
+	// --volumes を指定したときだけ消す
+	if err := appWith(t, body, client).Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appWith(t, body, client).Destroy(context.Background(), DestroyOptions{Volumes: true}); err != nil {
+		t.Fatalf("Destroy() error = %v", err)
+	}
+	if client.Volumes["default/dev-example-project-cache"] {
+		t.Error("--volumes でボリュームが消えていない")
+	}
+}
+
+// 既存のボリュームは作り直さない
+func TestVolumeIsReusedWhenPresent(t *testing.T) {
+	client := incustest.New()
+	client.Volumes = map[string]bool{"default/dev-example-project-cache": true}
+
+	body := rootYAML + "volumes:\n  cache:\n    path: /cache\n"
+	if err := appWith(t, body, client).Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if client.Called("volume create") {
+		t.Errorf("calls = %v, 既存のボリュームを作り直さないこと", client.Calls)
+	}
+}
+
+// rebuild ではボリュームを残す
+func TestRebuildKeepsVolumes(t *testing.T) {
+	client := incustest.New()
+	body := rootYAML + "volumes:\n  cache:\n    path: /cache\n"
+
+	if err := appWith(t, body, client).Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appWith(t, body, client).Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if !client.Volumes["default/dev-example-project-cache"] {
+		t.Error("rebuild でボリュームが消えている")
+	}
+}
+
+func TestVolumePropagatesErrors(t *testing.T) {
+	body := rootYAML + "volumes:\n  cache:\n    path: /cache\n"
+
+	for _, failOn := range []string{"volume exists", "volume create"} {
+		t.Run(failOn, func(t *testing.T) {
+			client := incustest.New()
+			client.FailOn = map[string]error{failOn: errBoom}
+
+			if err := appWith(t, body, client).Up(context.Background(), UpOptions{}); !errors.Is(err, errBoom) {
+				t.Errorf("error = %v, want %v", err, errBoom)
+			}
+		})
+	}
+
+	t.Run("volume delete", func(t *testing.T) {
+		client := incustest.New()
+		client.Volumes = map[string]bool{"default/dev-example-project-cache": true}
+		managed(client, "Running")
+		client.FailOn = map[string]error{"volume delete": errBoom}
+
+		err := appWith(t, body, client).Destroy(context.Background(), DestroyOptions{Volumes: true})
+		if !errors.Is(err, errBoom) {
+			t.Errorf("error = %v, want %v", err, errBoom)
+		}
+	})
+}
+
+// secrets はホストから取り込み、表示時は隠す（仕様 03-configuration.md 3.12）
+func TestSecretsAreInjectedAndRedacted(t *testing.T) {
+	cmdRunner := &runnertest.Fake{}
+	cmdRunner.Stdout = map[string]string{
+		"incus list": `[{"name":"dev-example-project","status":"Running",` +
+			`"expanded_devices":{"root":{"type":"disk"}},` +
+			`"config":{"user.incus-devkit.project":"example-project"}}]`,
+	}
+
+	cfg, err := config.Parse([]byte(rootYAML+`
+secrets:
+  API_TOKEN:
+    env: HOST_TOKEN
+provision:
+  - run: deploy
+`), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg,
+		Client: &incus.CLI{Runner: cmdRunner, Project: "default"},
+		Runner: cmdRunner,
+		Out:    &bytes.Buffer{},
+		LookupEnv: func(k string) (string, bool) {
+			return "s3cret-from-host", k == "HOST_TOKEN"
+		},
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Provision(context.Background(), provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	if raw := cmdRunner.LastArgv(); !strings.Contains(raw, "API_TOKEN=s3cret-from-host") {
+		t.Errorf("実引数 = %q, 秘密情報を渡すこと", raw)
+	}
+	if display := cmdRunner.LastCommand(); strings.Contains(display, "s3cret-from-host") {
+		t.Errorf("表示 = %q, 値を隠すこと", display)
+	}
+}
+
+// 取り込めない秘密情報がある場合、instanceへ触れる前に止まる
+func TestProvisionFailsOnMissingSecret(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	cfg, err := config.Parse([]byte(rootYAML+"secrets:\n  API_TOKEN:\n    env: NOT_SET\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out:        &bytes.Buffer{},
+		LookupEnv:  func(string) (string, bool) { return "", false },
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err = app.Provision(context.Background(), provision.Selection{})
+	if err == nil || !strings.Contains(err.Error(), "API_TOKEN") {
+		t.Errorf("error = %v, 足りない秘密情報を報告すること", err)
+	}
+	if len(client.Execs) != 0 {
+		t.Error("秘密情報を解決できないのにステップを実行している")
+	}
+}
+
+// 秘密情報を解決できない場合、instanceを作る前に止まる
+func TestUpFailsBeforeCreatingOnMissingSecret(t *testing.T) {
+	client := incustest.New()
+
+	cfg, err := config.Parse([]byte(rootYAML+"secrets:\n  API_TOKEN:\n    env: NOT_SET\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out:        &bytes.Buffer{},
+		LookupEnv:  func(string) (string, bool) { return "", false },
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err == nil {
+		t.Fatal("Up() = nil error, want error")
+	}
+	if client.Called("create") {
+		t.Errorf("calls = %v, 前提を満たさないのにinstanceを作成している", client.Calls)
+	}
+}
+
+// dry-run でも秘密情報の前提を確認する
+func TestPlanChecksSecrets(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML+"secrets:\n  API_TOKEN:\n    env: NOT_SET\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out:        &bytes.Buffer{},
+		LookupEnv:  func(string) (string, bool) { return "", false },
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "API_TOKEN") {
+		t.Errorf("error = %v", err)
 	}
 }

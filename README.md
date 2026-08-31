@@ -133,5 +133,7 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 | 設定・deviceの削除追従 | 実装済み |
 | `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
 | `idev snapshot`（create / list / restore / delete） | 実装済み |
+| `volumes`（永続ボリューム） | 実装済み |
+| `secrets`（ホストからの注入） | 実装済み |
 | `validate --check-host` | 未実装 |
 | snapshot / persistent volume / secrets | 未実装 |

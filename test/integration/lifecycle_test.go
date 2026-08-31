@@ -382,3 +382,65 @@ provision:
 		t.Errorf("output =\n%s\n既存instanceとして扱うこと", out)
 	}
 }
+
+// 永続ボリュームは instance を作り直しても残る（仕様 03-configuration.md 3.13）
+func TestPersistentVolume(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+volumes:
+  cache:
+    path: /cache
+    size: 64MiB
+`)
+	t.Cleanup(func() {
+		_, _ = runIncus("storage", "volume", "delete", "default", f.instance+"-cache")
+	})
+
+	f.mustRun("up")
+	f.mustRun("shell", "--", "sh", "-c", "echo persistent > /cache/data")
+
+	f.mustRun("rebuild", "--force")
+	if got := f.mustRun("shell", "--", "cat", "/cache/data"); !strings.Contains(got, "persistent") {
+		t.Errorf("rebuild でボリュームの中身が失われている: %q", got)
+	}
+
+	// destroy では残す
+	f.mustRun("destroy", "--force")
+	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); !strings.Contains(out, f.instance+"-cache") {
+		t.Error("destroy でボリュームまで削除している")
+	}
+
+	// --volumes を指定したときだけ消す
+	f.mustRun("up")
+	f.mustRun("destroy", "--force", "--volumes")
+	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); strings.Contains(out, f.instance+"-cache") {
+		t.Error("--volumes でボリュームが削除されていない")
+	}
+}
+
+// 秘密情報はホストから注入され、表示ではマスクされる
+func TestSecretInjection(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+secrets:
+  API_TOKEN:
+    env: IDEV_TEST_TOKEN
+provision:
+  - name: use secret
+    run: printf %s "$API_TOKEN" > /etc/idev-secret
+`)
+
+	// 未設定なら instance を作る前に止まる
+	out := f.mustFail("up")
+	if !strings.Contains(out, "API_TOKEN") || !strings.Contains(out, "IDEV_TEST_TOKEN") {
+		t.Errorf("output = %q, 足りない秘密情報を報告すること", out)
+	}
+	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+		t.Error("秘密情報を解決できないのにinstanceを作成している")
+	}
+
+	t.Setenv("IDEV_TEST_TOKEN", "from-host-env")
+	f.mustRun("up")
+
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-secret"); got != "from-host-env" {
+		t.Errorf("コンテナ内の値 = %q", got)
+	}
+}

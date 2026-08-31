@@ -160,7 +160,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		if got := desiredConfig(cfg, plan)[idmapConfigKey]; !strings.HasPrefix(got, "uid 1000 0") {
 			t.Errorf("raw.idmap = %q", got)
 		}
-		if got := desiredDevices(cfg, plan)["workspace"]["shift"]; got != "false" {
+		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
 			t.Errorf("shift = %q, rawではshiftを明示的に無効化すること", got)
 		}
 	})
@@ -171,7 +171,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		if got, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
 			t.Errorf("raw.idmap = %q, shiftでは設定しないこと", got)
 		}
-		if got := desiredDevices(cfg, plan)["workspace"]["shift"]; got != "true" {
+		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "true" {
 			t.Errorf("shift = %q, want true", got)
 		}
 	})
@@ -182,7 +182,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
 			t.Error("noneではraw.idmapを設定しないこと")
 		}
-		if got := desiredDevices(cfg, plan)["workspace"]["shift"]; got != "false" {
+		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
 			t.Errorf("shift = %q, noneではshiftを明示的に無効化すること", got)
 		}
 	})
@@ -194,7 +194,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
 			t.Error("raw.idmapを設定しないこと")
 		}
-		if got, ok := desiredDevices(cfg, plan)["workspace"]["shift"]; ok {
+		if got, ok := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; ok {
 			t.Errorf("shift = %q, 設定しないこと", got)
 		}
 	})
@@ -256,7 +256,7 @@ func TestDesiredDevicesPropagatesShiftToHostMounts(t *testing.T) {
 		t.Run(string(tt.mode), func(t *testing.T) {
 			plan := idmapPlan{Mode: tt.mode, Managed: true}
 
-			if got := desiredDevices(cfg, plan)["extdata"]["shift"]; got != tt.want {
+			if got := desiredDevices(cfg, plan, "dev-example-project")["extdata"]["shift"]; got != tt.want {
 				t.Errorf("shift = %q, want %q", got, tt.want)
 			}
 		})
@@ -277,7 +277,7 @@ func TestDesiredDevicesRespectsExplicitShift(t *testing.T) {
 	for _, mode := range []config.IDMapMode{config.IDMapRaw, config.IDMapNone, config.IDMapShift} {
 		plan := idmapPlan{Mode: mode, Managed: true}
 
-		if got := desiredDevices(cfg, plan)["extdata"]["shift"]; got != "true" {
+		if got := desiredDevices(cfg, plan, "dev-example-project")["extdata"]["shift"]; got != "true" {
 			t.Errorf("mode=%s: shift = %q, 明示指定を上書きしないこと", mode, got)
 		}
 	}
@@ -302,7 +302,7 @@ func TestDesiredDevicesLeavesNonHostMountsAlone(t *testing.T) {
     gpu0:
       type: gpu
 `)
-	devices := desiredDevices(cfg, idmapPlan{Mode: config.IDMapShift, Managed: true})
+	devices := desiredDevices(cfg, idmapPlan{Mode: config.IDMapShift, Managed: true}, "dev-example-project")
 
 	for _, name := range []string{"root", "volume", "eth0", "gpu0"} {
 		if got, ok := devices[name]["shift"]; ok {

@@ -920,3 +920,77 @@ func TestRemoveDevicesPropagatesError(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, wantErr)
 	}
 }
+
+func TestStorageVolumeCommands(t *testing.T) {
+	t.Run("exists", func(t *testing.T) {
+		f := &runnertest.Fake{Stdout: map[string]string{
+			"incus storage volume list": `[{"name":"dev-x-cache","type":"custom"},{"name":"img","type":"image"}]`,
+		}}
+		c := newCLI(f)
+
+		ok, err := c.VolumeExists(context.Background(), "default", "dev-x-cache")
+		if err != nil || !ok {
+			t.Errorf("VolumeExists() = %v, %v", ok, err)
+		}
+		// imageなど別種のvolumeは対象外
+		if ok, _ := c.VolumeExists(context.Background(), "default", "img"); ok {
+			t.Error("custom以外のvolumeを存在扱いしないこと")
+		}
+		want := "incus storage volume list --project default default --format json"
+		if got := f.LastArgv(); got != want {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("create", func(t *testing.T) {
+		f := &runnertest.Fake{}
+
+		if err := newCLI(f).CreateVolume(context.Background(), "default", "vol",
+			map[string]string{"size": "10GiB"}); err != nil {
+			t.Fatalf("CreateVolume() error = %v", err)
+		}
+		want := "incus storage volume create --project default default vol size=10GiB"
+		if got := f.LastArgv(); got != want {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		f := &runnertest.Fake{}
+
+		if err := newCLI(f).DeleteVolume(context.Background(), "default", "vol"); err != nil {
+			t.Fatalf("DeleteVolume() error = %v", err)
+		}
+		want := "incus storage volume delete --project default default vol"
+		if got := f.LastArgv(); got != want {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestStorageVolumeErrors(t *testing.T) {
+	t.Run("不正なJSON", func(t *testing.T) {
+		f := &runnertest.Fake{Stdout: map[string]string{"incus storage volume list": "{"}}
+
+		if _, err := newCLI(f).VolumeExists(context.Background(), "default", "v"); err == nil ||
+			!strings.Contains(err.Error(), "parse storage volume list") {
+			t.Errorf("error = %v", err)
+		}
+	})
+
+	wantErr := errors.New("volume failed")
+	ops := map[string]func(*incus.CLI) error{
+		"exists": func(c *incus.CLI) error { _, err := c.VolumeExists(context.Background(), "p", "v"); return err },
+		"create": func(c *incus.CLI) error { return c.CreateVolume(context.Background(), "p", "v", nil) },
+		"delete": func(c *incus.CLI) error { return c.DeleteVolume(context.Background(), "p", "v") },
+	}
+	for name, call := range ops {
+		t.Run(name, func(t *testing.T) {
+			f := &runnertest.Fake{Err: map[string]error{"incus storage volume": wantErr}}
+
+			if err := call(newCLI(f)); !errors.Is(err, wantErr) {
+				t.Errorf("error = %v, want %v", err, wantErr)
+			}
+		})
+	}
+}

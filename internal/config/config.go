@@ -19,6 +19,7 @@ const (
 	DefaultProfile         = "default"
 	DefaultInstanceType    = "container"
 	DefaultShell           = "/bin/sh"
+	DefaultStoragePool     = "default"
 )
 
 // ReservedConfigPrefix はdevkitが管理用に予約するinstance configの名前空間。
@@ -55,6 +56,10 @@ type Config struct {
 	Provision []Step  `json:"provision,omitempty"`
 	Shell     *Shell  `json:"shell,omitempty"`
 	Incus     *Incus  `json:"incus,omitempty"`
+	// Volumes はinstanceを作り直しても残るデータ領域。
+	Volumes map[string]Volume `json:"volumes,omitempty"`
+	// Secrets はホスト側から注入する秘密情報。
+	Secrets map[string]Secret `json:"secrets,omitempty"`
 
 	// Root はプロジェクトrootの絶対パス。Load時に設定される。
 	Root string `json:"-"`
@@ -109,6 +114,48 @@ func (i Instance) TypeOrDefault() string {
 		return DefaultInstanceType
 	}
 	return i.Type
+}
+
+// Volume は永続ボリューム（仕様 03-configuration.md 3.16）。
+//
+// instanceを作り直しても残るため、ビルドキャッシュや
+// データベースの実体などを置く。
+type Volume struct {
+	// Path はコンテナ内のマウント先。
+	Path string `json:"path"`
+	// Pool はIncusのstorage pool。既定は default。
+	Pool string `json:"pool,omitempty"`
+	// Size は容量。省略時はpoolの既定に従う。
+	Size string `json:"size,omitempty"`
+}
+
+// PoolOrDefault はstorage poolを返す。
+func (v Volume) PoolOrDefault() string {
+	if v.Pool == "" {
+		return DefaultStoragePool
+	}
+	return v.Pool
+}
+
+// Secret はホスト側から注入する値（仕様 03-configuration.md 3.12）。
+//
+// dev.yml はGitへcommitされる前提のため、値そのものは書かない。
+// ホストの環境変数かファイルから取り込む。
+type Secret struct {
+	// Env はホスト側の環境変数名。
+	Env string `json:"env,omitempty"`
+	// File はホスト側のファイルパス。内容を値とする（前後の空白は除く）。
+	File string `json:"file,omitempty"`
+	// Optional が真の場合、取得できなくてもエラーにしない。
+	Optional bool `json:"optional,omitempty"`
+}
+
+// Source は取得元の説明を返す。
+func (s Secret) Source() string {
+	if s.Env != "" {
+		return "environment variable " + s.Env
+	}
+	return "file " + s.File
 }
 
 // Shell は idev shell / idev exec の既定。

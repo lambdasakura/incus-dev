@@ -381,7 +381,10 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 	}
 
 	// ansible inventory へ渡す値も同じであること
-	env := app.env()
+	env, err := app.env()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if env.Remote != "dev-server" || env.IncusProject != "development" {
 		t.Errorf("env = %+v, remote/project が一致しないこと", env)
 	}
@@ -569,8 +572,143 @@ func TestIncusProjectPrecedence(t *testing.T) {
 			if client.Project != tt.want {
 				t.Errorf("Project = %q, want %q", client.Project, tt.want)
 			}
-			if got := app.env().IncusProject; got != tt.want {
+			env, err := app.env()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := env.IncusProject; got != tt.want {
 				t.Errorf("env.IncusProject = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// exec / snapshot コマンドの配線
+func TestExecAndSnapshotCommands(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		stdin string
+		want  string // 期待するIncus操作のprefix
+	}{
+		{"exec", []string{"exec", "--", "make", "test"}, "", "exec dev-example-project make test"},
+		{"snapshot create", []string{"snapshot", "create", "s1"}, "", "snapshot create dev-example-project s1"},
+		{"snapshot create（名前省略）", []string{"snapshot", "create"}, "", "snapshot create dev-example-project"},
+		{"snapshot list", []string{"snapshot", "list"}, "", "snapshot list dev-example-project"},
+		{"snapshot restore", []string{"snapshot", "restore", "s1", "--force"}, "", "snapshot restore dev-example-project s1"},
+		{"snapshot restore（確認）", []string{"snapshot", "restore", "s1"}, "y\n", "snapshot restore dev-example-project s1"},
+		{"snapshot delete", []string{"snapshot", "delete", "s1", "-f"}, "", "snapshot delete dev-example-project s1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			app, client := fakeApp(t, out)
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+
+			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root.SetArgs(tt.args)
+			root.SetIn(strings.NewReader(tt.stdin))
+			root.SetOut(out)
+			root.SetErr(out)
+
+			if err := root.ExecuteContext(context.Background()); err != nil {
+				t.Fatalf("execute %v: %v", tt.args, err)
+			}
+			if !client.Called(tt.want) {
+				t.Errorf("calls = %v, %q を含むこと", client.Calls, tt.want)
+			}
+		})
+	}
+}
+
+// 確認を拒否したら実行しない
+func TestSnapshotDestructiveCommandsConfirm(t *testing.T) {
+	for _, args := range [][]string{
+		{"snapshot", "restore", "s1"},
+		{"snapshot", "delete", "s1"},
+	} {
+		t.Run(args[1], func(t *testing.T) {
+			out := &bytes.Buffer{}
+			app, client := fakeApp(t, out)
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+
+			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root.SetArgs(args)
+			root.SetIn(strings.NewReader("n\n"))
+			root.SetOut(out)
+			root.SetErr(out)
+
+			if err := root.ExecuteContext(context.Background()); err == nil {
+				t.Error("拒否したのに成功している")
+			}
+			if client.Called("snapshot " + args[1]) {
+				t.Errorf("calls = %v, 拒否したら実行しないこと", client.Calls)
+			}
+		})
+	}
+}
+
+// destroy --volumes の配線
+func TestDestroyVolumesFlag(t *testing.T) {
+	out := &bytes.Buffer{}
+	cfg, err := config.Load(filepath.Join(
+		testProject(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n"), ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := incustest.New()
+	client.Volumes = map[string]bool{"default/dev-example-project-cache": true}
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	root.SetArgs([]string{"destroy", "--force", "--volumes"})
+	root.SetOut(out)
+
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("destroy --volumes: %v", err)
+	}
+	if client.Volumes["default/dev-example-project-cache"] {
+		t.Error("--volumes でボリュームが削除されていない")
+	}
+}
+
+// commandの生成に失敗した場合の伝播
+func TestSnapshotCommandsPropagateFactoryError(t *testing.T) {
+	wantErr := errors.New("factory failed")
+
+	for _, args := range [][]string{
+		{"exec", "--", "true"},
+		{"snapshot", "create"},
+		{"snapshot", "list"},
+		{"snapshot", "restore", "s", "--force"},
+		{"snapshot", "delete", "s", "--force"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			root := newRootCommand("test", func(*globalFlags) (*App, error) { return nil, wantErr })
+			root.SetArgs(args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+
+			if err := root.ExecuteContext(context.Background()); !errors.Is(err, wantErr) {
+				t.Errorf("error = %v, want %v", err, wantErr)
 			}
 		})
 	}

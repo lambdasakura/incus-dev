@@ -37,7 +37,7 @@ instance:
 func TestDesiredDevicesIncludesWorkspace(t *testing.T) {
 	cfg := mustParse(t, planBase)
 
-	devices := desiredDevices(cfg, rawPlan)
+	devices := desiredDevices(cfg, rawPlan, "dev-example-project")
 
 	want := map[string]string{
 		"type":   "disk",
@@ -58,7 +58,7 @@ func TestDesiredDevicesResolvesRelativeSource(t *testing.T) {
       source: ./assets
       path: /data
 `)
-	devices := desiredDevices(cfg, rawPlan)
+	devices := desiredDevices(cfg, rawPlan, "dev-example-project")
 
 	if got := devices["data"]["source"]; got != "/home/u/src/example/assets" {
 		t.Errorf("source = %q, project rootを基準に解決すること", got)
@@ -73,7 +73,7 @@ func TestDesiredDevicesKeepsAbsoluteSource(t *testing.T) {
       source: /srv/data
       path: /data
 `)
-	if got := desiredDevices(cfg, rawPlan)["data"]["source"]; got != "/srv/data" {
+	if got := desiredDevices(cfg, rawPlan, "dev-example-project")["data"]["source"]; got != "/srv/data" {
 		t.Errorf("source = %q", got)
 	}
 }
@@ -220,7 +220,7 @@ func TestStaleDevices(t *testing.T) {
 		},
 	}
 
-	got := staleDevices(current, desiredDevices(cfg, rawPlan))
+	got := staleDevices(current, desiredDevices(cfg, rawPlan, "dev-example-project"))
 	if diff := cmp.Diff([]string{"gone"}, got); diff != "" {
 		t.Errorf("staleDevices() mismatch (-want +got):\n%s", diff)
 	}

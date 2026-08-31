@@ -176,6 +176,10 @@ type Client interface {
 
 	ProfileExists(ctx context.Context, name string) (bool, error)
 
+	VolumeExists(ctx context.Context, pool, name string) (bool, error)
+	CreateVolume(ctx context.Context, pool, name string, config map[string]string) error
+	DeleteVolume(ctx context.Context, pool, name string) error
+
 	CreateSnapshot(ctx context.Context, instance, snapshot string) error
 	Snapshots(ctx context.Context, instance string) ([]Snapshot, error)
 	RestoreSnapshot(ctx context.Context, instance, snapshot string) error

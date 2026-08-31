@@ -989,3 +989,85 @@ provision:
 		t.Errorf("error = %v, 前提の不足を報告すること", err)
 	}
 }
+
+// 秘密情報は ansible ステップへも別ファイルで渡す
+func TestSecretsArePassedToAnsible(t *testing.T) {
+	root, cfg := ansibleProject(t)
+
+	f := &runnertest.Fake{}
+	var secretsFile string
+	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Name != "ansible-playbook" {
+			return runner.Result{}, nil
+		}
+		for _, a := range c.Args {
+			if strings.HasSuffix(a, "secrets.json") {
+				secretsFile = strings.TrimPrefix(a, "--extra-vars=@")
+				data, err := os.ReadFile(secretsFile)
+				if err != nil {
+					t.Errorf("read secrets: %v", err)
+					continue
+				}
+				var got map[string]string
+				if err := json.Unmarshal(data, &got); err != nil {
+					t.Errorf("parse secrets: %v", err)
+				}
+				if got["API_TOKEN"] != "s3cret" {
+					t.Errorf("secrets = %v", got)
+				}
+
+				info, err := os.Stat(secretsFile)
+				if err == nil && info.Mode().Perm() != 0o600 {
+					t.Errorf("permission = %o, want 600", info.Mode().Perm())
+				}
+			}
+		}
+		return runner.Result{}, nil
+	}
+
+	env := testEnv()
+	env.ProjectRoot = root
+	env.Secrets = map[string]string{"API_TOKEN": "s3cret"}
+
+	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+	if secretsFile == "" {
+		t.Fatal("秘密情報のファイルが渡されていない")
+	}
+	if _, err := os.Stat(secretsFile); !os.IsNotExist(err) {
+		t.Errorf("一時ファイル %q が残っている", secretsFile)
+	}
+}
+
+// 秘密情報が無ければ余計なファイルを渡さない
+func TestNoSecretsFileWhenEmpty(t *testing.T) {
+	root, cfg := ansibleProject(t)
+
+	f := &runnertest.Fake{}
+	env := testEnv()
+	env.ProjectRoot = root
+
+	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+	if strings.Contains(f.LastArgv(), "secrets.json") {
+		t.Errorf("args = %q, 秘密情報が無ければ渡さないこと", f.LastArgv())
+	}
+}
+
+// run ステップの env は秘密情報より優先される
+func TestStepEnvOverridesSecret(t *testing.T) {
+	f := &runnertest.Fake{}
+	cfg := parseConfig(t, base+"provision:\n  - run: deploy\n    env:\n      API_TOKEN: from-step\n")
+
+	env := testEnv()
+	env.Secrets = map[string]string{"API_TOKEN": "from-secret"}
+
+	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+	if raw := f.LastArgv(); !strings.Contains(raw, "API_TOKEN=from-step") {
+		t.Errorf("実引数 = %q", raw)
+	}
+}

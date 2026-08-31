@@ -25,6 +25,9 @@ func (a *App) Plan(ctx context.Context) error {
 	if plan.Warning != "" {
 		a.log.Warn(plan.Warning)
 	}
+	if _, err := a.env(); err != nil {
+		return err
+	}
 	if err := a.checkProfiles(ctx); err != nil {
 		return err
 	}
@@ -58,7 +61,7 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 	var out []string
 
 	desiredCfg := desiredConfig(cfg, idmap)
-	desiredDev := desiredDevices(cfg, idmap)
+	desiredDev := desiredDevices(cfg, idmap, name)
 
 	if current == nil {
 		out = append(out, fmt.Sprintf("Create instance %s (%s)", name, cfg.Instance.Image))

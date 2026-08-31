@@ -314,7 +314,7 @@ func TestDestroyDeletesManagedInstance(t *testing.T) {
 		Config: map[string]string{"user.incus-devkit.project": "example-project"},
 	})
 
-	if err := app.Destroy(context.Background()); err != nil {
+	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err != nil {
 		t.Fatalf("Destroy() error = %v", err)
 	}
 	if _, ok := client.Instances["dev-example-project"]; ok {
@@ -326,7 +326,7 @@ func TestDestroyRefusesUnmanagedInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
 
-	if err := app.Destroy(context.Background()); err == nil {
+	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err == nil {
 		t.Fatal("Destroy() = nil error, 管理外instanceは削除しないこと")
 	}
 	if _, ok := client.Instances["dev-example-project"]; !ok {
@@ -337,7 +337,7 @@ func TestDestroyRefusesUnmanagedInstance(t *testing.T) {
 func TestDestroyOnMissingInstanceIsAnError(t *testing.T) {
 	app, _, _ := newApp(t, baseYAML)
 
-	if err := app.Destroy(context.Background()); err == nil {
+	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err == nil {
 		t.Fatal("Destroy() = nil error, 対象が無ければ失敗すること")
 	}
 }

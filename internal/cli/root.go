@@ -257,7 +257,10 @@ func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 }
 
 func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	var force bool
+	var (
+		force   bool
+		volumes bool
+	)
 	c := &cobra.Command{
 		Use:   "destroy",
 		Short: "instanceを削除する（ホスト側のソースは削除しない）",
@@ -271,10 +274,12 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				fmt.Sprintf("instance %s を削除します。よろしいですか?", app.InstanceName())) {
 				return errAborted
 			}
-			return app.Destroy(cmd.Context())
+			return app.Destroy(cmd.Context(), DestroyOptions{Volumes: volumes})
 		},
 	}
 	c.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
+	c.Flags().BoolVar(&volumes, "volumes", false, "永続ボリュームも削除する")
+
 	return c
 }
 

@@ -249,7 +249,23 @@ storage pool名とnetwork名はホスト依存になる点に注意する。
 
 ---
 
-## 6.9 追加のデータをマウントする
+## 6.9 複数のリポジトリをマウントする
+
+`instance.devices` に追加すれば、workspace以外のディレクトリも共有できます。
+workspaceと同じuid/gid対応付けが自動的に適用されます。
+
+```yaml
+instance:
+  devices:
+    other-repo:
+      type: disk
+      source: ../other-repo      # project root基準
+      path: /other-repo
+```
+
+---
+
+## 6.10 追加のデータをマウントする
 
 ```yaml
 instance:
@@ -268,7 +284,7 @@ instance:
 
 ---
 
-## 6.10 CIから使う
+## 6.11 CIから使う
 
 ```bash
 idev validate                     # Incus不要。設定の妥当性だけ確認する
@@ -287,7 +303,7 @@ CIの成否判定にそのまま使える。
 
 ---
 
-## 6.11 Ansibleを使う構成
+## 6.12 Ansibleを使う構成
 
 ```text
 my-project/

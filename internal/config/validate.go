@@ -53,6 +53,8 @@ func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateSteps(raw, "provision", true, ps)
 	validateInstance(c, ps)
 	validateShell(c, ps)
+	validateVolumes(c, ps)
+	validateSecrets(c, ps)
 	validateStepValues(c, ps)
 	validateWorkspace(c, ps)
 
@@ -113,6 +115,42 @@ func parseVersion(v string) (major, minor int, err error) {
 		}
 	}
 	return major, minor, nil
+}
+
+// validateVolumes は永続ボリュームの宣言を検証する。
+func validateVolumes(c *Config, ps *problems) {
+	for _, name := range sortedKeys(c.Volumes) {
+		vol := c.Volumes[name]
+		path := "volumes." + name
+
+		if !filepath.IsAbs(vol.Path) {
+			ps.add(path+".path", "must be an absolute path in the container, got %q", vol.Path)
+		}
+		if name == WorkspaceDeviceName {
+			ps.add(path, "%q is reserved for the workspace mount", WorkspaceDeviceName)
+		}
+		if _, conflict := c.Instance.Devices[name]; conflict {
+			ps.add(path, "conflicts with instance.devices.%s", name)
+		}
+	}
+}
+
+// validateSecrets は秘密情報の宣言を検証する。
+func validateSecrets(c *Config, ps *problems) {
+	for _, name := range sortedKeys(c.Secrets) {
+		secret := c.Secrets[name]
+		path := "secrets." + name
+
+		switch {
+		case secret.Env != "" && secret.File != "":
+			ps.add(path, "env and file are mutually exclusive; specify only one")
+		case secret.Env == "" && secret.File == "":
+			ps.add(path, "must specify either env or file")
+		}
+		if strings.HasPrefix(name, devkitEnvPrefix) {
+			ps.add(path, "%s* is reserved for devkit", devkitEnvPrefix)
+		}
+	}
 }
 
 // validateShell は shell 設定を検証する。
@@ -209,6 +247,9 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 		}
 	}
 }
+
+// devkitEnvPrefix はdevkitが注入する環境変数の接頭辞。
+const devkitEnvPrefix = "DEVKIT_"
 
 // profileNamePattern はIncusのProfile名として妥当な形。
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)

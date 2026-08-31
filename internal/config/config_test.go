@@ -946,3 +946,101 @@ provision:
 		t.Errorf("error = %v", err)
 	}
 }
+
+// volumes（仕様 03-configuration.md 3.16）
+func TestVolumes(t *testing.T) {
+	c := parse(t, minimal+`
+volumes:
+  cache:
+    path: /home/dev/.cache
+    size: 10GiB
+  data:
+    path: /var/lib/postgresql
+    pool: fast
+`)
+	if got := c.Volumes["cache"].Path; got != "/home/dev/.cache" {
+		t.Errorf("cache.path = %q", got)
+	}
+	if got := c.Volumes["cache"].PoolOrDefault(); got != "default" {
+		t.Errorf("cache pool = %q, 既定は default", got)
+	}
+	if got := c.Volumes["data"].PoolOrDefault(); got != "fast" {
+		t.Errorf("data pool = %q", got)
+	}
+	if got := c.Volumes["cache"].Size; got != "10GiB" {
+		t.Errorf("cache.size = %q", got)
+	}
+}
+
+func TestVolumeErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"path欠落", minimal + "volumes:\n  cache: {}\n", "path"},
+		{"pathが相対", minimal + "volumes:\n  cache:\n    path: rel\n", "absolute"},
+		{"予約名", minimal + "volumes:\n  workspace:\n    path: /w\n", "reserved"},
+		{
+			name: "deviceと衝突",
+			yaml: minimal + "  devices:\n    cache:\n      type: disk\n      source: /tmp\n      path: /c\n" +
+				"volumes:\n  cache:\n    path: /cache\n",
+			want: "conflicts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+// secrets（仕様 03-configuration.md 3.12）
+func TestSecrets(t *testing.T) {
+	c := parse(t, minimal+`
+secrets:
+  API_TOKEN:
+    env: MY_TOKEN
+  DEPLOY_KEY:
+    file: ~/.config/key
+  OPTIONAL_ONE:
+    env: MAYBE
+    optional: true
+`)
+	if got := c.Secrets["API_TOKEN"].Env; got != "MY_TOKEN" {
+		t.Errorf("API_TOKEN.env = %q", got)
+	}
+	if got := c.Secrets["DEPLOY_KEY"].File; got != "~/.config/key" {
+		t.Errorf("DEPLOY_KEY.file = %q", got)
+	}
+	if !c.Secrets["OPTIONAL_ONE"].Optional {
+		t.Error("optional が反映されていない")
+	}
+	if got := c.Secrets["API_TOKEN"].Source(); !strings.Contains(got, "MY_TOKEN") {
+		t.Errorf("Source() = %q", got)
+	}
+}
+
+func TestSecretErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"env と file の併用", minimal + "secrets:\n  A:\n    env: X\n    file: /f\n", "mutually exclusive"},
+		{"どちらも無い", minimal + "secrets:\n  A:\n    optional: true\n", "must specify"},
+		{"devkit予約の名前", minimal + "secrets:\n  DEVKIT_TOKEN:\n    env: X\n", "reserved"},
+		{"環境変数名として不正", minimal + "secrets:\n  \"bad-name\":\n    env: X\n", "bad-name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+			}
+		})
+	}
+}

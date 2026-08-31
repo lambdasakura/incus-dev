@@ -14,7 +14,10 @@ func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) e
 	// devkitが注入する変数は診断に役立つため表示してよい。
 	// プロジェクトが指定した値はSecretを含みうるため隠す。
 	public := env.EnvVars()
-	secret := make(map[string]string, len(step.Env))
+	secret := make(map[string]string, len(step.Env)+len(env.Secrets))
+	for k, v := range env.Secrets {
+		secret[k] = v
+	}
 	for k, v := range step.Env {
 		delete(public, k) // プロジェクト指定を優先する
 		secret[k] = v

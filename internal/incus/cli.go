@@ -309,6 +309,47 @@ func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 	return false, nil
 }
 
+// VolumeExists はstorage volumeの存在を返す。
+func (c *CLI) VolumeExists(ctx context.Context, pool, name string) (bool, error) {
+	res, err := c.run(ctx, "list storage volumes",
+		c.args([]string{"storage", "volume", "list"}, c.qualify(pool), "--format", "json"))
+	if err != nil {
+		return false, err
+	}
+
+	var volumes []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(res.Stdout, &volumes); err != nil {
+		return false, fmt.Errorf("parse storage volume list: %w", err)
+	}
+	for _, v := range volumes {
+		if v.Name == name && v.Type == "custom" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CreateVolume はstorage volumeを作成する。
+func (c *CLI) CreateVolume(ctx context.Context, pool, name string, config map[string]string) error {
+	args := c.args([]string{"storage", "volume", "create"}, c.qualify(pool), name)
+	for _, k := range sortedKeys(config) {
+		args = append(args, k+"="+config[k])
+	}
+
+	_, err := c.run(ctx, "create storage volume "+name, args)
+	return err
+}
+
+// DeleteVolume はstorage volumeを削除する。
+func (c *CLI) DeleteVolume(ctx context.Context, pool, name string) error {
+	_, err := c.run(ctx, "delete storage volume "+name,
+		c.args([]string{"storage", "volume", "delete"}, c.qualify(pool), name))
+	return err
+}
+
 // CreateSnapshot はinstanceのスナップショットを作成する。
 func (c *CLI) CreateSnapshot(ctx context.Context, instance, snapshot string) error {
 	_, err := c.run(ctx, "create snapshot "+snapshot,

@@ -192,12 +192,15 @@ idev destroy
 - ソースコードはbind mountされたホスト側ディレクトリなので削除してはならない
 - devkit管理下でないinstanceは削除してはならない
 - 破壊操作のため、既定では確認を求める
+- **永続ボリューム（`volumes`）は削除しない**
 
 ```bash
-idev destroy --force
+idev destroy --force      # 確認を省略
+idev destroy --volumes    # 永続ボリュームも削除する
 ```
 
-将来的にpersistent volumeを追加する場合、削除ポリシーを明示的に管理する。
+永続ボリュームはinstanceを作り直しても残すためのものなので、
+削除は明示的な指示があった場合のみ行う。
 
 ---
 

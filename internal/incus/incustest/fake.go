@@ -19,6 +19,8 @@ type Fake struct {
 	Profiles []string
 	// SnapshotsByInstance はinstanceごとのスナップショット。
 	SnapshotsByInstance map[string][]incus.Snapshot
+	// Volumes は存在するstorage volume（"pool/name"）。
+	Volumes map[string]bool
 
 	// ExecFunc が設定されていれば Exec の応答に使用する。
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
@@ -258,6 +260,35 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	return false, nil
 }
 
+// VolumeExists は登録済みボリュームかを返す。
+func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) {
+	if err := f.record("volume exists %s %s", pool, name); err != nil {
+		return false, err
+	}
+	return f.Volumes[pool+"/"+name], nil
+}
+
+// CreateVolume はボリュームを登録する。
+func (f *Fake) CreateVolume(_ context.Context, pool, name string, config map[string]string) error {
+	if err := f.record("volume create %s %s %v", pool, name, sortedPairs(config)); err != nil {
+		return err
+	}
+	if f.Volumes == nil {
+		f.Volumes = map[string]bool{}
+	}
+	f.Volumes[pool+"/"+name] = true
+	return nil
+}
+
+// DeleteVolume はボリュームを削除する。
+func (f *Fake) DeleteVolume(_ context.Context, pool, name string) error {
+	if err := f.record("volume delete %s %s", pool, name); err != nil {
+		return err
+	}
+	delete(f.Volumes, pool+"/"+name)
+	return nil
+}
+
 // CreateSnapshot はスナップショットを登録する。
 func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) error {
 	if err := f.record("snapshot create %s %s", instance, snapshot); err != nil {
@@ -289,13 +320,19 @@ func (f *Fake) DeleteSnapshot(_ context.Context, instance, snapshot string) erro
 	if err := f.record("snapshot delete %s %s", instance, snapshot); err != nil {
 		return err
 	}
-	kept := f.SnapshotsByInstance[instance][:0]
-	for _, s := range f.SnapshotsByInstance[instance] {
+	existing, ok := f.SnapshotsByInstance[instance]
+	if !ok {
+		return nil
+	}
+
+	kept := existing[:0]
+	for _, s := range existing {
 		if s.Name != snapshot {
 			kept = append(kept, s)
 		}
 	}
 	f.SnapshotsByInstance[instance] = kept
+
 	return nil
 }
 

@@ -46,6 +46,9 @@ type AppOptions struct {
 	Host *HostIDs
 	// Branch は project.scope: branch のときに現在のブランチ名を返す。
 	Branch branchFunc
+	// LookupEnv は秘密情報をホストの環境変数から取り込む際に使う。
+	// nilの場合は os.LookupEnv。
+	LookupEnv func(string) (string, bool)
 }
 
 // HostIDs はホスト側のuid/gid。
@@ -70,6 +73,7 @@ type App struct {
 
 	checkIDMap func(uid, gid int) error
 	host       HostIDs
+	lookupEnv  func(string) (string, bool)
 }
 
 // NewApp は App を構成する。
@@ -112,6 +116,11 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		return nil, err
 	}
 
+	lookupEnv := opt.LookupEnv
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
+	}
+
 	return &App{
 		cfg:    opt.Config,
 		client: opt.Client,
@@ -132,13 +141,19 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
 		host:         *host,
+		lookupEnv:    lookupEnv,
 	}, nil
 }
 
 // InstanceName は対象instance名を返す。
 func (a *App) InstanceName() string { return a.instance }
 
-func (a *App) env() provision.Env {
+func (a *App) env() (provision.Env, error) {
+	secrets, err := resolveSecrets(a.cfg, a.lookupEnv)
+	if err != nil {
+		return provision.Env{}, err
+	}
+
 	ws := a.cfg.WorkspaceOrDefault()
 	return provision.Env{
 		ProjectName:     a.cfg.Project.Name,
@@ -148,7 +163,8 @@ func (a *App) env() provision.Env {
 		WorkspaceSource: a.cfg.WorkspaceSourcePath(),
 		Remote:          a.remote,
 		IncusProject:    a.incusProject,
-	}
+		Secrets:         secrets,
+	}, nil
 }
 
 // UpOptions は idev up の挙動。
@@ -161,8 +177,13 @@ type UpOptions struct {
 func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
-	// instanceを作る前に、ホスト側の前提を確認する。
+	// instanceを作る前に、ホスト側の前提をすべて確認する。
+	// 途中で失敗して中途半端なinstanceが残ることを避ける。
 	plan, err := a.idmapPlan()
+	if err != nil {
+		return err
+	}
+	env, err := a.env()
 	if err != nil {
 		return err
 	}
@@ -187,6 +208,9 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.log.Info("Creating instance " + a.instance)
+		if err := a.ensureVolumes(ctx); err != nil {
+			return err
+		}
 		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, plan)); err != nil {
 			return err
 		}
@@ -196,10 +220,14 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 		return err
 	}
 
+	if err := a.ensureVolumes(ctx); err != nil {
+		return err
+	}
+
 	ws := a.cfg.WorkspaceOrDefault()
 	a.log.Info(fmt.Sprintf("Mounting workspace %s -> %s", a.cfg.WorkspaceSourcePath(), ws.Target))
 	if !created {
-		if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, plan)); err != nil {
+		if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, plan, a.instance)); err != nil {
 			return err
 		}
 	}
@@ -207,7 +235,7 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	if err := a.ensureRunning(ctx); err != nil {
 		return err
 	}
-	if err := a.runProvisioning(ctx, provision.Selection{}); err != nil {
+	if err := a.runProvisioning(ctx, env, provision.Selection{}); err != nil {
 		return err
 	}
 
@@ -220,17 +248,22 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 //
 // sel が指定されていれば、provisionの一部だけを実行する。
 func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
-	// 解決できない指定は、instanceに触れる前に弾く。
+	// 解決できない指定や、揃っていない前提は、instanceに触れる前に弾く。
 	if _, err := provision.Select(a.cfg.Provision, sel); err != nil {
 		return err
 	}
+	env, err := a.env()
+	if err != nil {
+		return err
+	}
+
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureRunning(ctx); err != nil {
 		return err
 	}
-	return a.runProvisioning(ctx, sel)
+	return a.runProvisioning(ctx, env, sel)
 }
 
 // ListSteps はprovisionステップの一覧を表示する。
@@ -262,8 +295,17 @@ func stepKind(step config.Step) string {
 	}
 }
 
+// DestroyOptions は idev destroy の挙動。
+type DestroyOptions struct {
+	// Volumes が真の場合、永続ボリュームも削除する。
+	Volumes bool
+}
+
 // Destroy はinstanceを削除する。ホスト側のソースには触れない。
-func (a *App) Destroy(ctx context.Context) error {
+//
+// 永続ボリュームは既定で残す。instanceを作り直しても残すためのものであり、
+// 削除するかは利用者が明示的に決める（仕様 04-cli.md 4.5）。
+func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
 	}
@@ -271,7 +313,66 @@ func (a *App) Destroy(ctx context.Context) error {
 	if err := a.client.DeleteInstance(ctx, a.instance); err != nil {
 		return err
 	}
+
+	if opt.Volumes {
+		if err := a.deleteVolumes(ctx); err != nil {
+			return err
+		}
+	} else if len(a.cfg.Volumes) > 0 {
+		a.log.Info(fmt.Sprintf("Kept %d volume(s). Use --volumes to delete them", len(a.cfg.Volumes)))
+	}
+
 	a.log.Info("Instance deleted. Source tree on the host is untouched")
+
+	return nil
+}
+
+// ensureVolumes は宣言された永続ボリュームを用意する。
+func (a *App) ensureVolumes(ctx context.Context) error {
+	for _, key := range slices.Sorted(maps.Keys(a.cfg.Volumes)) {
+		vol := a.cfg.Volumes[key]
+		pool, name := vol.PoolOrDefault(), volumeName(a.instance, key)
+
+		exists, err := a.client.VolumeExists(ctx, pool, name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+
+		a.log.Info(fmt.Sprintf("Creating volume %s on pool %s", name, pool))
+
+		config := map[string]string{}
+		if vol.Size != "" {
+			config["size"] = vol.Size
+		}
+		if err := a.client.CreateVolume(ctx, pool, name, config); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteVolumes は宣言された永続ボリュームを削除する。
+func (a *App) deleteVolumes(ctx context.Context) error {
+	for _, key := range slices.Sorted(maps.Keys(a.cfg.Volumes)) {
+		vol := a.cfg.Volumes[key]
+		pool, name := vol.PoolOrDefault(), volumeName(a.instance, key)
+
+		exists, err := a.client.VolumeExists(ctx, pool, name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+
+		a.log.Info("Deleting volume " + name)
+		if err := a.client.DeleteVolume(ctx, pool, name); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -280,7 +381,8 @@ func (a *App) Rebuild(ctx context.Context) error {
 	_, err := a.client.Instance(ctx, a.instance)
 	switch {
 	case err == nil:
-		if err := a.Destroy(ctx); err != nil {
+		// rebuildでは永続ボリュームを残す。作り直しても残すためのものなので。
+		if err := a.Destroy(ctx, DestroyOptions{}); err != nil {
 			return err
 		}
 	case !errors.Is(err, incus.ErrInstanceNotFound):
@@ -477,7 +579,7 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 			return err
 		}
 	}
-	if devices := staleDevices(inst, desiredDevices(a.cfg, plan)); len(devices) > 0 {
+	if devices := staleDevices(inst, desiredDevices(a.cfg, plan, a.instance)); len(devices) > 0 {
 		a.log.Info("Removing devices no longer declared: " + strings.Join(devices, ", "))
 		if err := a.client.RemoveDevices(ctx, a.instance, devices); err != nil {
 			return err
@@ -614,8 +716,7 @@ func (a *App) ensureRunning(ctx context.Context) error {
 //
 // bootstrapは一部実行のときも省略しない。provisionerを動かすための
 // 準備であり、軽量かつ冪等であることを前提としているため。
-func (a *App) runProvisioning(ctx context.Context, sel provision.Selection) error {
-	env := a.env()
+func (a *App) runProvisioning(ctx context.Context, env provision.Env, sel provision.Selection) error {
 	if err := a.exec.Bootstrap(ctx, a.cfg, env); err != nil {
 		return err
 	}

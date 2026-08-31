@@ -73,12 +73,23 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 		return fmt.Errorf("write devkit vars: %w", err)
 	}
 
+	// 秘密情報は別ファイルにする。0600の一時ファイルで、実行後に削除される。
+	secretsPath := filepath.Join(dir, "secrets.json")
+	if len(env.Secrets) > 0 {
+		if err := writeJSON(secretsPath, env.Secrets); err != nil {
+			return fmt.Errorf("write secrets: %w", err)
+		}
+	}
+
 	args := runner.Args("-i", inventoryPath)
 	if step.Inventory != "" {
 		args.Add("-i", resolve(env.ProjectRoot, step.Inventory))
 	}
 	// devkitの変数を先に渡し、プロジェクト側での上書きを許す。
 	args.Add("--extra-vars=@" + varsPath)
+	if len(env.Secrets) > 0 {
+		args.Add("--extra-vars=@" + secretsPath)
+	}
 	if step.Vars != "" {
 		args.Add("--extra-vars=@" + resolve(env.ProjectRoot, step.Vars))
 	}

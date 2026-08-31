@@ -13,6 +13,9 @@ type Env struct {
 	WorkspaceSource string // ホスト側
 	Remote          string
 	IncusProject    string
+	// Secrets はホスト側から注入された秘密情報。
+	// 表示時は値を隠す（仕様 04-cli.md 4.10）。
+	Secrets map[string]string
 }
 
 // EnvVars は run ステップへ渡す環境変数を返す（仕様 3.10.1）。
