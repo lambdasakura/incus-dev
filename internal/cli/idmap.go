@@ -94,7 +94,7 @@ func checkSubIDAllowed(uidPath, gidPath string, uid, gid int) error {
 	return fmt.Errorf(
 		"workspace idmap (raw.idmap) is not permitted on this host.\n"+
 			"Incus needs permission to map your uid/gid into the container.\n\n"+
-			"Add the following entries and restart incus:\n  %s\n\n"+
+			"Add the following entries (no incus restart needed):\n  %s\n\n"+
 			"Alternatively set 'workspace: {idmap: none}' in dev.yml and handle\n"+
 			"ownership yourself (host files will not be writable from the container)",
 		strings.Join(missing, "\n  "))

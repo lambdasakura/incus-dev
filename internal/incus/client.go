@@ -51,9 +51,12 @@ type InstanceSpec struct {
 
 // ExecOptions はコンテナ内でのコマンド実行オプション。
 type ExecOptions struct {
-	Env  map[string]string
-	Cwd  string
-	User string
+	// Env は利用者が指定した環境変数。Secretを含みうるため表示時に値を隠す。
+	Env map[string]string
+	// PublicEnv はdevkitが注入する環境変数。診断に役立つため表示する。
+	PublicEnv map[string]string
+	Cwd       string
+	User      string
 	// TTY が真の場合、擬似端末を割り当てて標準入出力を引き継ぐ。
 	TTY    bool
 	Stdin  io.Reader

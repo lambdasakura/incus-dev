@@ -44,10 +44,14 @@ type AppOptions struct {
 
 	// CheckIDMap は workspace.idmap: auto の事前検査。nilの場合は既定の検査を使う。
 	CheckIDMap func(uid, gid int) error
-	// UID / GID はworkspaceの対応付けに使うホスト側のID。
-	// 0値の場合は実行ユーザーのものを使う。
-	UID int
-	GID int
+	// Host はworkspaceの対応付けに使うホスト側のID。
+	// nilの場合は実行ユーザーのものを使う。
+	Host *HostIDs
+}
+
+// HostIDs はホスト側のuid/gid。
+type HostIDs struct {
+	UID, GID int
 }
 
 // App はコマンドの実処理を保持する。
@@ -66,7 +70,7 @@ type App struct {
 	incusProject string
 
 	checkIDMap func(uid, gid int) error
-	uid, gid   int
+	host       HostIDs
 }
 
 // NewApp は App を構成する。
@@ -86,9 +90,9 @@ func NewApp(opt AppOptions) *App {
 		checkIDMap = defaultIDMapCheck
 	}
 
-	uid, gid := opt.UID, opt.GID
-	if uid == 0 && gid == 0 {
-		uid, gid = os.Getuid(), os.Getgid()
+	host := opt.Host
+	if host == nil {
+		host = &HostIDs{UID: os.Getuid(), GID: os.Getgid()}
 	}
 
 	return &App{
@@ -110,8 +114,7 @@ func NewApp(opt AppOptions) *App {
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
-		uid:          uid,
-		gid:          gid,
+		host:         *host,
 	}
 }
 
@@ -136,16 +139,18 @@ func (a *App) Up(ctx context.Context) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
 	// instanceを作る前に、ホスト側の前提を確認する。
-	mode, warn, err := a.idmapMode()
+	plan, err := a.idmapPlan()
 	if err != nil {
 		return err
 	}
-	if warn != "" {
-		a.log.Warn(warn)
+	if plan.Warning != "" {
+		a.log.Warn(plan.Warning)
 	}
 	if err := a.checkProfiles(ctx); err != nil {
 		return err
 	}
+
+	created := false
 
 	inst, err := a.client.Instance(ctx, a.instance)
 	switch {
@@ -154,22 +159,26 @@ func (a *App) Up(ctx context.Context) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
-		if err := a.reapplyInstance(ctx, inst, mode); err != nil {
+		if err := a.reapplyInstance(ctx, inst, plan); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.log.Info("Creating instance " + a.instance)
-		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, mode, a.uid, a.gid)); err != nil {
+		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, plan)); err != nil {
 			return err
 		}
+		// deviceは作成時に設定済みなので、再適用は不要。
+		created = true
 	default:
 		return err
 	}
 
 	ws := a.cfg.WorkspaceOrDefault()
 	a.log.Info(fmt.Sprintf("Mounting workspace %s -> %s", a.cfg.WorkspaceSourcePath(), ws.Target))
-	if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, mode)); err != nil {
-		return err
+	if !created {
+		if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, plan)); err != nil {
+			return err
+		}
 	}
 
 	if err := a.ensureRunning(ctx); err != nil {
@@ -348,13 +357,14 @@ func (a *App) Validate() error {
 }
 
 // reapplyInstance は既存instanceへ宣言内容を再適用する。
-func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, mode config.IDMapMode) error {
-	desired := desiredConfig(a.cfg, mode, a.uid, a.gid)
+func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan) error {
+	desired := desiredConfig(a.cfg, plan)
 	// 適用前の状態を控える。適用後は差分が分からなくなるため。
 	before := maps.Clone(inst.Config)
 
 	// idmap方式を切り替えた場合、devkitが以前設定したキーを残さない。
-	if stale := staleIDMapKeys(a.cfg, inst.Config, mode); len(stale) > 0 {
+	stale := staleIDMapKeys(inst.Config, plan)
+	if len(stale) > 0 {
 		if err := a.client.UnsetConfig(ctx, a.instance, stale); err != nil {
 			return err
 		}
@@ -363,7 +373,7 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, mode co
 		return err
 	}
 
-	a.warnRestartRequired(inst.IsRunning(), before, desired)
+	a.warnRestartRequired(inst.IsRunning(), before, desired, stale)
 	return nil
 }
 
@@ -372,39 +382,40 @@ var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security
 
 // warnRestartRequired は稼働中instanceで即座に反映されない変更を警告する
 // （仕様 05-incus.md 5.4.5）。
-func (a *App) warnRestartRequired(running bool, before, desired map[string]string) {
+//
+// devkitが実際に変更したキーのみを対象とする。宣言から消えたキーは
+// unset しない方針（仕様 5.4.4）なので、それを変更として扱うと
+// 何もしていないのに警告が出続けてしまう。
+func (a *App) warnRestartRequired(running bool, before, desired map[string]string, unset []string) {
 	if !running {
 		return
 	}
 
 	var changed []string
 	for _, k := range restartRequiredKeys {
-		want, declared := desired[k]
-		switch {
-		case declared && before[k] != want:
+		if want, declared := desired[k]; declared && before[k] != want {
 			changed = append(changed, k)
-		case !declared && before[k] != "":
+		}
+	}
+	for _, k := range unset {
+		if slices.Contains(restartRequiredKeys, k) && before[k] != "" {
 			changed = append(changed, k)
 		}
 	}
 	if len(changed) == 0 {
 		return
 	}
+	slices.Sort(changed)
+	changed = slices.Compact(changed)
 
 	a.log.Warn(fmt.Sprintf(
 		"%s changed but the instance is running; restart it to apply (idev rebuild --force, or incus restart %s)",
 		strings.Join(changed, ", "), a.instance))
 }
 
-// idmapMode は適用するidmap方式を解決する。
-func (a *App) idmapMode() (config.IDMapMode, string, error) {
-	declared := a.cfg.WorkspaceOrDefault().IDMap
-
-	// プロジェクトが raw.idmap を明示している場合は尊重し、検査しない。
-	if _, explicit := a.cfg.Instance.Config[idmapConfigKey]; explicit {
-		return config.IDMapNone, "", nil
-	}
-	return resolveIDMapMode(declared, a.checkIDMap)
+// idmapPlan は適用するidmap方針を解決する。
+func (a *App) idmapPlan() (idmapPlan, error) {
+	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap)
 }
 
 // checkProfiles は指定Profileの存在を確認する。devkitはProfileを作成しない。

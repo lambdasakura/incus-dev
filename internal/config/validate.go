@@ -52,6 +52,7 @@ func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateSteps(raw, "bootstrap", false, ps)
 	validateSteps(raw, "provision", true, ps)
 	validateInstance(c, ps)
+	validateStepValues(c, ps)
 	validateWorkspace(c, ps)
 
 	if c.Root != "" {
@@ -113,6 +114,32 @@ func parseVersion(v string) (major, minor int, err error) {
 	return major, minor, nil
 }
 
+// validateStepValues は、コンテナ内でのコマンド実行時に
+// オプションとして解釈されうる値を拒否する。
+func validateStepValues(c *Config, ps *problems) {
+	check := func(steps []Step, kind string) {
+		for i, s := range steps {
+			if s.Run == nil {
+				continue
+			}
+			for _, f := range []struct{ field, value string }{
+				{"user", s.Run.User},
+				{"shell", s.Run.Shell},
+			} {
+				if strings.HasPrefix(f.value, "-") {
+					ps.add(fmt.Sprintf("%s[%d].%s", kind, i, f.field),
+						"must not start with %q", "-")
+				}
+			}
+		}
+	}
+
+	if c.Bootstrap != nil {
+		check(*c.Bootstrap, "bootstrap")
+	}
+	check(c.Provision, "provision")
+}
+
 // runOnlyFields は run ステップ専用のフィールド。
 var runOnlyFields = []string{"cwd", "env", "shell", "user"}
 
@@ -160,6 +187,11 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func validateInstance(c *Config, ps *problems) {
+	// 位置引数としてincusコマンドへ渡す値は、フラグと解釈されうる。
+	if strings.HasPrefix(c.Instance.Image, "-") {
+		ps.add("instance.image", "must not start with %q", "-")
+	}
+
 	if c.Instance.Profiles != nil {
 		for i, name := range *c.Instance.Profiles {
 			if !profileNamePattern.MatchString(name) {
@@ -170,9 +202,13 @@ func validateInstance(c *Config, ps *problems) {
 	}
 
 	// "-" で始まるキーはincusコマンドのフラグとして解釈されうる。
+	// "=" を含むキーは key=value の分割位置がずれる。
 	for _, k := range sortedKeys(c.Instance.Config) {
 		if strings.HasPrefix(k, "-") {
 			ps.add("instance.config."+k, "key must not start with %q", "-")
+		}
+		if strings.Contains(k, "=") {
+			ps.add("instance.config."+k, "key must not contain %q", "=")
 		}
 	}
 	for _, name := range sortedKeys(c.Instance.Devices) {
@@ -183,6 +219,10 @@ func validateInstance(c *Config, ps *problems) {
 			if strings.HasPrefix(k, "-") {
 				ps.add(fmt.Sprintf("instance.devices.%s.%s", name, k),
 					"key must not start with %q", "-")
+			}
+			if strings.Contains(k, "=") {
+				ps.add(fmt.Sprintf("instance.devices.%s.%s", name, k),
+					"key must not contain %q", "=")
 			}
 		}
 	}

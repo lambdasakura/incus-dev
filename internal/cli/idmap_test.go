@@ -125,9 +125,20 @@ func TestCheckSubIDAllowedReportsGIDOnly(t *testing.T) {
 	}
 }
 
-// 既定の検査はホストの /etc/subuid を読む（結果は環境依存なので呼べることのみ確認）
-func TestDefaultIDMapCheckRuns(t *testing.T) {
-	_ = defaultIDMapCheck(os.Getuid(), os.Getgid())
+// 既定の検査はホストの /etc/subuid, /etc/subgid を読む。
+// 結果は環境依存だが、失敗する場合は対処方法を示すこと。
+func TestDefaultIDMapCheck(t *testing.T) {
+	err := defaultIDMapCheck(os.Getuid(), os.Getgid())
+	if err == nil {
+		t.Log("このホストでは raw.idmap が許可されています")
+		return
+	}
+
+	for _, want := range []string{subUIDPath, subGIDPath, "idmap: none"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, %q を含むこと", err, want)
+		}
+	}
 }
 
 // gid側のファイルが読めない場合も判定できないため通す

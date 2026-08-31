@@ -127,7 +127,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastCommand()
+	cmd := f.LastArgv()
 	for _, want := range []string{
 		"incus exec --project default dev-example-project",
 		"-T -- /bin/sh -c",
@@ -201,7 +201,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastCommand()
+	cmd := f.LastArgv()
 	if !strings.Contains(cmd, "--cwd /workspace") {
 		t.Errorf("command = %q, cwdを反映すること", cmd)
 	}
@@ -220,8 +220,8 @@ provision:
 	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv()); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
-	if !strings.Contains(f.LastCommand(), "--user 1000") {
-		t.Errorf("command = %q, 数値ユーザーは --user で渡すこと", f.LastCommand())
+	if !strings.Contains(f.LastArgv(), "--user 1000") {
+		t.Errorf("command = %q, 数値ユーザーは --user で渡すこと", f.LastArgv())
 	}
 }
 
@@ -237,7 +237,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastCommand()
+	cmd := f.LastArgv()
 	if !strings.Contains(cmd, "-- su -s /bin/sh developer -c") {
 		t.Errorf("command = %q, ユーザー名指定は su を使うこと", cmd)
 	}
@@ -259,7 +259,7 @@ provision:
 	}
 
 	var order []string
-	for _, c := range f.Commands() {
+	for _, c := range f.Argvs() {
 		for _, want := range []string{"first", "second", "third"} {
 			if strings.Contains(c, want) {
 				order = append(order, want)
@@ -275,7 +275,8 @@ provision:
 func TestStepFailureIdentifiesStep(t *testing.T) {
 	f := &runnertest.Fake{}
 	f.Handler = func(c runner.Command) (runner.Result, error) {
-		if strings.Contains(c.String(), "failing") {
+		// 実際に実行される引数で判定する（表示用文字列はマスクされる）
+		if strings.Contains(strings.Join(c.Args, " "), "failing") {
 			return runner.Result{ExitCode: 7}, &runner.ExitError{
 				Cmd: c.String(), ExitCode: 7, Stderr: "boom",
 			}
@@ -298,7 +299,7 @@ provision:
 			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
 		}
 	}
-	for _, c := range f.Commands() {
+	for _, c := range f.Argvs() {
 		if strings.Contains(c, "never") {
 			t.Error("失敗後のステップを実行しないこと")
 		}
@@ -314,8 +315,8 @@ bootstrap:
 	if err := newExecutor(f).Bootstrap(context.Background(), cfg, testEnv()); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
-	if !strings.Contains(f.LastCommand(), "bootstrap-command") {
-		t.Errorf("command = %q", f.LastCommand())
+	if !strings.Contains(f.LastArgv(), "bootstrap-command") {
+		t.Errorf("command = %q", f.LastArgv())
 	}
 }
 
@@ -663,5 +664,103 @@ bootstrap:
 	}
 	if strings.Contains(err.Error(), "dev.yml") {
 		t.Errorf("error = %v, 明示済みの場合は案内しないこと", err)
+	}
+}
+
+// ansible ステップの extra_args はSecretを含みうるため表示時に隠す
+// （仕様 04-cli.md 4.10）
+func TestAnsibleExtraArgsAreRedacted(t *testing.T) {
+	root, _ := ansibleProject(t)
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - ansible:
+      playbook: .incus-dev/ansible/site.yml
+      extra_args: ["-e", "vault_pass=s3cret"]
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{}
+	env := testEnv()
+	env.ProjectRoot = root
+	if err := newExecutor(f).Provision(context.Background(), cfg, env); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	if display := f.LastCommand(); strings.Contains(display, "s3cret") {
+		t.Errorf("表示 = %q, extra_args の値を含めないこと", display)
+	}
+	if raw := f.LastArgv(); !strings.Contains(raw, "vault_pass=s3cret") {
+		t.Errorf("実引数 = %q, 実際の値を渡すこと", raw)
+	}
+}
+
+// 複数行のスクリプトは、エラーへ全文が流れ込まないよう表示時に折り畳む。
+// 実行するコマンドは診断の中心なので、隠すのではなく短くする。
+func TestMultilineScriptIsCollapsedInDisplay(t *testing.T) {
+	f := &runnertest.Fake{}
+	cfg := parseConfig(t, base+`
+provision:
+  - name: deploy
+    run: |
+      first-line
+      second-line
+      third-line
+`)
+	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv()); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	display := f.LastCommand()
+	if !strings.Contains(display, "first-line") {
+		t.Errorf("表示 = %q, 先頭行は示すこと", display)
+	}
+	if strings.Contains(display, "third-line") {
+		t.Errorf("表示 = %q, 全文は載せないこと", display)
+	}
+	if !strings.Contains(display, "+2 lines") {
+		t.Errorf("表示 = %q, 省略した行数を示すこと", display)
+	}
+	if raw := f.LastArgv(); !strings.Contains(raw, "third-line") {
+		t.Errorf("実引数 = %q, 実際のスクリプトは全文渡すこと", raw)
+	}
+}
+
+// devkitが注入する変数は診断のため表示し、プロジェクト指定の値のみ隠す
+func TestDevkitEnvIsVisibleAndProjectEnvIsRedacted(t *testing.T) {
+	f := &runnertest.Fake{}
+	cfg := parseConfig(t, base+`
+provision:
+  - run: deploy
+    env:
+      API_TOKEN: s3cret
+      DEVKIT_WORKSPACE: /overridden
+`)
+	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv()); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	display := f.LastCommand()
+	if !strings.Contains(display, "--env DEVKIT_INSTANCE=dev-example-project") {
+		t.Errorf("表示 = %q, devkitの変数は表示すること", display)
+	}
+	if strings.Contains(display, "s3cret") {
+		t.Errorf("表示 = %q, プロジェクト指定の値は隠すこと", display)
+	}
+	// 上書きされた変数の値はプロジェクト由来なので隠す
+	if strings.Contains(display, "/overridden") {
+		t.Errorf("表示 = %q, 上書きされた値も隠すこと", display)
+	}
+	if strings.Contains(display, "DEVKIT_WORKSPACE=/workspace") {
+		t.Errorf("表示 = %q, 上書きされた変数の元の値を渡さないこと", display)
+	}
+
+	raw := f.LastArgv()
+	for _, want := range []string{"API_TOKEN=s3cret", "DEVKIT_WORKSPACE=/overridden"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("実引数 = %q, %q を含むこと", raw, want)
+		}
 	}
 }

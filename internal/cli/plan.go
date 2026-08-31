@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"maps"
 	"strconv"
 
@@ -20,8 +19,7 @@ const (
 const idmapConfigKey = "raw.idmap"
 
 // desiredConfig は dev.yml から適用すべきinstance configを組み立てる。
-// mode は解決済みのidmap方式、uid/gid はホストの実行ユーザー。
-func desiredConfig(cfg *config.Config, mode config.IDMapMode, uid, gid int) map[string]string {
+func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	out := make(map[string]string, len(cfg.Instance.Config)+4)
 	for k, v := range cfg.Instance.Config {
 		out[k] = v
@@ -32,17 +30,15 @@ func desiredConfig(cfg *config.Config, mode config.IDMapMode, uid, gid int) map[
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
 
 	// raw方式ではホストの実行ユーザーをコンテナのrootへ対応付ける。
-	// uidとgidは異なりうるため個別に指定する。
-	// プロジェクトが raw.idmap を明示している場合は尊重する。
-	if _, explicit := cfg.Instance.Config[idmapConfigKey]; !explicit && mode == config.IDMapRaw {
-		out[idmapConfigKey] = fmt.Sprintf("uid %d 0\ngid %d 0", uid, gid)
+	if v := plan.rawIDMap(); v != "" {
+		out[idmapConfigKey] = v
 	}
 	return out
 }
 
 // desiredDevices は dev.yml から適用すべきdeviceを組み立てる。
 // workspaceは予約名のdisk deviceとして追加する。
-func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.Device {
+func desiredDevices(cfg *config.Config, plan idmapPlan) map[string]incus.Device {
 	out := make(map[string]incus.Device, len(cfg.Instance.Devices)+1)
 
 	for name, dev := range cfg.Instance.Devices {
@@ -52,7 +48,7 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 		if src, ok := copied["source"]; ok && src != "" && !isVolumeSource(copied) {
 			copied["source"] = cfg.ResolvePath(src)
 		}
-		applyShift(copied, mode)
+		applyShift(copied, plan)
 
 		out[name] = copied
 	}
@@ -63,7 +59,7 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 		"source": cfg.WorkspaceSourcePath(),
 		"path":   ws.Target,
 	}
-	applyShift(workspace, mode)
+	applyShift(workspace, plan)
 
 	out[config.WorkspaceDeviceName] = workspace
 	return out
@@ -76,14 +72,17 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 // 方式を切り替えたときに古い設定が残らないよう、常に明示的に設定する。
 //
 // プロジェクトが shift を明示している場合は、そちらを尊重する。
-func applyShift(dev incus.Device, mode config.IDMapMode) {
+func applyShift(dev incus.Device, plan idmapPlan) {
+	if !plan.Managed {
+		return
+	}
 	if _, explicit := dev["shift"]; explicit {
 		return
 	}
 	if !isHostPathMount(dev) {
 		return
 	}
-	dev["shift"] = strconv.FormatBool(mode == config.IDMapShift)
+	dev["shift"] = strconv.FormatBool(plan.shiftEnabled())
 }
 
 // isHostPathMount はホストのディレクトリをマウントするdiskかを返す。
@@ -95,15 +94,13 @@ func isHostPathMount(dev incus.Device) bool {
 
 // isVolumeSource は source がホストのパスではなくストレージボリューム名かを返す。
 func isVolumeSource(dev incus.Device) bool {
-	return dev["pool"] != ""
+	return dev.Type() == "disk" && dev["pool"] != ""
 }
 
-// staleIDMapKeys は現在の方式では不要になった、devkit設定のconfigキーを返す。
-func staleIDMapKeys(cfg *config.Config, current map[string]string, mode config.IDMapMode) []string {
-	if _, explicit := cfg.Instance.Config[idmapConfigKey]; explicit {
-		return nil // 利用者が書いたキーには触れない
-	}
-	if mode == config.IDMapRaw {
+// staleIDMapKeys は現在の方針では不要になった、devkit設定のconfigキーを返す。
+func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
+	if !plan.Managed || plan.Mode == config.IDMapRaw {
+		// 利用者が管理している、または今も設定すべき場合は触れない。
 		return nil
 	}
 	if _, ok := current[idmapConfigKey]; !ok {
@@ -113,7 +110,7 @@ func staleIDMapKeys(cfg *config.Config, current map[string]string, mode config.I
 }
 
 // instanceSpec はinstance作成時の指定を組み立てる。
-func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode, uid, gid int) incus.InstanceSpec {
+func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
 	return incus.InstanceSpec{
 		Name:       name,
@@ -121,8 +118,8 @@ func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode, uid, g
 		Type:       cfg.Instance.TypeOrDefault(),
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg, mode, uid, gid),
-		Devices:    desiredDevices(cfg, mode),
+		Config:     desiredConfig(cfg, plan),
+		Devices:    desiredDevices(cfg, plan),
 	}
 }
 

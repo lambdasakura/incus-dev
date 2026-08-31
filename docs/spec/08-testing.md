@@ -20,7 +20,7 @@ Instance naming / 正規化
 Bootstrap 既定動作の選択
   - ansible ステップの有無による分岐
   - bootstrap 明示時の上書き
-Step planning（実行順序、dry-run出力）
+Step planning（実行順序）
 Command construction
   - incus exec の引数
   - ansible-playbook の引数

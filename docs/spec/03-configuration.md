@@ -336,8 +336,11 @@ instance configに `raw.idmap` を設定し、実行ユーザーのuid/gidを
 コンテナのrootへ対応付ける。
 
 ```text
-raw.idmap: both <uid> 0
+raw.idmap: uid <uid> 0
+            gid <gid> 0
 ```
+
+uidとgidは異なりうるため、個別に写像する。
 
 開発用途では最も望ましい。コンテナ内でrootとして作ったファイルが、
 ホスト側では実行ユーザーの所有になる。

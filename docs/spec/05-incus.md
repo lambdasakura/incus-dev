@@ -134,6 +134,10 @@ MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunset�
 
 クリーンな状態が必要な場合は `idev rebuild` を使用する。
 
+例外として、**devkit自身が設定したidmap関連のキー**（`raw.idmap`）は、
+方式を切り替えた際に取り消す。利用者が書いたキーには触れない。
+残したままにすると、`raw.idmap` と `shift` が二重に適用されるためである。
+
 将来的には、devkitが適用したキーの一覧を
 
 ```text
@@ -214,11 +218,13 @@ type Client interface {
     DeleteInstance(ctx context.Context, name string) error
 
     ApplyConfig(ctx context.Context, name string, cfg map[string]string) error
+    UnsetConfig(ctx context.Context, name string, keys []string) error
     ApplyDevices(ctx context.Context, name string, dev map[string]Device) error
 
     ProfileExists(ctx context.Context, name string) (bool, error)
 
     Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error)
+    WaitReady(ctx context.Context, name string, opt WaitOptions) error
 }
 
 type ExecOptions struct {

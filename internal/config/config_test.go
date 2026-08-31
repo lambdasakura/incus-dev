@@ -737,3 +737,61 @@ func TestValidateProfileNameSyntax(t *testing.T) {
 
 	parse(t, minimal+"  profiles:\n    - default\n    - gpu-nvidia\n    - my.profile_1\n")
 }
+
+// incusやsuのオプションとして解釈されうる値を拒否する
+func TestValidateRejectsFlagLikeValues(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{"image", "schema: 1\nproject:\n  name: p\ninstance:\n  image: \"--project=other\"\n"},
+		{"run.user", minimal + "provision:\n  - run: echo\n    user: \"-lc\"\n"},
+		{"run.shell", minimal + "provision:\n  - run: echo\n    shell: \"--login\"\n"},
+		{"bootstrap.user", minimal + "bootstrap:\n  - run: echo\n    user: \"-x\"\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := parseErr(t, tt.yaml)
+			if !strings.Contains(err.Error(), "must not start with") {
+				t.Errorf("error = %q", err.Error())
+			}
+		})
+	}
+}
+
+// root diskは「type: disk かつ path: /」で判定する（仕様 03-configuration.md 3.6.3）
+func TestValidateRootDiskRequiresRootPath(t *testing.T) {
+	// diskはあるが / を提供していない
+	err := parseErr(t, minimal+`
+  profiles: []
+  devices:
+    data:
+      type: disk
+      pool: default
+      path: /data
+`)
+	if !strings.Contains(err.Error(), "root") {
+		t.Errorf("error = %q, root diskの不足を報告すること", err.Error())
+	}
+
+	// disk以外で path: / を持つdeviceもroot diskとは認めない
+	err = parseErr(t, minimal+`
+  profiles: []
+  devices:
+    weird:
+      type: none
+      path: /
+`)
+	if !strings.Contains(err.Error(), "root") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+// incusは k=v を最初の = で分割するため、キーに = を含められない
+func TestValidateRejectsEqualsInConfigKey(t *testing.T) {
+	err := parseErr(t, minimal+"  config:\n    \"limits.cpu=8\": \"x\"\n")
+	if !strings.Contains(err.Error(), "=") {
+		t.Errorf("error = %q", err.Error())
+	}
+}

@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoggerFormat(t *testing.T) {
@@ -75,7 +77,15 @@ func TestLoggerWithGroup(t *testing.T) {
 	}
 }
 
+// 出力先への書き込みが失敗しても、ログ呼び出しは処理を止めない
 func TestLoggerWriteError(t *testing.T) {
-	// 書き込みに失敗してもpanicしないこと
+	h := &handler{w: errWriter{}, level: slog.LevelInfo}
+
+	err := h.Handle(context.Background(), slog.NewRecord(time.Time{}, slog.LevelInfo, "message", 0))
+	if err == nil {
+		t.Error("Handle() = nil error, 書き込み失敗を返すこと")
+	}
+
+	// slog経由ではエラーが捨てられ、panicもしないこと
 	newLogger(errWriter{}, false).Info("message")
 }

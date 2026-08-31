@@ -41,33 +41,37 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 		return fmt.Errorf("write devkit vars: %w", err)
 	}
 
-	args := []string{"-i", inventoryPath}
+	args := runner.Args("-i", inventoryPath)
 	if step.Inventory != "" {
-		args = append(args, "-i", resolve(env.ProjectRoot, step.Inventory))
+		args.Add("-i", resolve(env.ProjectRoot, step.Inventory))
 	}
 	// devkitの変数を先に渡し、プロジェクト側での上書きを許す。
-	args = append(args, "--extra-vars=@"+varsPath)
+	args.Add("--extra-vars=@" + varsPath)
 	if step.Vars != "" {
-		args = append(args, "--extra-vars=@"+resolve(env.ProjectRoot, step.Vars))
+		args.Add("--extra-vars=@" + resolve(env.ProjectRoot, step.Vars))
 	}
 	if len(step.Tags) > 0 {
-		args = append(args, "--tags", strings.Join(step.Tags, ","))
+		args.Add("--tags", strings.Join(step.Tags, ","))
 	}
 	if len(step.SkipTags) > 0 {
-		args = append(args, "--skip-tags", strings.Join(step.SkipTags, ","))
+		args.Add("--skip-tags", strings.Join(step.SkipTags, ","))
 	}
-	args = append(args, step.ExtraArgs...)
-	args = append(args, resolve(env.ProjectRoot, step.Playbook))
+	// extra_args は ansible-playbook へ素通しするため、
+	// -e で秘密の変数を渡すといった使い方がありうる。
+	args.AddSecret(step.ExtraArgs...)
+	args.Add(resolve(env.ProjectRoot, step.Playbook))
 
 	// ラベルは RunSteps 側で付与するため、ここでは付けない（二重表示になる）。
-	_, err = e.Runner.Run(ctx, runner.Command{
+	cmd := runner.Command{
 		Name:   "ansible-playbook",
-		Args:   args,
 		Dir:    env.ProjectRoot,
 		Env:    ansibleEnv(env.ProjectRoot),
 		Stdout: e.Stdout,
 		Stderr: e.Stderr,
-	})
+	}
+	args.Apply(&cmd)
+
+	_, err = e.Runner.Run(ctx, cmd)
 	return err
 }
 

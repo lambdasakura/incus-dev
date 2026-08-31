@@ -49,6 +49,56 @@ func TestNoEnvironmentSpecificAssets(t *testing.T) {
 	}
 }
 
+// 実装コードにOS固有のコマンドが紛れ込んでいないこと（REQ-007）。
+//
+// ファイル名の検査だけでは「.go の中へ直接書き足す」形の違反を防げないため、
+// パッケージマネージャの呼び出しを本文で検査する。
+func TestNoOSSpecificCommandsInImplementation(t *testing.T) {
+	// 仕様 06-provisioning.md 6.3.2 が認める唯一の例外。
+	allowed := map[string]string{
+		"internal/provision/provision.go": "既定bootstrap（上書き・無効化が可能）",
+	}
+	managers := []string{"apt-get", "apt install", "dnf ", "yum ", "apk add", "pacman -S", "zypper "}
+
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// examples/ と docs/ と test/ は利用者向けの例なので対象外。
+			switch filepath.Base(path) {
+			case ".git", "bin", "examples", "docs", "test":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+
+		rel := filepath.ToSlash(strings.TrimPrefix(path, "../"))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range managers {
+			if !strings.Contains(string(data), m) {
+				continue
+			}
+			if reason, ok := allowed[rel]; ok {
+				t.Logf("%s: %q（%s）", rel, m, reason)
+				continue
+			}
+			t.Errorf("%s が %q を含む。REQ-007により、OS固有の手順は "+
+				"devkitではなくプロジェクトの .incus-dev/ に属する", rel, m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
+
 // バイナリへ同梱するのはJSON Schemaのみであること（仕様 02-repository-layout.md 2.4）
 func TestOnlySchemasAreEmbedded(t *testing.T) {
 	var files []string

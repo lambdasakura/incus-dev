@@ -74,7 +74,7 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 利用できなければidmapped mount（`shift`）へ退避する。
 
 コンテナ内で作られたファイルをホスト側でも自分の所有にしたい場合は、
-`/etc/subuid`・`/etc/subgid` へ以下を追加してincusを再起動する。
+`/etc/subuid`・`/etc/subgid` へ以下を追加する（incusの再起動は不要）。
 （一般的なIncusセットアップ手順に含まれる `root:1000000:1000000000` とは
 別に必要になる。）
 

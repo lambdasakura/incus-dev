@@ -62,7 +62,7 @@ func TestUpPropagatesIncusErrors(t *testing.T) {
 		{"profile確認の失敗", "profile", false},
 		{"instance取得の失敗", "instance", false},
 		{"instance作成の失敗", "create", false},
-		{"device適用の失敗", "devices", false},
+		{"device適用の失敗", "devices", true},
 		{"起動の失敗", "start", false},
 		{"ready待ちの失敗", "waitready", false},
 		{"config再適用の失敗", "config", true},
@@ -666,5 +666,104 @@ func TestUpPropagatesEnsureRunningLookupError(t *testing.T) {
 
 	if err := appWith(t, rootYAML, client).Up(context.Background()); !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// idev shell で利用者が入力したコマンドは、診断のため表示してよい
+func TestShellCommandIsNotRedacted(t *testing.T) {
+	cmdRunner := &runnertest.Fake{}
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	client := &incus.CLI{Runner: cmdRunner, Project: "default"}
+	cmdRunner.Stdout = map[string]string{
+		"incus list": `[{"name":"dev-example-project","status":"Running",` +
+			`"config":{"user.incus-devkit.project":"example-project"}}]`,
+	}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: cmdRunner,
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+	if err := app.Shell(context.Background(), []string{"make", "test"}); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	if got := cmdRunner.LastCommand(); !strings.Contains(got, "make test") {
+		t.Errorf("表示 = %q, 利用者が入力したコマンドは表示すること", got)
+	}
+}
+
+// 再起動が必要なキーの一覧を取り違えないこと（仕様 05-incus.md 5.4.5）
+func TestRestartRequiredKeys(t *testing.T) {
+	for _, key := range []string{"raw.idmap", "security.nesting", "security.privileged"} {
+		t.Run(key, func(t *testing.T) {
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+
+			cfg, err := config.Parse([]byte(rootYAML+"  config:\n    "+key+": \"changed\"\n"), config.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Root = t.TempDir()
+
+			errOut := &bytes.Buffer{}
+			app := NewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: &bytes.Buffer{}, ErrOut: errOut,
+				CheckIDMap: func(int, int) error { return nil },
+			})
+
+			if err := app.Up(context.Background()); err != nil {
+				t.Fatalf("Up() error = %v", err)
+			}
+			if !strings.Contains(errOut.String(), key) {
+				t.Errorf("warning = %q, %q の変更を警告すること", errOut.String(), key)
+			}
+		})
+	}
+}
+
+// 宣言から消えたキーは unset しないため、変更として警告しない。
+// そうしないと何もしていないのに警告が出続ける。
+func TestNoWarningForKeysRemovedFromConfig(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey:     "example-project",
+			"security.nesting":    "true",
+			"security.privileged": "true",
+			// devkitが設定する値と同じ = 変更なし
+			idmapConfigKey: fmt.Sprintf("uid %d 0\ngid %d 0", os.Getuid(), os.Getgid()),
+		},
+	})
+
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart") {
+		t.Errorf("warning = %q, 変更していないキーを警告しないこと", errOut.String())
 	}
 }

@@ -177,20 +177,15 @@ func (c *CLI) ApplyConfig(ctx context.Context, name string, config map[string]st
 	if len(config) == 0 {
 		return nil
 	}
-	args := c.args([]string{"config", "set"}, c.qualify(name))
-
-	var redact []int
+	args := runner.Args(c.args([]string{"config", "set"}, c.qualify(name))...)
 	for _, k := range sortedKeys(config) {
-		redact = append(redact, len(args))
-		args = append(args, k+"="+config[k])
+		args.AddSecret(k + "=" + config[k])
 	}
 
-	_, err := c.Runner.Run(ctx, runner.Command{
-		Label:  "set config on " + name,
-		Name:   "incus",
-		Args:   args,
-		Redact: redact,
-	})
+	cmd := runner.Command{Label: "set config on " + name, Name: "incus"}
+	args.Apply(&cmd)
+
+	_, err := c.Runner.Run(ctx, cmd)
 	return err
 }
 
@@ -232,49 +227,42 @@ func (c *CLI) ApplyDevices(ctx context.Context, name string, devices map[string]
 		}
 
 		if !exists {
-			args := c.args([]string{"config", "device", "add"}, c.qualify(name), devName, want.Type())
-
-			var redact []int
+			args := runner.Args(c.args([]string{"config", "device", "add"},
+				c.qualify(name), devName, want.Type())...)
 			for _, k := range sortedKeys(want) {
-				if k == "type" {
-					continue
+				if k != "type" {
+					args.AddSecret(k + "=" + want[k])
 				}
-				redact = append(redact, len(args))
-				args = append(args, k+"="+want[k])
 			}
 
-			if _, err := c.Runner.Run(ctx, runner.Command{
-				Label:  "add device " + devName,
-				Name:   "incus",
-				Args:   args,
-				Redact: redact,
-			}); err != nil {
+			cmd := runner.Command{Label: "add device " + devName, Name: "incus"}
+			args.Apply(&cmd)
+
+			if _, err := c.Runner.Run(ctx, cmd); err != nil {
 				return err
 			}
 			continue
 		}
 
-		args := c.args([]string{"config", "device", "set"}, c.qualify(name), devName)
-		base := len(args)
+		base := c.args([]string{"config", "device", "set"}, c.qualify(name), devName)
+		args := runner.Args(base...)
 
-		var redact []int
+		changed := false
 		for _, k := range sortedKeys(want) {
 			if k == "type" || current[k] == want[k] {
 				continue
 			}
-			redact = append(redact, len(args))
-			args = append(args, k+"="+want[k])
+			args.AddSecret(k + "=" + want[k])
+			changed = true
 		}
-		if len(args) == base {
+		if !changed {
 			continue
 		}
 
-		if _, err := c.Runner.Run(ctx, runner.Command{
-			Label:  "set device " + devName,
-			Name:   "incus",
-			Args:   args,
-			Redact: redact,
-		}); err != nil {
+		cmd := runner.Command{Label: "set device " + devName, Name: "incus"}
+		args.Apply(&cmd)
+
+		if _, err := c.Runner.Run(ctx, cmd); err != nil {
 			return err
 		}
 	}
@@ -309,17 +297,16 @@ func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 
 // Exec はコンテナ内でコマンドを実行し、終了コードを返す。
 func (c *CLI) Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error) {
-	args := c.args([]string{"exec"}, c.qualify(name))
+	args := runner.Args(c.args([]string{"exec"}, c.qualify(name))...)
 
 	if opt.Cwd != "" {
-		args = append(args, "--cwd", opt.Cwd)
+		args.Add("--cwd", opt.Cwd)
 	}
-
-	var redact []int
+	for _, k := range sortedKeys(opt.PublicEnv) {
+		args.Add("--env", k+"="+opt.PublicEnv[k])
+	}
 	for _, k := range sortedKeys(opt.Env) {
-		args = append(args, "--env")
-		redact = append(redact, len(args))
-		args = append(args, k+"="+opt.Env[k])
+		args.Add("--env").AddSecret(k + "=" + opt.Env[k])
 	}
 	if opt.User != "" {
 		uid, ok := numericUser(opt.User)
@@ -328,26 +315,30 @@ func (c *CLI) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 			// ユーザー名の解決は呼び出し側の責務であり、黙って無視しない。
 			return 0, fmt.Errorf("exec user must be a numeric uid, got %q", opt.User)
 		}
-		args = append(args, "--user", uid)
+		args.Add("--user", uid)
 	}
 	if opt.TTY {
-		args = append(args, "-t")
+		args.Add("-t")
 	} else {
-		args = append(args, "-T")
+		args.Add("-T")
 	}
-	args = append(args, "--")
-	args = append(args, argv...)
 
-	res, err := c.Runner.Run(ctx, runner.Command{
+	// 実行するコマンドは診断の中心であり、失敗時に表示する（仕様 04-cli.md 4.10）。
+	// 複数行のスクリプトは表示時に折り畳まれる（runner.Command.String）。
+	args.Add("--")
+	args.Add(argv...)
+
+	cmd := runner.Command{
 		Label:       "exec in " + name,
 		Name:        "incus",
-		Args:        args,
-		Redact:      redact,
 		Stdin:       opt.Stdin,
 		Stdout:      opt.Stdout,
 		Stderr:      opt.Stderr,
 		Interactive: opt.TTY,
-	})
+	}
+	args.Apply(&cmd)
+
+	res, err := c.Runner.Run(ctx, cmd)
 	return res.ExitCode, err
 }
 
@@ -381,6 +372,9 @@ func (c *CLI) WaitReady(ctx context.Context, name string, opt WaitOptions) error
 		}
 
 		if time.Now().After(deadline) {
+			if lastErr == nil {
+				return fmt.Errorf("instance %s did not become ready within %s", name, opt.Timeout)
+			}
 			return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, lastErr)
 		}
 		select {

@@ -5,7 +5,7 @@ stages:
 
 lint:
   stage: check
-  image: golang:1.25
+  image: golang:1.27
   before_script:
     - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
   script:
@@ -13,7 +13,7 @@ lint:
 
 test:
   stage: check
-  image: golang:1.25
+  image: golang:1.27
   script:
     - make cover
   coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
@@ -22,7 +22,7 @@ test:
 # tags は環境に合わせて設定すること。incus が無い場合、テストはskipされる。
 integration:
   stage: integration
-  image: golang:1.25
+  image: golang:1.27
   tags:
     - incus
   rules:

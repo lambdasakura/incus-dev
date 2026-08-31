@@ -66,14 +66,28 @@ func (c Command) String() string {
 	parts = append(parts, c.Name)
 
 	for i, a := range c.Args {
-		a = c.redacted(i, a)
-		if strings.ContainsAny(a, " \t\n\"'") {
+		a = collapse(c.redacted(i, a))
+		if strings.ContainsAny(a, " \t\"'") {
 			parts = append(parts, fmt.Sprintf("%q", a))
 			continue
 		}
 		parts = append(parts, a)
 	}
 	return strings.Join(parts, " ")
+}
+
+// collapse は複数行の引数を1行へ畳む。
+//
+// provisionのスクリプトのような長い引数がそのままエラーへ流れ込むと、
+// 肝心の失敗理由が埋もれてしまうため、先頭行だけを示す。
+func collapse(arg string) string {
+	first, rest, found := strings.Cut(arg, "\n")
+	if !found {
+		return arg
+	}
+
+	lines := strings.Count(strings.TrimRight(rest, "\n"), "\n") + 1
+	return fmt.Sprintf("%s … (+%d lines)", first, lines)
 }
 
 // Result は実行結果。
@@ -151,6 +165,8 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 		cmd.Env = append(os.Environ(), c.Env...)
 	}
 
+	// 中継先が指定されている場合はそちらへ直接流す。
+	// 出力量が読めないステップもあるため、不要な蓄積はしない。
 	var stdout, stderr bytes.Buffer
 	switch {
 	case c.Interactive:
@@ -159,13 +175,14 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 		cmd.Stderr = os.Stderr
 	default:
 		cmd.Stdin = c.Stdin
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if c.Stdout != nil {
-			cmd.Stdout = io.MultiWriter(&stdout, c.Stdout)
+
+		cmd.Stdout = c.Stdout
+		if cmd.Stdout == nil {
+			cmd.Stdout = &stdout
 		}
-		if c.Stderr != nil {
-			cmd.Stderr = io.MultiWriter(&stderr, c.Stderr)
+		cmd.Stderr = c.Stderr
+		if cmd.Stderr == nil {
+			cmd.Stderr = &stderr
 		}
 	}
 

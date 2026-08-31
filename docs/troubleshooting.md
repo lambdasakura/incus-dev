@@ -178,7 +178,7 @@ newuidmap: uid range [0-1) -> [1000-1001) not allowed
 ```bash
 grep '^root:' /etc/subuid /etc/subgid
 idev up
-incus config get dev-<project> raw.idmap    # both <uid> 0 になっていれば適用済み
+incus config get dev-<project> raw.idmap    # "uid <uid> 0 / gid <gid> 0" が出れば適用済み
 ```
 
 追加しない場合、既定の `auto` は `shift`（idmapped mount）へ退避して動作を継続する。

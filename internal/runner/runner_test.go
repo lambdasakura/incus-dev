@@ -342,3 +342,43 @@ func TestExitCodeForSignaledProcess(t *testing.T) {
 		t.Errorf("ExitCode = %d, want %d", res.ExitCode, 128+int(syscall.SIGTERM))
 	}
 }
+
+func TestCollapseMultilineArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		arg  string
+		want string
+	}{
+		{"単一行はそのまま", "echo hi", `"echo hi"`},
+		{"複数行は折り畳む", "one\ntwo\nthree", `"one … (+2 lines)"`},
+		{"末尾改行は数えない", "one\ntwo\n", `"one … (+1 lines)"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runner.Command{Name: "sh", Args: []string{"-c", tt.arg}}.String()
+
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("String() = %q, %q を含むこと", got, tt.want)
+			}
+		})
+	}
+}
+
+// 対話実行では、親のcontextがキャンセルされても子プロセスを殺さない。
+// そうしないと、コンテナ内コマンドを止めようとしたCtrl-Cでシェルごと落ちる。
+func TestInteractiveIgnoresContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	r := runner.New()
+
+	if _, err := r.Run(ctx, runner.Command{Name: "true", Interactive: true}); err != nil {
+		t.Errorf("Run() error = %v, 対話実行はcontextに追従しないこと", err)
+	}
+
+	// 非対話ではcontextに従う
+	if _, err := r.Run(ctx, runner.Command{Name: "true"}); err == nil {
+		t.Error("非対話実行はcontextに従うこと")
+	}
+}

@@ -106,7 +106,9 @@ func (f *Fake) InstanceExists(ctx context.Context, name string) (bool, error) {
 
 // CreateInstance はinstanceを登録する。状態は Stopped になる。
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
-	if err := f.record("create %s image=%s profiles=%v noprofiles=%v", spec.Name, spec.Image, spec.Profiles, spec.NoProfiles); err != nil {
+	if err := f.record("create %s image=%s type=%s profiles=%v noprofiles=%v config=%v devices=%v",
+		spec.Name, spec.Image, spec.Type, spec.Profiles, spec.NoProfiles,
+		sortedPairs(spec.Config), sortedDeviceNames(spec.Devices)); err != nil {
 		return err
 	}
 	config := map[string]string{}

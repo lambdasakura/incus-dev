@@ -11,19 +11,24 @@ import (
 
 // execRun はコンテナ内でスクリプトを実行する（仕様 06-provisioning.md 6.4）。
 func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) error {
-	vars := env.EnvVars()
+	// devkitが注入する変数は診断に役立つため表示してよい。
+	// プロジェクトが指定した値はSecretを含みうるため隠す。
+	public := env.EnvVars()
+	secret := make(map[string]string, len(step.Env))
 	for k, v := range step.Env {
-		vars[k] = v // プロジェクト指定を優先する
+		delete(public, k) // プロジェクト指定を優先する
+		secret[k] = v
 	}
 
 	argv, user := runArgv(step)
 
 	code, err := e.Incus.Exec(ctx, env.Instance, argv, incus.ExecOptions{
-		Env:    vars,
-		Cwd:    step.Cwd,
-		User:   user,
-		Stdout: e.Stdout,
-		Stderr: e.Stderr,
+		Env:       secret,
+		PublicEnv: public,
+		Cwd:       step.Cwd,
+		User:      user,
+		Stdout:    e.Stdout,
+		Stderr:    e.Stderr,
 	})
 	if err != nil {
 		return err

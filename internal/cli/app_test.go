@@ -54,7 +54,9 @@ func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Bu
 		Out:     out,
 		Verbose: false,
 		// ホストの /etc/subuid に依存しないようにする
-		CheckIDMap: func(int, int) error { return nil },
+		CheckIDMap:   func(int, int) error { return nil },
+		Remote:       "local",
+		IncusProject: "default",
 	})
 	return app, client, out
 }
@@ -73,8 +75,8 @@ func TestUpCreatesInstance(t *testing.T) {
 	if inst.Status != "Running" {
 		t.Errorf("Status = %q, want Running", inst.Status)
 	}
-	// 作成 → device → 起動 → ready待ち の順であること
-	want := []string{"create", "devices", "start", "waitready"}
+	// deviceは作成時に渡すため、作成 → 起動 → ready待ち の順になる
+	want := []string{"create", "start", "waitready"}
 	var got []string
 	for _, c := range client.Calls {
 		for _, w := range want {
@@ -214,7 +216,7 @@ func TestUpAppliesNoProfiles(t *testing.T) {
 	if err := app.Up(context.Background()); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
-	if !client.Called("create dev-example-project image=images:ubuntu/24.04 profiles=[] noprofiles=true") {
+	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=container profiles=[] noprofiles=true") {
 		t.Errorf("calls = %v, profiles: [] は --no-profiles に対応すること", client.Calls)
 	}
 }
@@ -684,5 +686,152 @@ func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
 	}
 	if !gotStdout {
 		t.Error("非対話時は標準出力を中継すること")
+	}
+}
+
+// status --json のキーは機械可読な契約なので、全フィールドを固定する
+// （仕様 04-cli.md 4.12、docs/manual/07-ai-agents.md）
+func TestStatusJSONContract(t *testing.T) {
+	app, client, out := newApp(t, baseYAML+`
+  config:
+    limits.cpu: "8"
+provision:
+  - run: "true"
+  - run: "true"
+`)
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			"user.incus-devkit.project": "example-project",
+			"limits.cpu":                "8",
+		},
+	})
+
+	if err := app.Status(context.Background(), true); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("JSON出力が不正: %v\n%s", err, out.String())
+	}
+
+	want := map[string]any{
+		"project":          "example-project",
+		"instance":         "dev-example-project",
+		"status":           "Running",
+		"image":            "images:ubuntu/24.04",
+		"workspace":        "/workspace",
+		"workspace_source": got["workspace_source"], // 一時ディレクトリのため値は問わない
+		"exists":           true,
+		"managed":          true,
+		"profiles":         []any{"default"},
+		"config":           map[string]any{"limits.cpu": "8"},
+		"provision_steps":  float64(2),
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("status --json のキー・値が変わっている (-want +got):\n%s", diff)
+	}
+	if got["workspace_source"] == "" {
+		t.Error("workspace_source が空")
+	}
+}
+
+func TestStatusReportsProvisionStepCount(t *testing.T) {
+	app, _, out := newApp(t, baseYAML+"provision:\n  - run: a\n  - run: b\n  - run: c\n")
+
+	if err := app.Status(context.Background(), false); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "3 step(s)") {
+		t.Errorf("status = %q, ステップ数を表示すること", out.String())
+	}
+}
+
+func TestValidateReportsProvisionStepCount(t *testing.T) {
+	app, _, out := newApp(t, baseYAML+"provision:\n  - run: a\n  - run: b\n")
+
+	if err := app.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "2 step(s)") {
+		t.Errorf("validate = %q, ステップ数を表示すること", out.String())
+	}
+}
+
+// shell は既定シェルを workspace 上で起動する（仕様 04-cli.md 4.3）
+func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+	})
+
+	var gotCwd string
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		gotCwd = opt.Cwd
+		return 0, nil
+	}
+
+	if err := app.Shell(context.Background(), nil); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	if diff := cmp.Diff([]string{cli.DefaultShellCommand}, client.Execs[0]); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	}
+	if gotCwd != "/workspace" {
+		t.Errorf("Cwd = %q, want /workspace", gotCwd)
+	}
+}
+
+// instance.type が作成時の指定へ渡ること
+func TestUpPassesInstanceType(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+"  type: virtual-machine\n")
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=virtual-machine") {
+		t.Errorf("calls = %v, instance.type を渡すこと", client.Calls)
+	}
+}
+
+// devkitがステップへ渡す文脈が正しく組み立てられること（仕様 3.10）
+func TestProvisionEnvIsPopulated(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+"provision:\n  - run: echo hi\n")
+
+	var gotEnv map[string]string
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		gotEnv = opt.PublicEnv
+		return 0, nil
+	}
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	if got := gotEnv["DEVKIT_PROJECT_NAME"]; got != "example-project" {
+		t.Errorf("DEVKIT_PROJECT_NAME = %q", got)
+	}
+	if got := gotEnv["DEVKIT_INSTANCE"]; got != "dev-example-project" {
+		t.Errorf("DEVKIT_INSTANCE = %q", got)
+	}
+	if got := gotEnv["DEVKIT_WORKSPACE"]; got != "/workspace" {
+		t.Errorf("DEVKIT_WORKSPACE = %q", got)
+	}
+	// workspace（コンテナ内）とworkspace_source（ホスト）を取り違えないこと
+	src := gotEnv["DEVKIT_WORKSPACE_SOURCE"]
+	if src == "/workspace" || !filepath.IsAbs(src) {
+		t.Errorf("DEVKIT_WORKSPACE_SOURCE = %q, ホスト側のパスであること", src)
+	}
+	if got := gotEnv["DEVKIT_INCUS_REMOTE"]; got != "local" {
+		t.Errorf("DEVKIT_INCUS_REMOTE = %q, want local", got)
+	}
+	if got := gotEnv["DEVKIT_INCUS_PROJECT"]; got != "default" {
+		t.Errorf("DEVKIT_INCUS_PROJECT = %q, want default", got)
 	}
 }

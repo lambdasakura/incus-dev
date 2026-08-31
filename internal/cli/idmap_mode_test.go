@@ -10,65 +10,92 @@ import (
 
 var errNotPermitted = errors.New("subuid is not configured")
 
-func TestResolveIDMapMode(t *testing.T) {
-	permitted := func(int, int) error { return nil }
-	denied := func(int, int) error { return errNotPermitted }
+func permitted(int, int) error { return nil }
+func denied(int, int) error    { return errNotPermitted }
 
+func TestResolveIDMap(t *testing.T) {
 	tests := []struct {
-		name      string
-		declared  config.IDMapMode
-		check     func(int, int) error
-		want      config.IDMapMode
-		wantWarn  bool
-		wantError bool
+		name        string
+		yaml        string
+		check       func(int, int) error
+		wantManaged bool
+		wantMode    config.IDMapMode
+		wantWarn    bool
+		wantErr     bool
 	}{
 		{
-			name:     "auto: 許可されていればraw",
-			declared: config.IDMapAuto,
-			check:    permitted,
-			want:     config.IDMapRaw,
+			name:        "auto: 許可されていればraw",
+			yaml:        planBase,
+			check:       permitted,
+			wantManaged: true,
+			wantMode:    config.IDMapRaw,
 		},
 		{
 			// ホストへ手を入れなくても動くことを優先する
-			name:     "auto: 許可されていなければshiftへ退避",
-			declared: config.IDMapAuto,
-			check:    denied,
-			want:     config.IDMapShift,
-			wantWarn: true,
+			name:        "auto: 許可されていなければshiftへ退避",
+			yaml:        planBase,
+			check:       denied,
+			wantManaged: true,
+			wantMode:    config.IDMapShift,
+			wantWarn:    true,
 		},
 		{
-			name:      "raw: 許可されていなければ失敗",
-			declared:  config.IDMapRaw,
-			check:     denied,
-			wantError: true,
+			name:    "raw: 許可されていなければ失敗",
+			yaml:    planBase + "workspace:\n  idmap: raw\n",
+			check:   denied,
+			wantErr: true,
 		},
 		{
-			name:     "raw: 許可されていればraw",
-			declared: config.IDMapRaw,
-			check:    permitted,
-			want:     config.IDMapRaw,
+			name:        "raw: 許可されていればraw",
+			yaml:        planBase + "workspace:\n  idmap: raw\n",
+			check:       permitted,
+			wantManaged: true,
+			wantMode:    config.IDMapRaw,
 		},
 		{
-			name:     "shift: 検査しない",
-			declared: config.IDMapShift,
-			check:    denied,
-			want:     config.IDMapShift,
+			name:        "shift: 検査しない",
+			yaml:        planBase + "workspace:\n  idmap: shift\n",
+			check:       denied,
+			wantManaged: true,
+			wantMode:    config.IDMapShift,
 		},
 		{
-			name:     "none: 検査しない",
-			declared: config.IDMapNone,
-			check:    denied,
-			want:     config.IDMapNone,
+			name:        "none: 検査しない",
+			yaml:        planBase + "workspace:\n  idmap: none\n",
+			check:       denied,
+			wantManaged: true,
+			wantMode:    config.IDMapNone,
+		},
+		{
+			name:        "利用者がraw.idmapを明示していれば介入しない",
+			yaml:        planBase + "  config:\n    raw.idmap: \"both 1234 0\"\n",
+			check:       denied,
+			wantManaged: false,
+		},
+		{
+			// 両方書かれた場合、workspace.idmap は効かないので伝える
+			name:        "raw.idmapとworkspace.idmapの併記を警告する",
+			yaml:        planBase + "  config:\n    raw.idmap: \"both 1234 0\"\nworkspace:\n  idmap: shift\n",
+			check:       denied,
+			wantManaged: false,
+			wantWarn:    true,
+		},
+		{
+			// raw.idmap も disk の shift もコンテナ固有の仕組み
+			name:        "コンテナ以外では介入しない",
+			yaml:        planBase + "  type: virtual-machine\n",
+			check:       denied,
+			wantManaged: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mode, warn, err := resolveIDMapMode(tt.declared, tt.check)
+			plan, err := resolveIDMap(mustParse(t, tt.yaml), 1000, 1001, tt.check)
 
-			if tt.wantError {
+			if tt.wantErr {
 				if err == nil {
-					t.Fatal("resolveIDMapMode() = nil error, want error")
+					t.Fatalf("resolveIDMap() = %+v, want error", plan)
 				}
 				if !strings.Contains(err.Error(), "subuid") {
 					t.Errorf("error = %q", err.Error())
@@ -76,13 +103,16 @@ func TestResolveIDMapMode(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolveIDMapMode() error = %v", err)
+				t.Fatalf("resolveIDMap() error = %v", err)
 			}
-			if mode != tt.want {
-				t.Errorf("mode = %q, want %q", mode, tt.want)
+			if plan.Managed != tt.wantManaged {
+				t.Errorf("Managed = %v, want %v", plan.Managed, tt.wantManaged)
 			}
-			if (warn != "") != tt.wantWarn {
-				t.Errorf("warn = %q, wantWarn = %v", warn, tt.wantWarn)
+			if tt.wantManaged && plan.Mode != tt.wantMode {
+				t.Errorf("Mode = %q, want %q", plan.Mode, tt.wantMode)
+			}
+			if (plan.Warning != "") != tt.wantWarn {
+				t.Errorf("Warning = %q, wantWarn = %v", plan.Warning, tt.wantWarn)
 			}
 		})
 	}
@@ -90,76 +120,106 @@ func TestResolveIDMapMode(t *testing.T) {
 
 // 退避した場合の警告は、理由と最適な設定方法を示すこと
 func TestFallbackWarningIsActionable(t *testing.T) {
-	_, warn, err := resolveIDMapMode(config.IDMapAuto, func(int, int) error { return errNotPermitted })
+	plan, err := resolveIDMap(mustParse(t, planBase), 1000, 1001, denied)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"shift", "root:"} {
-		if !strings.Contains(warn, want) {
-			t.Errorf("warn = %q, %q を含むこと", warn, want)
+
+	for _, want := range []string{"shift", "root:1000:1", "root:1001:1", "/etc/subuid", "/etc/subgid"} {
+		if !strings.Contains(plan.Warning, want) {
+			t.Errorf("warning = %q, %q を含むこと", plan.Warning, want)
 		}
 	}
 }
 
-func TestPlanUsesResolvedIDMapMode(t *testing.T) {
+// uidとgidが異なるホストでも、それぞれを正しく写像すること
+func TestRawIDMapUsesBothIDs(t *testing.T) {
+	plan := idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1001}
+
+	if got, want := plan.rawIDMap(), "uid 1000 0\ngid 1001 0"; got != want {
+		t.Errorf("rawIDMap() = %q, want %q", got, want)
+	}
+
+	for _, p := range []idmapPlan{
+		{Mode: config.IDMapShift, Managed: true},
+		{Mode: config.IDMapNone, Managed: true},
+		{Mode: config.IDMapRaw, Managed: false},
+	} {
+		if got := p.rawIDMap(); got != "" {
+			t.Errorf("%+v: rawIDMap() = %q, want empty", p, got)
+		}
+	}
+}
+
+func TestPlanUsesResolvedIDMap(t *testing.T) {
 	cfg := mustParse(t, planBase)
 
 	t.Run("raw", func(t *testing.T) {
-		if got := desiredConfig(cfg, config.IDMapRaw, 1000, 1001)[idmapConfigKey]; got != "uid 1000 0\ngid 1001 0" {
+		plan := idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1000}
+
+		if got := desiredConfig(cfg, plan)[idmapConfigKey]; !strings.HasPrefix(got, "uid 1000 0") {
 			t.Errorf("raw.idmap = %q", got)
 		}
-		if got := desiredDevices(cfg, config.IDMapRaw)["workspace"]["shift"]; got != "false" {
+		if got := desiredDevices(cfg, plan)["workspace"]["shift"]; got != "false" {
 			t.Errorf("shift = %q, rawではshiftを明示的に無効化すること", got)
 		}
 	})
 
 	t.Run("shift", func(t *testing.T) {
-		if got, ok := desiredConfig(cfg, config.IDMapShift, 1000, 1000)[idmapConfigKey]; ok {
-			t.Errorf("raw.idmap = %q, shiftではraw.idmapを設定しないこと", got)
+		plan := idmapPlan{Mode: config.IDMapShift, Managed: true}
+
+		if got, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
+			t.Errorf("raw.idmap = %q, shiftでは設定しないこと", got)
 		}
-		if got := desiredDevices(cfg, config.IDMapShift)["workspace"]["shift"]; got != "true" {
-			t.Errorf("workspace device shift = %q, want true", got)
+		if got := desiredDevices(cfg, plan)["workspace"]["shift"]; got != "true" {
+			t.Errorf("shift = %q, want true", got)
 		}
 	})
 
 	t.Run("none", func(t *testing.T) {
-		if _, ok := desiredConfig(cfg, config.IDMapNone, 1000, 1000)[idmapConfigKey]; ok {
+		plan := idmapPlan{Mode: config.IDMapNone, Managed: true}
+
+		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
 			t.Error("noneではraw.idmapを設定しないこと")
 		}
-		if got := desiredDevices(cfg, config.IDMapNone)["workspace"]["shift"]; got != "false" {
+		if got := desiredDevices(cfg, plan)["workspace"]["shift"]; got != "false" {
 			t.Errorf("shift = %q, noneではshiftを明示的に無効化すること", got)
+		}
+	})
+
+	// 利用者が管理している場合、devkitはconfigにもdeviceにも触れない
+	t.Run("利用者管理", func(t *testing.T) {
+		plan := idmapPlan{Managed: false}
+
+		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
+			t.Error("raw.idmapを設定しないこと")
+		}
+		if got, ok := desiredDevices(cfg, plan)["workspace"]["shift"]; ok {
+			t.Errorf("shift = %q, 設定しないこと", got)
 		}
 	})
 }
 
 // idmap方式を切り替えたとき、devkitが設定した古いキーを残さない
 func TestStaleIDMapKeys(t *testing.T) {
-	cfg := mustParse(t, planBase)
 	withRaw := map[string]string{idmapConfigKey: "uid 1000 0"}
 
 	tests := []struct {
 		name    string
-		cfg     *config.Config
 		current map[string]string
-		mode    config.IDMapMode
+		plan    idmapPlan
 		want    []string
 	}{
-		{"shiftへ切り替え", cfg, withRaw, config.IDMapShift, []string{idmapConfigKey}},
-		{"noneへ切り替え", cfg, withRaw, config.IDMapNone, []string{idmapConfigKey}},
-		{"rawのまま", cfg, withRaw, config.IDMapRaw, nil},
-		{"元々設定が無い", cfg, map[string]string{}, config.IDMapShift, nil},
-		{
-			name:    "利用者が明示したキーには触れない",
-			cfg:     mustParse(t, planBase+"  config:\n    raw.idmap: \"both 1234 0\"\n"),
-			current: withRaw,
-			mode:    config.IDMapShift,
-			want:    nil,
-		},
+		{"shiftへ切り替え", withRaw, idmapPlan{Mode: config.IDMapShift, Managed: true}, []string{idmapConfigKey}},
+		{"noneへ切り替え", withRaw, idmapPlan{Mode: config.IDMapNone, Managed: true}, []string{idmapConfigKey}},
+		{"rawのまま", withRaw, idmapPlan{Mode: config.IDMapRaw, Managed: true}, nil},
+		{"元々設定が無い", map[string]string{}, idmapPlan{Mode: config.IDMapShift, Managed: true}, nil},
+		{"利用者が管理している", withRaw, idmapPlan{Managed: false}, nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := staleIDMapKeys(tt.cfg, tt.current, tt.mode)
+			got := staleIDMapKeys(tt.current, tt.plan)
 
 			if len(got) != len(tt.want) {
 				t.Fatalf("staleIDMapKeys() = %v, want %v", got, tt.want)
@@ -173,7 +233,7 @@ func TestStaleIDMapKeys(t *testing.T) {
 	}
 }
 
-// ホストのディレクトリをマウントする追加deviceにも、解決したidmap方式を伝播させる。
+// ホストのディレクトリをマウントする追加deviceにも、解決した方式を伝播させる。
 // そうしないと、workspaceだけ書けて追加マウントは書けない状態になる。
 func TestDesiredDevicesPropagatesShiftToHostMounts(t *testing.T) {
 	cfg := mustParse(t, planBase+`
@@ -194,7 +254,9 @@ func TestDesiredDevicesPropagatesShiftToHostMounts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.mode), func(t *testing.T) {
-			if got := desiredDevices(cfg, tt.mode)["extdata"]["shift"]; got != tt.want {
+			plan := idmapPlan{Mode: tt.mode, Managed: true}
+
+			if got := desiredDevices(cfg, plan)["extdata"]["shift"]; got != tt.want {
 				t.Errorf("shift = %q, want %q", got, tt.want)
 			}
 		})
@@ -213,7 +275,9 @@ func TestDesiredDevicesRespectsExplicitShift(t *testing.T) {
 `)
 
 	for _, mode := range []config.IDMapMode{config.IDMapRaw, config.IDMapNone, config.IDMapShift} {
-		if got := desiredDevices(cfg, mode)["extdata"]["shift"]; got != "true" {
+		plan := idmapPlan{Mode: mode, Managed: true}
+
+		if got := desiredDevices(cfg, plan)["extdata"]["shift"]; got != "true" {
 			t.Errorf("mode=%s: shift = %q, 明示指定を上書きしないこと", mode, got)
 		}
 	}
@@ -238,11 +302,15 @@ func TestDesiredDevicesLeavesNonHostMountsAlone(t *testing.T) {
     gpu0:
       type: gpu
 `)
-	devices := desiredDevices(cfg, config.IDMapShift)
+	devices := desiredDevices(cfg, idmapPlan{Mode: config.IDMapShift, Managed: true})
 
 	for _, name := range []string{"root", "volume", "eth0", "gpu0"} {
 		if got, ok := devices[name]["shift"]; ok {
 			t.Errorf("%s の shift = %q, ホストのパスを指すdisk以外には付けないこと", name, got)
 		}
+	}
+	// storage volume の source はパスとして解決しない
+	if got := devices["volume"]["source"]; got != "myvolume" {
+		t.Errorf("volume の source = %q, ボリューム名を書き換えないこと", got)
 	}
 }

@@ -118,8 +118,8 @@ incus exec <instance> --env KEY=VALUE ... -- <shell> -c '<script>'
 
 - 既定シェルは `/bin/sh`。`shell` フィールドで変更可能
 - 終了コードが0以外の場合は失敗とする
-- stdout / stderrはdevkitの出力へ中継する
-  - 通常モードでは要約、`--verbose` では全量
+- stdout / stderrはdevkitの出力へそのまま中継する
+  （[04-cli.md](04-cli.md) 4.9。長時間かかる処理の進行が見えなくなるため要約しない）
 - `env` は 3.10.1 のdevkit変数に追記される（プロジェクト指定が優先）
 - `env` の値はSecretを含みうるため、ログやエラーへは値を出さない
 - 対話的入力は行わない（stdinは接続しない）

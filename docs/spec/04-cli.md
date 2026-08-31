@@ -143,7 +143,7 @@ idev status
 ```text
 Project:    example-project
 Instance:   dev-example-project
-Status:     RUNNING
+Status:     Running
 Image:      images:ubuntu/24.04
 Workspace:  /home/user/src/example-project -> /workspace
 ```
@@ -376,7 +376,7 @@ MVPで `--json` を実装する場合、最低限以下を返す。
 {
   "project": "example-project",
   "instance": "dev-example-project",
-  "status": "RUNNING",
+  "status": "Running",
   "workspace": "/workspace"
 }
 ```

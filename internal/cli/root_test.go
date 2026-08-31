@@ -354,3 +354,35 @@ func TestIsTerminal(t *testing.T) {
 		t.Error("パイプは端末ではない")
 	}
 }
+
+// グローバルフラグが Incus 操作層まで届くこと
+// （マニュアル 03-commands.md が契約として提示している）
+func TestNewAppWiresIncusFlags(t *testing.T) {
+	root := testProject(t, rootYAML)
+
+	app, err := newApp(&globalFlags{
+		directory:    root,
+		incusRemote:  "dev-server",
+		incusProject: "development",
+	})
+	if err != nil {
+		t.Fatalf("newApp() error = %v", err)
+	}
+
+	client, ok := app.client.(*incus.CLI)
+	if !ok {
+		t.Fatalf("client = %T, want *incus.CLI", app.client)
+	}
+	if client.Remote != "dev-server" {
+		t.Errorf("Remote = %q, want dev-server", client.Remote)
+	}
+	if client.Project != "development" {
+		t.Errorf("Project = %q, want development", client.Project)
+	}
+
+	// ansible inventory へ渡す値も同じであること
+	env := app.env()
+	if env.Remote != "dev-server" || env.IncusProject != "development" {
+		t.Errorf("env = %+v, remote/project が一致しないこと", env)
+	}
+}
