@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"strconv"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
@@ -45,14 +46,14 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 	out := make(map[string]incus.Device, len(cfg.Instance.Devices)+1)
 
 	for name, dev := range cfg.Instance.Devices {
-		copied := make(incus.Device, len(dev))
-		for k, v := range dev {
-			copied[k] = v
-		}
+		copied := maps.Clone(incus.Device(dev))
+
 		// deviceのsourceはproject rootを基準に解決する（仕様 3.11）。
-		if src, ok := copied["source"]; ok && src != "" {
+		if src, ok := copied["source"]; ok && src != "" && !isVolumeSource(copied) {
 			copied["source"] = cfg.ResolvePath(src)
 		}
+		applyShift(copied, mode)
+
 		out[name] = copied
 	}
 
@@ -62,11 +63,39 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 		"source": cfg.WorkspaceSourcePath(),
 		"path":   ws.Target,
 	}
-	// workspace deviceはdevkitの所有物なので、shiftは常に明示する。
-	// 方式を切り替えたときに古い設定が残らないようにするため。
-	workspace["shift"] = strconv.FormatBool(mode == config.IDMapShift)
+	applyShift(workspace, mode)
+
 	out[config.WorkspaceDeviceName] = workspace
 	return out
+}
+
+// applyShift はホストのディレクトリをマウントするdiskへidmap方式を反映する。
+//
+// workspace以外の追加マウントにも同じ扱いを適用しないと、
+// shift方式のホストで「workspaceだけ書けて追加マウントは書けない」状態になる。
+// 方式を切り替えたときに古い設定が残らないよう、常に明示的に設定する。
+//
+// プロジェクトが shift を明示している場合は、そちらを尊重する。
+func applyShift(dev incus.Device, mode config.IDMapMode) {
+	if _, explicit := dev["shift"]; explicit {
+		return
+	}
+	if !isHostPathMount(dev) {
+		return
+	}
+	dev["shift"] = strconv.FormatBool(mode == config.IDMapShift)
+}
+
+// isHostPathMount はホストのディレクトリをマウントするdiskかを返す。
+//
+// storage volume（poolを伴うもの）やroot disk、disk以外のdeviceは対象外。
+func isHostPathMount(dev incus.Device) bool {
+	return dev.Type() == "disk" && dev["source"] != "" && !isVolumeSource(dev)
+}
+
+// isVolumeSource は source がホストのパスではなくストレージボリューム名かを返す。
+func isVolumeSource(dev incus.Device) bool {
+	return dev["pool"] != ""
 }
 
 // staleIDMapKeys は現在の方式では不要になった、devkit設定のconfigキーを返す。

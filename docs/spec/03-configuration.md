@@ -286,6 +286,8 @@ devices:
 - deviceの `source` に相対パスを指定した場合、project rootを基準に解決する
 - ただし `pool` を伴う `disk` の `source` はストレージボリューム名であり、
   パスとして解決も検査もしない
+- ホストのディレクトリをマウントする `disk` には、devkitが `workspace` と
+  同じidmap方式を適用する（3.7.3参照）。`shift` を明示した場合はそちらを尊重する
 - `workspace` という名前のdeviceはdevkitが予約する（3.7参照）
 - device名およびキーは `-` で始められない（incusのフラグと衝突するため）
 
@@ -375,6 +377,20 @@ workspaceのdisk deviceに `shift=true` を設定し、idmapped mountを使う�
 
 何も設定しない。プロジェクトが `instance.config` で自前に対応付ける場合や、
 workspaceへの書き込みが不要な場合に使う。
+
+#### 適用範囲
+
+ここで決まった方式は、workspaceだけでなく
+**ホストのディレクトリをマウントする `instance.devices` の `disk` にも適用する**。
+
+workspaceだけを対象にすると、`shift` 方式のホストで
+「workspaceは書けるが追加マウントは書けない」という不整合が生じるためである。
+
+適用対象は `type: disk` かつ `source` を持ち、`pool` を伴わないdeviceに限る
+（storage volumeやroot diskは対象外）。
+
+プロジェクトがdeviceに `shift` を明示した場合は、そちらを尊重する。
+ただし最適な値はホストに依存するため、**通常は書かないほうがよい**。
 
 なお `instance.config` に `raw.idmap` が明示されている場合、
 devkitは対応付けに一切介入しない。

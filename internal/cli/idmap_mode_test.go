@@ -172,3 +172,77 @@ func TestStaleIDMapKeys(t *testing.T) {
 		})
 	}
 }
+
+// ホストのディレクトリをマウントする追加deviceにも、解決したidmap方式を伝播させる。
+// そうしないと、workspaceだけ書けて追加マウントは書けない状態になる。
+func TestDesiredDevicesPropagatesShiftToHostMounts(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    extdata:
+      type: disk
+      source: /srv/dataset
+      path: /data
+`)
+
+	tests := []struct {
+		mode config.IDMapMode
+		want string
+	}{
+		{config.IDMapShift, "true"},
+		{config.IDMapRaw, "false"},
+		{config.IDMapNone, "false"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			if got := desiredDevices(cfg, tt.mode)["extdata"]["shift"]; got != tt.want {
+				t.Errorf("shift = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// プロジェクトが shift を明示している場合は尊重する
+func TestDesiredDevicesRespectsExplicitShift(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    extdata:
+      type: disk
+      source: /srv/dataset
+      path: /data
+      shift: "true"
+`)
+
+	for _, mode := range []config.IDMapMode{config.IDMapRaw, config.IDMapNone, config.IDMapShift} {
+		if got := desiredDevices(cfg, mode)["extdata"]["shift"]; got != "true" {
+			t.Errorf("mode=%s: shift = %q, 明示指定を上書きしないこと", mode, got)
+		}
+	}
+}
+
+// ホストのパスを指さないdeviceには shift を付けない
+func TestDesiredDevicesLeavesNonHostMountsAlone(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
+    volume:
+      type: disk
+      pool: default
+      source: myvolume
+      path: /vol
+    eth0:
+      type: nic
+      network: incusbr0
+    gpu0:
+      type: gpu
+`)
+	devices := desiredDevices(cfg, config.IDMapShift)
+
+	for _, name := range []string{"root", "volume", "eth0", "gpu0"} {
+		if got, ok := devices[name]["shift"]; ok {
+			t.Errorf("%s の shift = %q, ホストのパスを指すdisk以外には付けないこと", name, got)
+		}
+	}
+}

@@ -138,7 +138,8 @@ Dockerのチェーンがufwのチェーンより先に評価されるため。
 
 ### 症状
 
-- コンテナ内から `/workspace` へ書き込めない
+- コンテナ内から `/workspace` や、`instance.devices` でマウントした
+  ホストのディレクトリへ書き込めない
 - コンテナ内で作ったファイルがホスト側でrootの所有になり、sudoなしで消せない
 - `idev up` が `workspace idmap (raw.idmap) is not permitted on this host` で停止する
 
