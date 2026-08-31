@@ -35,6 +35,8 @@ type AppOptions struct {
 	// Interactive は標準入出力が端末に接続されているか。
 	// idev shell で擬似端末を割り当てるかの判断に使う。
 	Interactive bool
+	// Term はホスト端末の種類（TERM）。擬似端末を割り当てる際にコンテナへ渡す。
+	Term string
 
 	Remote       string
 	IncusProject string
@@ -67,6 +69,7 @@ type App struct {
 	log         *slog.Logger
 	instance    string
 	interactive bool
+	term        string
 
 	remote       string
 	incusProject string
@@ -136,6 +139,7 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		errOut:       errOut,
 		log:          log,
 		interactive:  opt.Interactive,
+		term:         opt.Term,
 		instance:     name,
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
@@ -427,6 +431,7 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 		// 端末に接続されていない場合に擬似端末を割り当てると、
 		// 出力へCRが混入しパイプやリダイレクトが壊れる。
 		TTY:    tty,
+		Term:   a.term,
 		Stdin:  a.in,
 		Stdout: a.out,
 		Stderr: a.errOut,

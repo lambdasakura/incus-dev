@@ -59,6 +59,11 @@ type NetworkAddress struct {
 // IsRunning はinstanceが実行中かを返す。
 func (i *Instance) IsRunning() bool { return i.Status == "Running" }
 
+// IsStopped はinstanceが停止しているかを返す。
+//
+// Frozen や Starting のような中間状態は「停止していない」として扱う。
+func (i *Instance) IsStopped() bool { return i.Status == "Stopped" }
+
 // HasNIC はネットワークインターフェースを持つかを返す。
 func (i *Instance) HasNIC() bool {
 	for _, dev := range i.ExpandedDevices {
@@ -133,7 +138,10 @@ type ExecOptions struct {
 	Cwd       string
 	User      string
 	// TTY が真の場合、擬似端末を割り当てて標準入出力を引き継ぐ。
-	TTY    bool
+	TTY bool
+	// Term はホスト端末の種類（TERM）。TTY割り当て時のみコンテナへ渡す。
+	// これが無いと vim / less などが端末を判別できない。
+	Term   string
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer

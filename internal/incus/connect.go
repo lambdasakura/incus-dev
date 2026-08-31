@@ -11,7 +11,8 @@ import (
 
 // Target は操作対象のIncus。
 type Target struct {
-	// Remote はremote名。空またはlocalならローカルのIncus。
+	// Remote はremote名。空の場合のみ incus の既定remoteを使う。
+	// CLIの既定は "local" であり、incus remote switch の影響を受けない。
 	Remote string
 	// Project はIncus project名。空なら default。
 	Project string
@@ -66,7 +67,10 @@ type configImageResolver struct {
 }
 
 // Resolve は images:ubuntu/24.04 のような参照から、取得元とimageを返す。
-func (r *configImageResolver) Resolve(_ context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
+//
+// instanceType はaliasの解決に使う。同じalias（例 images:debian/12）が
+// container用とvirtual-machine用で別のimageを指すためである。
+func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error) {
 	remote, name, err := r.config.ParseRemote(ref)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse image reference %q: %w", ref, err)
@@ -81,14 +85,30 @@ func (r *configImageResolver) Resolve(_ context.Context, ref string) (incusclien
 	}
 
 	// エイリアス（ubuntu/24.04 など）を fingerprint へ解決する。
+	// 解決できない場合は fingerprint 直指定とみなす。
 	fingerprint := name
-	if alias, _, err := server.GetImageAlias(name); err == nil && alias != nil {
+	aliasErr := error(nil)
+	if alias, _, err := server.GetImageAliasType(instanceTypeOrDefault(instanceType), name); err == nil && alias != nil {
 		fingerprint = alias.Target
+	} else {
+		aliasErr = err
 	}
 
 	image, _, err := server.GetImage(fingerprint)
 	if err != nil {
+		if aliasErr != nil {
+			// aliasを引けなかったことが原因のこともあるため、両方示す。
+			return nil, nil, fmt.Errorf("resolve image %q: %w (alias lookup failed: %w)", ref, err, aliasErr)
+		}
 		return nil, nil, fmt.Errorf("resolve image %q: %w", ref, err)
 	}
 	return server, image, nil
+}
+
+// instanceTypeOrDefault は空の指定を container として扱う。
+func instanceTypeOrDefault(instanceType string) string {
+	if instanceType == "" {
+		return "container"
+	}
+	return instanceType
 }

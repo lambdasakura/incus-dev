@@ -326,6 +326,61 @@ provision:
 }
 
 // 失敗したステップを特定できること（仕様 04-cli.md 4.10）
+// 失敗したスクリプトが分かること。名前を付けていないステップでは
+// 番号だけでは何が落ちたのか分からない（仕様 04-cli.md 4.10）
+func TestStepFailureShowsScript(t *testing.T) {
+	client := newIncus()
+	client.code[""] = 1
+	cfg := parseConfig(t, base+`
+provision:
+  - run: |
+      first-line
+      second-line
+      third-line
+`)
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{})
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "first-line") {
+		t.Errorf("error = %q, 失敗したスクリプトを示すこと", msg)
+	}
+	if strings.Contains(msg, "third-line") {
+		t.Errorf("error = %q, 全文は載せないこと", msg)
+	}
+	if !strings.Contains(msg, "+2 lines") {
+		t.Errorf("error = %q, 省略した行数を示すこと", msg)
+	}
+}
+
+// エラーへ環境変数の値を混ぜないこと（Secretを含みうる）
+func TestStepFailureDoesNotLeakEnv(t *testing.T) {
+	client := newIncus()
+	client.code[""] = 1
+	cfg := parseConfig(t, base+`
+provision:
+  - run: deploy
+    env:
+      API_TOKEN: s3cret-value
+`)
+	env := testEnv()
+	env.Secrets = map[string]string{"DEPLOY_KEY": "s3cret-key"}
+
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, env, provision.Selection{})
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
+	}
+	for _, secret := range []string{"s3cret-value", "s3cret-key"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error = %q, 秘密情報を含めないこと", err.Error())
+		}
+	}
+}
+
 func TestStepFailureIdentifiesStep(t *testing.T) {
 	client := newIncus()
 	client.code["failing"] = 7

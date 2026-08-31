@@ -111,12 +111,15 @@ func newApp(g *globalFlags) (*App, error) {
 
 	target := resolveTarget(g, cfg)
 
-	cmdRunner := runner.NewWithLogger(newLogger(os.Stderr, g.verbose))
+	log := newLogger(os.Stderr, g.verbose)
+	cmdRunner := runner.NewWithLogger(log)
 
 	client, err := incus.Connect(target)
 	if err != nil {
 		return nil, err
 	}
+	// --verbose でIncusへの操作を追えるようにする。
+	client.Logger = log
 
 	return NewAppFor(AppOptions{
 		Config:       cfg,
@@ -128,6 +131,7 @@ func newApp(g *globalFlags) (*App, error) {
 		ErrOut:       os.Stderr,
 		Verbose:      g.verbose,
 		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
+		Term:         os.Getenv("TERM"),
 		Remote:       target.Remote,
 		IncusProject: target.Project,
 	})

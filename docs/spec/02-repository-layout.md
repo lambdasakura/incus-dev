@@ -42,6 +42,10 @@ incus-devkit/
 │   │   ├── root.go             # コマンド配線
 │   │   ├── app.go              # up / provision / shell / status / ...
 │   │   ├── plan.go             # 適用すべきconfig / deviceの算出
+│   │   ├── dryrun.go           # 実行予定の組み立て
+│   │   ├── naming.go           # project.scope に応じたinstance名
+│   │   ├── secrets.go          # ホストからの秘密情報の取り込み
+│   │   ├── snapshot.go         # snapshot サブコマンド
 │   │   ├── idmap.go            # ホスト側のidmap可否検査
 │   │   ├── idmap_mode.go       # idmap方式の解決
 │   │   └── log.go
@@ -61,20 +65,25 @@ incus-devkit/
 │   │   ├── connect.go          # remote / image の解決
 │   │   ├── exec_tty.go         # 端末を伴う実行
 │   │   ├── wait.go             # 起動待ち
-│   │   └── name.go             # instance命名規則
+│   │   ├── name.go             # instance命名規則
+│   │   └── incustest/          # テスト用fake
 │   │
 │   ├── provision/              # bootstrap / provision ステップの実行
 │   │   ├── provision.go
+│   │   ├── select.go           # 部分実行（--step / --from）
 │   │   ├── env.go
 │   │   ├── step_run.go
-│   │   └── step_ansible.go
+│   │   ├── step_ansible.go
+│   │   └── step_galaxy.go
 │   │
 │   └── runner/                 # 外部コマンド実行の集約
 │       ├── runner.go
-│       └── args.go             # 引数の組み立てとマスク指定
+│       ├── args.go             # 引数の組み立てとマスク指定
+│       └── runnertest/         # テスト用fake
 │
 ├── schemas/
-│   └── dev-v1.schema.json
+│   ├── dev-v1.schema.json
+│   └── embed.go
 │
 ├── examples/                   # ドキュメント用サンプル（実行時には使用しない）
 │   ├── minimal/
@@ -82,6 +91,8 @@ incus-devkit/
 │   └── ansible-based/
 │
 └── test/
+    ├── examples_test.go        # examples/ が読めることの確認
+    ├── structure_test.go       # パッケージ依存方向の確認
     └── integration/            # //go:build integration
 ```
 

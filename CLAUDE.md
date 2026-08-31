@@ -126,6 +126,8 @@ cmd/idev
 | YAML | `sigs.k8s.io/yaml`（YAML→JSON→struct） |
 | JSON Schema | `github.com/santhosh-tekuri/jsonschema/v6` |
 | Incus API | `github.com/lxc/incus/v6/client` |
+| 端末制御 | `golang.org/x/term` |
+| 制御用websocket | `github.com/gorilla/websocket` |
 | テスト差分 | `github.com/google/go-cmp` |
 
 ## 用語

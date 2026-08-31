@@ -70,8 +70,10 @@ type fakeImageServer struct {
 	err     error
 }
 
-func (s *fakeImageServer) GetImageAlias(name string) (*api.ImageAliasesEntry, string, error) {
-	target, ok := s.aliases[name]
+// GetImageAliasType はinstance種別ごとに別のimageを返す。
+// 本物のsimplestreamsも種別でimageを分けている。
+func (s *fakeImageServer) GetImageAliasType(imageType, name string) (*api.ImageAliasesEntry, string, error) {
+	target, ok := s.aliases[imageType+"/"+name]
 	if !ok {
 		return nil, "", errors.New("alias not found")
 	}
@@ -93,8 +95,14 @@ func newFakeCLIConfig() *fakeCLIConfig {
 	return &fakeCLIConfig{
 		instanceServer: &fakeInstanceServer{},
 		imageServer: &fakeImageServer{
-			aliases: map[string]string{"alpine/3.21": "abc123"},
-			images:  map[string]*api.Image{"abc123": {Fingerprint: "abc123"}},
+			aliases: map[string]string{
+				"container/alpine/3.21":       "abc123",
+				"virtual-machine/alpine/3.21": "vm456",
+			},
+			images: map[string]*api.Image{
+				"abc123": {Fingerprint: "abc123"},
+				"vm456":  {Fingerprint: "vm456"},
+			},
 		},
 	}
 }
@@ -176,7 +184,7 @@ func TestResolveImage(t *testing.T) {
 	config := newFakeCLIConfig()
 	r := &configImageResolver{config: config}
 
-	server, image, err := r.Resolve(context.Background(), "images:alpine/3.21")
+	server, image, err := r.Resolve(context.Background(), "images:alpine/3.21", "container")
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -194,12 +202,51 @@ func TestResolveImageByFingerprint(t *testing.T) {
 	config.imageServer.images["deadbeef"] = &api.Image{Fingerprint: "deadbeef"}
 	r := &configImageResolver{config: config}
 
-	_, image, err := r.Resolve(context.Background(), "images:deadbeef")
+	_, image, err := r.Resolve(context.Background(), "images:deadbeef", "container")
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	if image.Fingerprint != "deadbeef" {
 		t.Errorf("image = %+v", image)
+	}
+}
+
+// 同じaliasでも、instance種別によって別のimageを指す
+func TestResolveImageByInstanceType(t *testing.T) {
+	tests := []struct {
+		instanceType string
+		want         string
+	}{
+		{"container", "abc123"},
+		{"virtual-machine", "vm456"},
+		{"", "abc123"}, // 未指定は container
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.instanceType, func(t *testing.T) {
+			r := &configImageResolver{config: newFakeCLIConfig()}
+
+			_, image, err := r.Resolve(context.Background(), "images:alpine/3.21", tt.instanceType)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if image.Fingerprint != tt.want {
+				t.Errorf("image = %q, want %q", image.Fingerprint, tt.want)
+			}
+		})
+	}
+}
+
+// aliasを引けなかった場合、その理由もエラーへ含める
+func TestResolveImageKeepsAliasError(t *testing.T) {
+	config := newFakeCLIConfig()
+	config.imageServer.aliases = nil
+
+	_, _, err := (&configImageResolver{config: config}).Resolve(
+		context.Background(), "images:alpine/3.21", "container")
+
+	if err == nil || !strings.Contains(err.Error(), "alias lookup") {
+		t.Errorf("error = %v, aliasの失敗も示すこと", err)
 	}
 }
 
@@ -242,7 +289,7 @@ func TestResolveImageErrors(t *testing.T) {
 				tt.setup(config)
 			}
 
-			_, _, err := (&configImageResolver{config: config}).Resolve(context.Background(), tt.ref)
+			_, _, err := (&configImageResolver{config: config}).Resolve(context.Background(), tt.ref, "container")
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 				t.Errorf("error = %v, want %q", err, tt.wantMsg)
 			}

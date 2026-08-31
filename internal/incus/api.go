@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"slices"
@@ -27,7 +28,7 @@ type server interface {
 
 	GetProfileNames() ([]string, error)
 
-	GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error)
+	GetStoragePoolVolume(pool, volType, name string) (*api.StorageVolume, string, error)
 	CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error
 	DeleteStoragePoolVolume(pool, volType, name string) error
 
@@ -37,8 +38,10 @@ type server interface {
 }
 
 // imageResolver は image 参照（例 images:ubuntu/24.04）を解決する。
+//
+// aliasはinstance種別ごとに別のimageを指すため、種別も渡す。
 type imageResolver interface {
-	Resolve(ctx context.Context, ref string) (incusclient.ImageServer, *api.Image, error)
+	Resolve(ctx context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error)
 }
 
 // API はIncusのHTTP APIを呼ぶ Client 実装。
@@ -48,6 +51,18 @@ type API struct {
 	// Console は端末を伴う実行で操作するホスト側の端末。
 	// nilならプロセスの標準入出力を使う。
 	Console Console
+	// Logger は操作の記録先。nilなら記録しない。
+	Logger *slog.Logger
+}
+
+// log は行った操作を記録する（--verbose で見える）。
+//
+// 値はSecretを含みうるため、操作名と対象だけを出す。
+// configやenvの値は決して渡さない。
+func (a *API) log(op string, args ...any) {
+	if a.Logger != nil {
+		a.Logger.Debug("incus "+op, args...)
+	}
 }
 
 // console は端末を伴う実行で使う端末を返す。
@@ -132,7 +147,7 @@ func (a *API) InstanceExists(ctx context.Context, name string) (bool, error) {
 
 // CreateInstance はinstanceを作成する（起動はしない）。
 func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
-	source, image, err := a.Images.Resolve(ctx, spec.Image)
+	source, image, err := a.Images.Resolve(ctx, spec.Image, spec.Type)
 	if err != nil {
 		return err
 	}
@@ -150,15 +165,32 @@ func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 		req.Profiles = []string{}
 	}
 
+	a.log("create instance", "name", spec.Name, "image", spec.Image)
+
 	op, err := a.Server.CreateInstanceFromImage(source, *image, req)
 	if err != nil {
 		return fmt.Errorf("create instance %s: %w", spec.Name, err)
 	}
-	// RemoteOperation は context を受け取らないため、完了を待つ。
-	if err := op.Wait(); err != nil {
+	// RemoteOperation は context を受け取らない。imageの取得は数分かかる
+	// ことがあるため、中断できるよう自前で待つ。
+	if err := waitOp(ctx, op); err != nil {
 		return fmt.Errorf("create instance %s: %w", spec.Name, err)
 	}
 	return nil
+}
+
+// waitOp は転送を伴う操作の完了を待つ。中断された場合は取り消す。
+func waitOp(ctx context.Context, op incusclient.RemoteOperation) error {
+	done := make(chan error, 1)
+	go func() { done <- op.Wait() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		_ = op.CancelTarget()
+		return ctx.Err()
+	}
 }
 
 // StartInstance はinstanceを起動する。
@@ -167,16 +199,42 @@ func (a *API) StartInstance(ctx context.Context, name string) error {
 }
 
 // StopInstance はinstanceを停止する。
+//
+// 利用者の作業中プロセスを不用意に殺さないよう、まず正常停止を試みる。
+// 応答しない場合に備えて待ち時間には上限を設け、超えたら強制停止する
+// （仕様 05-incus.md 5.4.5）。
 func (a *API) StopInstance(ctx context.Context, name string) error {
+	inst, err := a.Instance(ctx, name)
+	if err != nil {
+		return err
+	}
+	if inst.IsStopped() {
+		return nil
+	}
+
+	if err := a.changeState(ctx, name, "stop", false); err == nil {
+		return nil
+	}
+	return a.forceStop(ctx, name)
+}
+
+// stopTimeout は正常停止を待つ上限（秒）。
+const stopTimeout = 30
+
+// forceStop は応答しないinstanceを強制停止する。
+func (a *API) forceStop(ctx context.Context, name string) error {
 	return a.changeState(ctx, name, "stop", true)
 }
 
 func (a *API) changeState(ctx context.Context, name, action string, force bool) error {
-	op, err := a.Server.UpdateInstanceState(name, api.InstanceStatePut{
-		Action:  action,
-		Force:   force,
-		Timeout: -1,
-	}, "")
+	a.log(action+" instance", "name", name, "force", force)
+
+	state := api.InstanceStatePut{Action: action, Force: force, Timeout: -1}
+	if action == "stop" && !force {
+		state.Timeout = stopTimeout
+	}
+
+	op, err := a.Server.UpdateInstanceState(name, state, "")
 	if err != nil {
 		return fmt.Errorf("%s instance %s: %w", action, name, err)
 	}
@@ -192,11 +250,15 @@ func (a *API) DeleteInstance(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if inst.IsRunning() {
-		if err := a.StopInstance(ctx, name); err != nil {
+	// これから消すinstanceなので、正常停止を待たずに落としてよい。
+	// Frozen や Starting のような中間状態も対象にする。
+	if !inst.IsStopped() {
+		if err := a.forceStop(ctx, name); err != nil {
 			return err
 		}
 	}
+
+	a.log("delete instance", "name", name)
 
 	op, err := a.Server.DeleteInstance(name)
 	if err != nil {
@@ -214,6 +276,8 @@ func (a *API) ApplyConfig(ctx context.Context, name string, config map[string]st
 	if len(config) == 0 {
 		return nil
 	}
+	a.log("set config", "name", name, "keys", sortedKeys(config))
+
 	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
 		maps.Copy(put.Config, config)
 	})
@@ -224,6 +288,8 @@ func (a *API) UnsetConfig(ctx context.Context, name string, keys []string) error
 	if len(keys) == 0 {
 		return nil
 	}
+	a.log("unset config", "name", name, "keys", keys)
+
 	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
 		for _, k := range keys {
 			delete(put.Config, k)
@@ -237,13 +303,15 @@ func (a *API) ApplyDevices(ctx context.Context, name string, devices map[string]
 	if len(devices) == 0 {
 		return nil
 	}
+	a.log("set devices", "name", name, "devices", sortedKeys(devices))
+
 	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
 		if put.Devices == nil {
 			put.Devices = map[string]map[string]string{}
 		}
 		for devName, want := range devices {
 			current, exists := put.Devices[devName]
-			if !exists || Device(current).Type() != want.Type() {
+			if !exists || current == nil || Device(current).Type() != want.Type() {
 				put.Devices[devName] = maps.Clone(want)
 				continue
 			}
@@ -257,6 +325,8 @@ func (a *API) RemoveDevices(ctx context.Context, name string, devices []string) 
 	if len(devices) == 0 {
 		return nil
 	}
+	a.log("remove devices", "name", name, "devices", devices)
+
 	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
 		for _, dev := range devices {
 			delete(put.Devices, dev)
@@ -301,16 +371,15 @@ func (a *API) ProfileExists(_ context.Context, name string) (bool, error) {
 
 // VolumeExists はstorage volumeの存在を返す。
 func (a *API) VolumeExists(_ context.Context, pool, name string) (bool, error) {
-	volumes, err := a.Server.GetStoragePoolVolumes(pool)
-	if err != nil {
-		return false, fmt.Errorf("list storage volumes on %s: %w", pool, err)
+	_, _, err := a.Server.GetStoragePoolVolume(pool, storageVolumeType, name)
+	switch {
+	case err == nil:
+		return true, nil
+	case api.StatusErrorCheck(err, 404):
+		return false, nil
+	default:
+		return false, fmt.Errorf("get storage volume %s on %s: %w", name, pool, err)
 	}
-	for _, v := range volumes {
-		if v.Name == name && v.Type == storageVolumeType {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // storageVolumeType はdevkitが扱うstorage volumeの種別。
@@ -321,6 +390,8 @@ func (a *API) CreateVolume(_ context.Context, pool, name string, config map[stri
 	req := api.StorageVolumesPost{Name: name, Type: storageVolumeType}
 	req.Config = config
 
+	a.log("create volume", "pool", pool, "name", name)
+
 	if err := a.Server.CreateStoragePoolVolume(pool, req); err != nil {
 		return fmt.Errorf("create storage volume %s on %s: %w", name, pool, err)
 	}
@@ -329,6 +400,8 @@ func (a *API) CreateVolume(_ context.Context, pool, name string, config map[stri
 
 // DeleteVolume はstorage volumeを削除する。
 func (a *API) DeleteVolume(_ context.Context, pool, name string) error {
+	a.log("delete volume", "pool", pool, "name", name)
+
 	if err := a.Server.DeleteStoragePoolVolume(pool, storageVolumeType, name); err != nil {
 		return fmt.Errorf("delete storage volume %s on %s: %w", name, pool, err)
 	}
@@ -337,6 +410,8 @@ func (a *API) DeleteVolume(_ context.Context, pool, name string) error {
 
 // CreateSnapshot はinstanceのスナップショットを作成する。
 func (a *API) CreateSnapshot(ctx context.Context, instance, snapshot string) error {
+	a.log("create snapshot", "instance", instance, "snapshot", snapshot)
+
 	op, err := a.Server.CreateInstanceSnapshot(instance, api.InstanceSnapshotsPost{Name: snapshot})
 	if err != nil {
 		return fmt.Errorf("create snapshot %s: %w", snapshot, err)
@@ -370,14 +445,27 @@ func snapshotName(name string) string {
 }
 
 // RestoreSnapshot はinstanceをスナップショットの状態へ戻す。
+//
+// 現在の設定を送り返すと、取得から書き戻しまでの間に加えられた変更を
+// 巻き戻してしまう。Incusは Restore 指定時に他のフィールドを見ないため、
+// 復元先だけを送る。
 func (a *API) RestoreSnapshot(ctx context.Context, instance, snapshot string) error {
-	return a.updateInstance(ctx, instance, func(put *api.InstancePut) {
-		put.Restore = snapshot
-	})
+	a.log("restore snapshot", "instance", instance, "snapshot", snapshot)
+
+	op, err := a.Server.UpdateInstance(instance, api.InstancePut{Restore: snapshot}, "")
+	if err != nil {
+		return fmt.Errorf("restore snapshot %s: %w", snapshot, err)
+	}
+	if err := op.WaitContext(ctx); err != nil {
+		return fmt.Errorf("restore snapshot %s: %w", snapshot, err)
+	}
+	return nil
 }
 
 // DeleteSnapshot はスナップショットを削除する。
 func (a *API) DeleteSnapshot(ctx context.Context, instance, snapshot string) error {
+	a.log("delete snapshot", "instance", instance, "snapshot", snapshot)
+
 	op, err := a.Server.DeleteInstanceSnapshot(instance, snapshot)
 	if err != nil {
 		return fmt.Errorf("delete snapshot %s: %w", snapshot, err)
@@ -403,6 +491,11 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 		DataDone: dataDone,
 	}
 
+	// 中断されたときにコンテナ内のプロセスへ伝えるため、制御経路は常に開く。
+	done := make(chan struct{})
+	defer close(done)
+	ctrl := control{ctx: ctx, done: done}
+
 	if opt.TTY {
 		// 端末を割り当てる場合、キー入力をそのままコンテナへ渡すため
 		// ホスト側の端末をraw modeにする。復元しないとシェルが壊れる。
@@ -422,8 +515,15 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 
 		resized, stop := console.Resized()
 		defer stop()
-		args.Control = controlHandler(console, resized)
+
+		ctrl.console = console
+		ctrl.resized = resized
 	}
+	args.Control = controlHandler(ctrl)
+
+	// argvにはスクリプト本文が入りうるため、実行するプログラムだけを示す。
+	// 失敗した内容はステップ側のエラーが伝える。
+	a.log("exec", "name", name, "program", program(argv))
 
 	op, err := a.Server.ExecInstance(name, req, args)
 	if err != nil {
@@ -432,17 +532,27 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	if err := op.WaitContext(ctx); err != nil {
 		return 0, fmt.Errorf("exec in %s: %w", name, err)
 	}
-	<-dataDone
+
+	// 出力の中継が終わるのを待つ。websocketが半開のまま残ると
+	// 永久に閉じないため、中断できるようにしておく。
+	select {
+	case <-dataDone:
+	case <-ctx.Done():
+		return 0, fmt.Errorf("exec in %s: %w", name, ctx.Err())
+	}
 
 	return exitCodeOf(op.Get()), nil
 }
 
 // execRequest はexec要求を組み立てる。
 func execRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error) {
-	env := maps.Clone(opt.PublicEnv)
-	if env == nil {
-		env = map[string]string{}
+	env := map[string]string{}
+	if opt.TTY && opt.Term != "" {
+		// Incusは既定でTERMを設定しない。端末向けのプログラムが
+		// 動かなくなるため、ホストの値を引き継ぐ。
+		env["TERM"] = opt.Term
 	}
+	maps.Copy(env, opt.PublicEnv)
 	maps.Copy(env, opt.Env)
 
 	req := api.InstanceExecPost{
@@ -482,4 +592,17 @@ func exitCodeOf(op api.Operation) int {
 // WaitReady はinstanceがprovisioningを受けられる状態になるまで待つ。
 func (a *API) WaitReady(ctx context.Context, name string, opt WaitOptions) error {
 	return waitReady(ctx, a, name, opt)
+}
+
+// program は実行するプログラム名を返す。
+func program(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	return argv[0]
+}
+
+// sortedKeys はマップのキーを昇順で返す。ログの出力順を安定させる。
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }

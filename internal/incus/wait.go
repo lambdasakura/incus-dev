@@ -36,21 +36,20 @@ func waitReady(ctx context.Context, c Client, name string, opt WaitOptions) erro
 // waitExec はコンテナ内でコマンドを実行できるようになるまで待つ。
 func waitExec(ctx context.Context, c Client, name string, opt WaitOptions) error {
 	deadline := time.Now().Add(opt.Timeout)
-	var lastErr error
 	for {
 		code, err := c.Exec(ctx, name, []string{"true"}, ExecOptions{})
 		if err == nil && code == 0 {
 			return nil
 		}
-		if err != nil {
-			lastErr = err
-		}
 
 		if time.Now().After(deadline) {
-			if lastErr == nil {
-				return fmt.Errorf("instance %s did not become ready within %s", name, opt.Timeout)
+			// 最後の試行が何で失敗したかを示す。これが無いと
+			// 「起動しない」以上のことが分からず、対処のしようがない。
+			if err != nil {
+				return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, err)
 			}
-			return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, lastErr)
+			return fmt.Errorf("instance %s did not become ready within %s (last exit code %d)",
+				name, opt.Timeout, code)
 		}
 		select {
 		case <-ctx.Done():
@@ -96,6 +95,11 @@ func waitNetwork(ctx context.Context, c Client, name string, opt WaitOptions) er
 		case time.Now().After(limit):
 			return fmt.Errorf("%w: instance %s has no address after %s",
 				ErrNetworkNotReady, name, opt.NetworkTimeout)
+		}
+
+		// どの経路でも NetworkTimeout を超えたら待たない。
+		if time.Now().After(limit) {
+			return nil
 		}
 
 		select {

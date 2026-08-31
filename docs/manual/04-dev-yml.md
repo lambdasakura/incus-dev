@@ -100,6 +100,25 @@ instance名としては英数字とハイフンへ正規化される。
 
 同じマシンで複数のプロジェクトを扱う場合、名前が衝突しないようにする。
 
+### `scope`
+
+同じプロジェクトを複数の場所に clone する、あるいはブランチごとに
+環境を分けたい場合、instance名の区別の仕方を選べる。
+
+```yaml
+project:
+  name: my-project
+  scope: path        # name（既定） | path | branch
+```
+
+| 値 | instance名 | 用途 |
+| --- | --- | --- |
+| `name`（既定） | `dev-my-project` | 1つの環境を共有する |
+| `path` | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
+| `branch` | `dev-my-project-feature-x` | ブランチごとに分ける（Gitが必要） |
+
+既定を変えると既存の環境が別物になるため、明示した場合のみ名前が変わる。
+
 ---
 
 ## 4.5 `instance`
@@ -300,7 +319,7 @@ provision:
 
 ## 4.10 volumes
 
-instanceを作り直しても残したいデータを置きます。
+instanceを作り直しても残したいデータを置く。
 
 ```yaml
 volumes:
@@ -310,18 +329,18 @@ volumes:
     pool: default            # 任意
 ```
 
-`idev rebuild` しても中身は残ります。`idev destroy` でも残り、
-消したい場合は `idev destroy --volumes` を使います。
+`idev rebuild` しても中身は残る。`idev destroy` でも残るため、
+消したい場合は `idev destroy --volumes` を使う。
 
 ビルドキャッシュやデータベースの実体など、
-「環境は作り直したいが消したくないもの」に向いています。
+「環境は作り直したいが消したくないもの」に向く。
 
 ---
 
 ## 4.11 secrets
 
-`dev.yml` はGitにコミットされる前提なので、**値そのものは書きません**。
-ホスト側から注入します。
+`dev.yml` はGitにコミットされる前提なので、**値そのものは書かない**。
+ホスト側から注入する。
 
 ```yaml
 secrets:
@@ -334,10 +353,10 @@ secrets:
     optional: true           # 無くてもよい
 ```
 
-- `run` ステップには環境変数として渡ります
-- `ansible` ステップには `--extra-vars` として渡ります（0600の一時ファイル）
-- 取得できないものがあると、**instanceに触れる前に** どれが足りないか表示して止まります
-- ログやエラーの表示では値がマスクされます
+- `run` ステップには環境変数として渡る
+- `ansible` ステップには `--extra-vars` として渡る（0600の一時ファイル）
+- 取得できないものがあると、**instanceに触れる前に** どれが足りないか表示して止まる
+- ログやエラーの表示では値がマスクされる
 
 ```console
 $ idev up
@@ -345,5 +364,39 @@ $ idev up
   API_TOKEN (environment variable HOST_TOKEN): not set
 ```
 
-ただし **ステップ自身が出力した内容まではマスクできません**。
-`echo $API_TOKEN` のような書き方は避けてください。
+ただし **ステップ自身が出力した内容まではマスクできない**。
+`echo $API_TOKEN` のような書き方は避けること。
+
+---
+
+## 4.12 `shell`
+
+`idev shell` / `idev exec` の既定を指定する。
+
+```yaml
+shell:
+  user: developer      # 実行ユーザー。省略時はinstanceの既定（root）
+  command: /bin/bash   # 起動するシェル。既定 /bin/sh
+  cwd: /workspace/src  # 作業ディレクトリ。既定は workspace.target
+```
+
+`user` に数値uidを指定した場合はそのままIncusへ渡す。ユーザー名の場合は
+コンテナ内で `su` を使って切り替える（Incusのexecはuidしか受け付けないため）。
+指定したユーザーはコンテナ内に存在している必要があるので、
+provisionで作成しておくこと。
+
+---
+
+## 4.13 `incus`
+
+操作対象のIncus projectを指定する。
+
+```yaml
+incus:
+  project: development
+```
+
+CLIの `--incus-project` を指定した場合はそちらが優先される。
+どちらも無ければ `default` を使う。
+
+指定したprojectはIncus側に存在している必要がある（devkitは作成しない）。

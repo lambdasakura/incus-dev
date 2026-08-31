@@ -251,8 +251,8 @@ storage pool名とnetwork名はホスト依存になる点に注意する。
 
 ## 6.9 複数のリポジトリをマウントする
 
-`instance.devices` に追加すれば、workspace以外のディレクトリも共有できます。
-workspaceと同じuid/gid対応付けが自動的に適用されます。
+`instance.devices` に追加すれば、workspace以外のディレクトリも共有できる。
+workspaceと同じuid/gid対応付けが自動的に適用される。
 
 ```yaml
 instance:

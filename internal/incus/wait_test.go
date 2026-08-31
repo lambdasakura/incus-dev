@@ -220,3 +220,34 @@ func TestWaitNetworkPropagatesError(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, errAPI)
 	}
 }
+
+// IPv6だけが付いた状態でも、NetworkTimeout を超えたら待たない。
+// grace の判定だけが唯一の脱出路だと、退行時に永久に待ち続けてしまう。
+func TestWaitNetworkStopsAtTimeout(t *testing.T) {
+	f := newFakeServer()
+	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv6)
+	a, _ := newAPI(f)
+
+	opt := fastWait()
+	opt.IPv4Grace = time.Hour // grace では抜けられない
+	opt.NetworkTimeout = 50 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := a.WaitReady(ctx, "dev-x", opt); err != nil {
+		t.Fatalf("WaitReady() error = %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Error("NetworkTimeout を超えても待ち続けている")
+	}
+}
+
+// instanceを取得できなくなった場合
+func TestStopInstanceMissing(t *testing.T) {
+	a, _ := newAPI(newFakeServer())
+
+	if err := a.StopInstance(context.Background(), "dev-missing"); !errors.Is(err, ErrInstanceNotFound) {
+		t.Errorf("error = %v, want ErrInstanceNotFound", err)
+	}
+}

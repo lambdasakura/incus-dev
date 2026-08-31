@@ -1,9 +1,12 @@
 package incus
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,17 +32,42 @@ func (o *fakeOp) GetWebsocket(string) (*websocket.Conn, error)                  
 func (o *fakeOp) RemoveHandler(*incusclient.EventTarget) error                     { return nil }
 func (o *fakeOp) Refresh() error                                                   { return nil }
 func (o *fakeOp) Wait() error                                                      { return o.err }
-func (o *fakeOp) WaitContext(context.Context) error                                { return o.err }
+
+// WaitContext は本物同様、中断されたら待たずに戻る。
+func (o *fakeOp) WaitContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return o.err
+	}
+}
 
 // fakeRemoteOp は転送を伴う操作を表す。
-type fakeRemoteOp struct{ err error }
+type fakeRemoteOp struct {
+	err error
+	// block が非nilの場合、閉じるまで完了しない。
+	block chan struct{}
+	// canceled は取り消しが要求されたか。
+	canceled chan struct{}
+}
 
 func (o *fakeRemoteOp) AddHandler(func(api.Operation)) (*incusclient.EventTarget, error) {
 	return nil, nil
 }
-func (o *fakeRemoteOp) CancelTarget() error                { return nil }
+func (o *fakeRemoteOp) CancelTarget() error {
+	if o.canceled != nil {
+		close(o.canceled)
+	}
+	return nil
+}
 func (o *fakeRemoteOp) GetTarget() (*api.Operation, error) { return nil, nil }
-func (o *fakeRemoteOp) Wait() error                        { return o.err }
+func (o *fakeRemoteOp) Wait() error {
+	if o.block != nil {
+		<-o.block
+	}
+	return o.err
+}
 
 // fakeServer はIncus APIのfake。
 type fakeServer struct {
@@ -58,14 +86,25 @@ type fakeServer struct {
 	execMeta map[string]any
 	// beforeExec は ExecInstance の直前に呼ばれる。
 	beforeExec func()
+	// holdData が非nilの場合、閉じるまで出力の中継が終わらない。
+	holdData chan struct{}
 	// beforeInstance は GetInstanceFull の直前に呼ばれる。
 	beforeInstance func()
+	// beforeState は UpdateInstanceState の直前に呼ばれる。
+	beforeState func()
 	// lastExec は最後の exec 要求。
 	lastExec api.InstanceExecPost
 	// lastExecArgs は最後の exec に渡された入出力・制御の指定。
 	lastExecArgs *incusclient.InstanceExecArgs
 	// lastCreate は最後の作成要求。
 	lastCreate api.InstancesPost
+	// lastImage / lastSource は作成に使ったimageと取得元。
+	lastImage  api.Image
+	lastSource incusclient.ImageServer
+	// createOp は CreateInstanceFromImage が返す操作。nilなら既定。
+	createOp *fakeRemoteOp
+	// lastUpdate は最後に送った更新内容。
+	lastUpdate api.InstancePut
 	// lastVolume は最後のボリューム作成要求。
 	lastVolume api.StorageVolumesPost
 	// lastState は最後の状態変更要求。
@@ -113,33 +152,61 @@ func (f *fakeServer) GetInstanceFull(name string) (*api.InstanceFull, string, er
 	if !ok {
 		return nil, "", api.StatusErrorf(404, "Instance not found")
 	}
-	return inst, "etag", nil
+	// 本物はレスポンスを毎回組み立てる。保持している値を共有しない。
+	copied := *inst
+	copied.Config = maps.Clone(inst.Config)
+	copied.Devices = cloneDevices(inst.Devices)
+	copied.Profiles = slices.Clone(inst.Profiles)
+
+	return &copied, "etag", nil
 }
 
-func (f *fakeServer) CreateInstanceFromImage(_ incusclient.ImageServer, _ api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error) {
+func (f *fakeServer) CreateInstanceFromImage(source incusclient.ImageServer, image api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error) {
 	f.lastCreate = req
+	f.lastImage = image
+	f.lastSource = source
 	if err := f.record("CreateInstanceFromImage"); err != nil {
 		return nil, err
 	}
 	f.addInstance(req.Name, req.InstancePut)
 
+	if f.createOp != nil {
+		return f.createOp, nil
+	}
 	return &fakeRemoteOp{err: f.opErr["CreateInstanceFromImage"]}, nil
 }
 
 func (f *fakeServer) UpdateInstance(name string, put api.InstancePut, _ string) (incusclient.Operation, error) {
+	f.lastUpdate = put
 	if err := f.record("UpdateInstance"); err != nil {
 		return nil, err
 	}
 	if inst, ok := f.instances[name]; ok {
-		inst.Config = put.Config
-		inst.Devices = put.Devices
-		inst.Profiles = put.Profiles
+		// 本物は送った内容で置き換える。呼び出し側が保持しているマップを
+		// そのまま共有すると、更新を送っていない実装でもテストが通ってしまう。
+		inst.Config = maps.Clone(put.Config)
+		inst.Devices = cloneDevices(put.Devices)
+		inst.Profiles = slices.Clone(put.Profiles)
 	}
 	return f.op("UpdateInstance"), nil
 }
 
+func cloneDevices(devices map[string]map[string]string) map[string]map[string]string {
+	if devices == nil {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(devices))
+	for name, dev := range devices {
+		out[name] = maps.Clone(dev)
+	}
+	return out
+}
+
 func (f *fakeServer) UpdateInstanceState(name string, state api.InstanceStatePut, _ string) (incusclient.Operation, error) {
 	f.lastState = state
+	if f.beforeState != nil {
+		f.beforeState()
+	}
 	if err := f.record("UpdateInstanceState"); err != nil {
 		return nil, err
 	}
@@ -172,7 +239,14 @@ func (f *fakeServer) ExecInstance(_ string, exec api.InstanceExecPost, args *inc
 		return nil, err
 	}
 	if args != nil && args.DataDone != nil {
-		close(args.DataDone)
+		// 本物は出力の中継が終わってから閉じる。
+		done, hold := args.DataDone, f.holdData
+		go func() {
+			if hold != nil {
+				<-hold
+			}
+			close(done)
+		}()
 	}
 	return &fakeOp{err: f.opErr["ExecInstance"], metadata: f.execMeta}, nil
 }
@@ -184,11 +258,16 @@ func (f *fakeServer) GetProfileNames() ([]string, error) {
 	return f.profiles, nil
 }
 
-func (f *fakeServer) GetStoragePoolVolumes(pool string) ([]api.StorageVolume, error) {
-	if err := f.record("GetStoragePoolVolumes"); err != nil {
-		return nil, err
+func (f *fakeServer) GetStoragePoolVolume(pool, volType, name string) (*api.StorageVolume, string, error) {
+	if err := f.record("GetStoragePoolVolume"); err != nil {
+		return nil, "", err
 	}
-	return f.volumes[pool], nil
+	for _, v := range f.volumes[pool] {
+		if v.Name == name && v.Type == volType {
+			return &v, "etag", nil
+		}
+	}
+	return nil, "", api.StatusErrorf(404, "Storage volume not found")
 }
 
 func (f *fakeServer) CreateStoragePoolVolume(pool string, volume api.StorageVolumesPost) error {
@@ -255,19 +334,24 @@ func (f *fakeServer) DeleteInstanceSnapshot(name, snapshot string) (incusclient.
 // fakeImages はimage参照の解決をfakeする。
 type fakeImages struct {
 	err error
-	ref string
+	// ref / instanceType は解決を求められた内容。
+	ref          string
+	instanceType string
+	// server は取得元として返すサーバ。
+	server incusclient.ImageServer
 }
 
-func (f *fakeImages) Resolve(_ context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
+func (f *fakeImages) Resolve(_ context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error) {
 	f.ref = ref
+	f.instanceType = instanceType
 	if f.err != nil {
 		return nil, nil, f.err
 	}
-	return nil, &api.Image{Fingerprint: "abc123"}, nil
+	return f.server, &api.Image{Fingerprint: "abc123"}, nil
 }
 
 func newAPI(f *fakeServer) (*API, *fakeImages) {
-	images := &fakeImages{}
+	images := &fakeImages{server: &fakeImageServer{}}
 	return &API{Server: f, Images: images}, images
 }
 
@@ -343,8 +427,15 @@ func TestAPICreateInstance(t *testing.T) {
 		t.Fatalf("CreateInstance() error = %v", err)
 	}
 
-	if images.ref != "images:alpine/3.21" {
-		t.Errorf("image参照 = %q", images.ref)
+	if images.ref != "images:alpine/3.21" || images.instanceType != "container" {
+		t.Errorf("image解決 = %q / %q", images.ref, images.instanceType)
+	}
+	// 解決結果をそのままIncusへ渡すこと（fingerprintが違えば別のimageになる）
+	if f.lastImage.Fingerprint != "abc123" {
+		t.Errorf("image = %+v, 解決したimageを渡すこと", f.lastImage)
+	}
+	if f.lastSource != images.server {
+		t.Errorf("取得元 = %v, 解決した取得元を渡すこと", f.lastSource)
 	}
 	req := f.lastCreate
 	if req.Name != "dev-x" || string(req.Type) != "container" {
@@ -381,8 +472,11 @@ func TestAPIStartStop(t *testing.T) {
 	if err := a.StopInstance(context.Background(), "dev-x"); err != nil {
 		t.Fatalf("StopInstance() error = %v", err)
 	}
-	if f.lastState.Action != "stop" || !f.lastState.Force {
-		t.Errorf("state = %+v, 停止は強制すること", f.lastState)
+	if f.lastState.Action != "stop" || f.lastState.Force {
+		t.Errorf("state = %+v, 作業中のプロセスを殺さないよう正常停止すること", f.lastState)
+	}
+	if f.lastState.Timeout <= 0 {
+		t.Errorf("timeout = %d, 応答しないinstanceで待ち続けないこと", f.lastState.Timeout)
 	}
 
 	if err := a.StartInstance(context.Background(), "dev-x"); err != nil {
@@ -390,6 +484,50 @@ func TestAPIStartStop(t *testing.T) {
 	}
 	if f.lastState.Action != "start" || f.lastState.Force {
 		t.Errorf("state = %+v", f.lastState)
+	}
+}
+
+// 正常停止できないinstanceは強制停止する。
+// idev up --restart / destroy が固まってしまうのを避ける。
+func TestAPIStopFallsBackToForce(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	f.opErr["UpdateInstanceState"] = errAPI
+	a, _ := newAPI(f)
+
+	// 2回目（強制停止）は成功させる
+	calls := 0
+	f.beforeState = func() {
+		calls++
+		if calls >= 2 {
+			delete(f.opErr, "UpdateInstanceState")
+		}
+	}
+
+	if err := a.StopInstance(context.Background(), "dev-x"); err != nil {
+		t.Fatalf("StopInstance() error = %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("呼び出し回数 = %d, 正常停止のあとに強制停止すること", calls)
+	}
+	if !f.lastState.Force {
+		t.Errorf("state = %+v, 2回目は強制停止すること", f.lastState)
+	}
+}
+
+// 停止中のinstanceを停止しようとしない
+func TestAPIStopAlreadyStopped(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{}).Status = "Stopped"
+	a, _ := newAPI(f)
+
+	if err := a.StopInstance(context.Background(), "dev-x"); err != nil {
+		t.Fatalf("StopInstance() error = %v", err)
+	}
+	for _, c := range f.calls {
+		if c == "UpdateInstanceState" {
+			t.Error("停止中のinstanceへ停止要求を出している")
+		}
 	}
 }
 
@@ -423,6 +561,23 @@ func TestAPIDeleteStopsRunningInstance(t *testing.T) {
 	}
 }
 
+// Running 以外の非停止状態でも削除できること
+func TestAPIDeleteStopsNonRunningInstance(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{}).Status = "Frozen"
+	a, _ := newAPI(f)
+
+	if err := a.DeleteInstance(context.Background(), "dev-x"); err != nil {
+		t.Fatalf("DeleteInstance() error = %v", err)
+	}
+	if _, ok := f.instances["dev-x"]; ok {
+		t.Error("削除されていない")
+	}
+	if !f.lastState.Force {
+		t.Errorf("state = %+v, 削除前の停止は強制でよい", f.lastState)
+	}
+}
+
 func TestAPIApplyConfig(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{Config: map[string]string{"keep": "yes"}})
@@ -432,9 +587,9 @@ func TestAPIApplyConfig(t *testing.T) {
 		t.Fatalf("ApplyConfig() error = %v", err)
 	}
 
-	got := f.instances["dev-x"].Config
+	got := f.lastUpdate.Config
 	if got["limits.cpu"] != "8" || got["keep"] != "yes" {
-		t.Errorf("config = %v, 宣言外のキーは残すこと", got)
+		t.Errorf("送信したconfig = %v, 宣言外のキーは残すこと", got)
 	}
 
 	// 空なら呼び出さない
@@ -455,9 +610,9 @@ func TestAPIUnsetConfig(t *testing.T) {
 	if err := a.UnsetConfig(context.Background(), "dev-x", []string{"a"}); err != nil {
 		t.Fatalf("UnsetConfig() error = %v", err)
 	}
-	got := f.instances["dev-x"].Config
+	got := f.lastUpdate.Config
 	if _, ok := got["a"]; ok {
-		t.Errorf("config = %v, 削除されていない", got)
+		t.Errorf("送信したconfig = %v, 削除されていない", got)
 	}
 	if got["b"] != "2" {
 		t.Errorf("config = %v, 指定外のキーを消している", got)
@@ -481,7 +636,7 @@ func TestAPIApplyDevices(t *testing.T) {
 		t.Fatalf("ApplyDevices() error = %v", err)
 	}
 
-	got := f.instances["dev-x"].Devices
+	got := f.lastUpdate.Devices
 	if got["workspace"]["path"] != "/workspace2" || got["workspace"]["shift"] != "true" {
 		t.Errorf("workspace = %v, 宣言外のキーは残すこと", got["workspace"])
 	}
@@ -506,7 +661,7 @@ func TestAPIRemoveDevices(t *testing.T) {
 	if err := a.RemoveDevices(context.Background(), "dev-x", []string{"gone"}); err != nil {
 		t.Fatalf("RemoveDevices() error = %v", err)
 	}
-	got := f.instances["dev-x"].Devices
+	got := f.lastUpdate.Devices
 	if _, ok := got["gone"]; ok {
 		t.Error("削除されていない")
 	}
@@ -630,6 +785,109 @@ func TestAPIExec(t *testing.T) {
 	if req.Interactive {
 		t.Error("非対話実行で Interactive を立てないこと")
 	}
+	// WaitForWS が無いとIncusは出力用のwebsocketを用意しない
+	if !req.WaitForWS {
+		t.Error("WaitForWS = false, 出力を受け取れない")
+	}
+}
+
+// 同名の変数はプロジェクト指定が優先される（仕様 06-provisioning.md 6.4）
+func TestAPIExecEnvPrecedence(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+
+	if _, err := a.Exec(context.Background(), "dev-x", []string{"true"}, ExecOptions{
+		PublicEnv: map[string]string{"DEVKIT_WORKSPACE": "/workspace"},
+		Env:       map[string]string{"DEVKIT_WORKSPACE": "/elsewhere"},
+	}); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got := f.lastExec.Environment["DEVKIT_WORKSPACE"]; got != "/elsewhere" {
+		t.Errorf("DEVKIT_WORKSPACE = %q, プロジェクト指定を優先すること", got)
+	}
+}
+
+// 出力の中継が終わるまで待つ。待たないと最後の出力を取りこぼす。
+func TestAPIExecWaitsForOutput(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+
+	// 出力の中継が終わるまで Exec が返らないこと
+	f.holdData = make(chan struct{})
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		if _, err := a.Exec(context.Background(), "dev-x", []string{"true"}, ExecOptions{}); err != nil {
+			t.Errorf("Exec() error = %v", err)
+		}
+	}()
+
+	select {
+	case <-returned:
+		t.Fatal("出力の中継を待たずに返っている")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(f.holdData)
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Exec() が返らない")
+	}
+}
+
+// 中断されたら待ち続けない
+func TestAPIOperationsHonorCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ops := map[string]func(*API) error{
+		"start":  func(a *API) error { return a.StartInstance(ctx, "dev-x") },
+		"delete": func(a *API) error { return a.DeleteInstance(ctx, "dev-x") },
+		"config": func(a *API) error { return a.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}) },
+		"snapshot": func(a *API) error {
+			return a.CreateSnapshot(ctx, "dev-x", "s1")
+		},
+	}
+
+	for name, fn := range ops {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeServer()
+			f.addInstance("dev-x", api.InstancePut{}).Status = "Stopped"
+			a, _ := newAPI(f)
+
+			if err := fn(a); !errors.Is(err, context.Canceled) {
+				t.Errorf("error = %v, want context.Canceled", err)
+			}
+		})
+	}
+}
+
+// imageの取得中に中断されたら取り消す
+func TestAPICreateInstanceCancellation(t *testing.T) {
+	f := newFakeServer()
+	f.createOp = &fakeRemoteOp{block: make(chan struct{}), canceled: make(chan struct{})}
+	a, _ := newAPI(f)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	err := a.CreateInstance(ctx, InstanceSpec{Name: "dev-x", Image: "img"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	select {
+	case <-f.createOp.canceled:
+	case <-time.After(2 * time.Second):
+		t.Error("転送を取り消していない")
+	}
+	close(f.createOp.block)
 }
 
 // ユーザー名は解決できないため呼び出し側の責務とする
@@ -658,7 +916,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 		"config":     {"UpdateInstance", func(a *API) error { return a.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}) }},
 		"devices":    {"UpdateInstance", func(a *API) error { return a.ApplyDevices(ctx, "dev-x", map[string]Device{"d": {"type": "disk"}}) }},
 		"profiles":   {"GetProfileNames", func(a *API) error { _, err := a.ProfileExists(ctx, "p"); return err }},
-		"volumes":    {"GetStoragePoolVolumes", func(a *API) error { _, err := a.VolumeExists(ctx, "p", "v"); return err }},
+		"volumes":    {"GetStoragePoolVolume", func(a *API) error { _, err := a.VolumeExists(ctx, "p", "v"); return err }},
 		"volcreate":  {"CreateStoragePoolVolume", func(a *API) error { return a.CreateVolume(ctx, "p", "v", nil) }},
 		"voldelete":  {"DeleteStoragePoolVolume", func(a *API) error { return a.DeleteVolume(ctx, "p", "v") }},
 		"snapcreate": {"CreateInstanceSnapshot", func(a *API) error { return a.CreateSnapshot(ctx, "dev-x", "s") }},
@@ -841,5 +1099,134 @@ func TestAPIWaitReady(t *testing.T) {
 
 	if err := a.WaitReady(context.Background(), "dev-x", WaitOptions{Timeout: time.Second}); err != nil {
 		t.Errorf("WaitReady() error = %v", err)
+	}
+}
+
+// --verbose でIncusへの操作を追えること。
+// ただしSecretを含みうる値は決して出さない（仕様 04-cli.md 4.10）。
+func TestAPILogsOperationsWithoutValues(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+
+	var out bytes.Buffer
+	a, _ := newAPI(f)
+	a.Logger = slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	ctx := context.Background()
+	if err := a.ApplyConfig(ctx, "dev-x", map[string]string{"limits.cpu": "8"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ApplyDevices(ctx, "dev-x", map[string]Device{
+		"secret-mount": {"type": "disk", "source": "/home/u/.ssh"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Exec(ctx, "dev-x", []string{"/bin/sh", "-c", "deploy --token s3cret"}, ExecOptions{
+		Env: map[string]string{"API_TOKEN": "s3cret"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	log := out.String()
+	for _, want := range []string{"set config", "limits.cpu", "set devices", "secret-mount", "exec", "dev-x"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("ログ = %q, %q を含むこと", log, want)
+		}
+	}
+	// 値は出さない
+	for _, leak := range []string{"s3cret", "/home/u/.ssh", "deploy"} {
+		if strings.Contains(log, leak) {
+			t.Errorf("ログ = %q, %q を含めないこと", log, leak)
+		}
+	}
+}
+
+// ログ出力先を設定しなくても動くこと
+func TestAPIWithoutLogger(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+
+	if err := a.ApplyConfig(context.Background(), "dev-x", map[string]string{"a": "1"}); err != nil {
+		t.Errorf("ApplyConfig() error = %v", err)
+	}
+}
+
+func TestAPIRestoreSnapshotErrors(t *testing.T) {
+	tests := map[string]func(*fakeServer){
+		"要求が拒否される": func(f *fakeServer) { f.err["UpdateInstance"] = errAPI },
+		"復元に失敗する":  func(f *fakeServer) { f.opErr["UpdateInstance"] = errAPI },
+	}
+
+	for name, setup := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeServer()
+			f.addInstance("dev-x", api.InstancePut{})
+			setup(f)
+			a, _ := newAPI(f)
+
+			if err := a.RestoreSnapshot(context.Background(), "dev-x", "s1"); !errors.Is(err, errAPI) {
+				t.Errorf("error = %v, want %v", err, errAPI)
+			}
+		})
+	}
+}
+
+// 復元は現在の設定を送り返さない（取得と書き戻しの間の変更を巻き戻さないため）
+func TestAPIRestoreSnapshotSendsOnlyRestore(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{Config: map[string]string{"limits.cpu": "8"}})
+	a, _ := newAPI(f)
+
+	if err := a.RestoreSnapshot(context.Background(), "dev-x", "s1"); err != nil {
+		t.Fatalf("RestoreSnapshot() error = %v", err)
+	}
+	if f.lastUpdate.Restore != "s1" {
+		t.Errorf("Restore = %q, want s1", f.lastUpdate.Restore)
+	}
+	if len(f.lastUpdate.Config) != 0 {
+		t.Errorf("config = %v, 復元先だけを送ること", f.lastUpdate.Config)
+	}
+}
+
+// 出力の中継を待っている間に中断された場合
+func TestAPIExecCancelledWhileWaitingForOutput(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	f.holdData = make(chan struct{})
+	defer close(f.holdData)
+
+	a, _ := newAPI(f)
+	ctx, cancel := context.WithCancel(context.Background())
+	f.beforeExec = cancel
+
+	// 操作の完了待ちは通るが、中継の待ちで中断される
+	f.opErr["ExecInstance"] = nil
+	if _, err := a.Exec(ctx, "dev-x", []string{"true"}, ExecOptions{}); !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+}
+
+// instanceの状態を取得できなければ削除しない
+func TestAPIDeleteKeepsInstanceWhenStopFails(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	f.err["UpdateInstanceState"] = errAPI
+	a, _ := newAPI(f)
+
+	if err := a.DeleteInstance(context.Background(), "dev-x"); !errors.Is(err, errAPI) {
+		t.Errorf("error = %v, want %v", err, errAPI)
+	}
+	if _, ok := f.instances["dev-x"]; !ok {
+		t.Error("停止に失敗したのに削除している")
+	}
+}
+
+func TestProgram(t *testing.T) {
+	if got := program(nil); got != "" {
+		t.Errorf("program(nil) = %q, want empty", got)
+	}
+	if got := program([]string{"/bin/sh", "-c", "x"}); got != "/bin/sh" {
+		t.Errorf("program() = %q", got)
 	}
 }

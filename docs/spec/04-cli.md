@@ -29,7 +29,7 @@ idev snapshot
 | `-v`, `--verbose` | | 実行した外部コマンドなどを出力する |
 | `-C`, `--directory` | カレントディレクトリ | プロジェクト探索の起点 |
 | `--incus-remote` | `local` | Incus remote |
-| `--incus-project` | `default` | Incus project |
+| `--incus-project` | `dev.yml` の `incus.project`、無ければ `default` | Incus project |
 
 `--incus-remote` / `--incus-project` は操作層へそのまま渡す
 （[05-incus.md](05-incus.md) 5.5、5.6）。remoteを指定した場合、
@@ -126,26 +126,33 @@ idev shell
 
 対象コンテナへinteractive shellを開く。
 
-- TTYを割り当て、標準入出力を引き継ぐ
-- 作業ディレクトリの既定は `workspace.target`
-- 初期実装ではroot shellでよい
+- 標準入出力が端末に接続されている場合のみTTYを割り当てる
+  （端末でない場合に割り当てると出力へCRが混入する。[05-incus.md](05-incus.md) 5.7.2）
+- 実行ユーザー・シェル・作業ディレクトリは `dev.yml` の `shell` で指定する
+  （[03-configuration.md](03-configuration.md) 3.14）。既定はinstanceの既定ユーザー、
+  `/bin/sh`、`workspace.target`
 
-将来的には、
-
-```yaml
-shell:
-  user: developer
-  command: /bin/bash
-  cwd: /workspace
-```
-
-を `dev.yml` で指定できる構造とする。
-
-引数を与えた場合は、そのコマンドを実行して終了する形も検討する。
+引数を与えた場合は、そのコマンドを実行して終了する。
 
 ```bash
 idev shell -- make test
 ```
+
+---
+
+## 4.3.1 `idev exec`
+
+```bash
+idev exec -- make test
+```
+
+コンテナ内でコマンドを実行する。**TTYは割り当てない。**
+
+`idev shell` と違い、端末に接続されていても擬似端末を割り当てない。
+CIやスクリプトから呼ぶ場合に、端末の有無で挙動が変わらないようにするためである。
+
+実行ユーザー・作業ディレクトリの扱いは `idev shell` と同じ（`shell` の指定に従う）。
+コマンドの指定は必須とし、省略された場合は `idev shell` を使うよう促して失敗する。
 
 ---
 
@@ -272,7 +279,7 @@ idev validate
 - Profile名の構文
 - `profiles: []` の場合に root disk device が宣言されていること
 - `instance.config` / `instance.devices` のキーが `-` で始まらないこと
-  （incusコマンドのフラグとして解釈されうるため）
+  （Incusが受け付けないキー形式であり、誤記を早期に知らせるため）
 - `instance.config` の値がスカラであること
 - `user.incus-devkit.*` を使用していないこと
 
@@ -344,7 +351,11 @@ idev up
 ステップ実行中の出力は、そのまま標準エラーへ中継する。
 
 長時間かかる処理（パッケージの導入など）で進行が見えなくなることを避けるため、
-要約や抑制は行わない。`--verbose` では、これに加えて実行した外部コマンドを出力する。
+要約や抑制は行わない。`--verbose` では、これに加えて実行した外部コマンドと
+Incusへの操作を出力する。
+
+Incus操作のログには **操作名と対象（instance名・キー名）のみ** を出す。
+configやenvの値はSecretを含みうるため出さない。
 
 詳細確認用に以下を提供する。
 

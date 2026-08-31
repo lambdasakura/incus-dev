@@ -847,3 +847,39 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 		t.Errorf("DEVKIT_INCUS_PROJECT = %q, want default", got)
 	}
 }
+
+// 擬似端末を割り当てる場合、ホストの TERM をコンテナへ渡すこと。
+// これが無いと vim / less などが端末を判別できない。
+func TestShellPassesTerm(t *testing.T) {
+	cfg := loadTestConfig(t, baseYAML)
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+	})
+
+	var got incus.ExecOptions
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		got = opt
+		return 0, nil
+	}
+
+	app := cli.NewApp(cli.AppOptions{
+		Config:      cfg,
+		Client:      client,
+		Runner:      &runnertest.Fake{},
+		In:          strings.NewReader(""),
+		Out:         &bytes.Buffer{},
+		Interactive: true,
+		Term:        "xterm-256color",
+		CheckIDMap:  func(int, int) error { return nil },
+	})
+
+	if err := app.Shell(context.Background(), nil); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+	if got.Term != "xterm-256color" {
+		t.Errorf("Term = %q, want xterm-256color", got.Term)
+	}
+}

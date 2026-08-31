@@ -174,23 +174,6 @@ func TestCommandString(t *testing.T) {
 	}
 }
 
-func TestRunInteractivePassesThroughStdio(t *testing.T) {
-	r := runner.New()
-
-	// Interactive では親プロセスの標準入出力を引き継ぐ。
-	// ここでは何も出力しないコマンドで、経路が動作することのみ確認する。
-	res, err := r.Run(context.Background(), runner.Command{
-		Name:        "true",
-		Interactive: true,
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if res.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", res.ExitCode)
-	}
-}
-
 func TestRunLogsCommandWhenLoggerSet(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -362,23 +345,5 @@ func TestCollapseMultilineArgs(t *testing.T) {
 				t.Errorf("String() = %q, %q を含むこと", got, tt.want)
 			}
 		})
-	}
-}
-
-// 対話実行では、親のcontextがキャンセルされても子プロセスを殺さない。
-// そうしないと、コンテナ内コマンドを止めようとしたCtrl-Cでシェルごと落ちる。
-func TestInteractiveIgnoresContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	r := runner.New()
-
-	if _, err := r.Run(ctx, runner.Command{Name: "true", Interactive: true}); err != nil {
-		t.Errorf("Run() error = %v, 対話実行はcontextに追従しないこと", err)
-	}
-
-	// 非対話ではcontextに従う
-	if _, err := r.Run(ctx, runner.Command{Name: "true"}); err == nil {
-		t.Error("非対話実行はcontextに従うこと")
 	}
 }

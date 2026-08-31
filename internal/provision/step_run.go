@@ -7,6 +7,7 @@ import (
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
 // execRun はコンテナ内でスクリプトを実行する（仕様 06-provisioning.md 6.4）。
@@ -37,7 +38,9 @@ func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) e
 		return err
 	}
 	if code != 0 {
-		return fmt.Errorf("exited with code %d", code)
+		// どのスクリプトが失敗したかを示す（仕様 04-cli.md 4.10）。
+		// 値がSecretを含みうる env は決して含めない。
+		return fmt.Errorf("%s: exited with code %d", runner.Collapse(step.Script), code)
 	}
 	return nil
 }

@@ -151,26 +151,28 @@ func TestAPIExecDoesNotTouchConsole(t *testing.T) {
 	if console.raw {
 		t.Error("端末を伴わない実行でraw modeにしている")
 	}
-	if f.lastExecArgs.Control != nil {
-		t.Error("端末を伴わない実行で制御ハンドラを設定している")
+	// 中断を伝えるため、端末を伴わない実行でも制御経路は開く
+	if f.lastExecArgs.Control == nil {
+		t.Error("制御ハンドラが設定されていない")
 	}
 }
 
 // ウィンドウサイズの変更をIncusへ伝える
-func TestSendResizes(t *testing.T) {
+func TestControlSendsResize(t *testing.T) {
 	console := newFakeConsole()
-	resized := make(chan struct{}, 2)
+	resized := make(chan struct{}, 1)
 	resized <- struct{}{}
+	done := make(chan struct{})
 
 	var sent []any
 	send := func(v any) error {
 		sent = append(sent, v)
 		console.width, console.height = 100, 40
-		close(resized) // 2回目のループで抜ける
+		close(done) // 次のループで抜ける
 		return nil
 	}
 
-	sendResizes(console, resized, send)
+	control{ctx: context.Background(), done: done, console: console, resized: resized}.handle(send)
 
 	want := []any{api.InstanceExecControl{
 		Command: "window-resize",
@@ -181,18 +183,68 @@ func TestSendResizes(t *testing.T) {
 	}
 }
 
+// 中断されたら、コンテナ内のプロセスへ終了を伝える。
+// 伝えないとパッケージ導入などが走り続け、次の実行と衝突する。
+func TestControlForwardsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var sent []any
+	control{ctx: ctx, done: make(chan struct{})}.handle(func(v any) error {
+		sent = append(sent, v)
+		return nil
+	})
+
+	want := []any{api.InstanceExecControl{Command: "signal", Signal: int(syscall.SIGTERM)}}
+	if diff := cmp.Diff(want, sent); diff != "" {
+		t.Errorf("送信内容 mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// 実行が終わったらハンドラも終える
+func TestControlStopsWhenExecFinishes(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+
+	control{ctx: context.Background(), done: done}.handle(func(any) error {
+		t.Error("実行後に送信している")
+		return nil
+	})
+}
+
+// 購読が終わってもハンドラは中断の監視を続ける
+func TestControlSurvivesClosedResize(t *testing.T) {
+	resized := make(chan struct{})
+	close(resized)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	calls := 0
+	control{ctx: ctx, done: make(chan struct{}), console: newFakeConsole(), resized: resized}.handle(
+		func(any) error {
+			calls++
+			return nil
+		})
+
+	if calls != 1 {
+		t.Errorf("送信回数 = %d, 中断だけを送ること", calls)
+	}
+}
+
 // 送信できなくなったら黙って終える（execそのものは継続する）
-func TestSendResizesStopsOnError(t *testing.T) {
+func TestControlStopsOnSendError(t *testing.T) {
 	console := newFakeConsole()
 	resized := make(chan struct{}, 2)
 	resized <- struct{}{}
 	resized <- struct{}{}
 
 	calls := 0
-	sendResizes(console, resized, func(any) error {
-		calls++
-		return errAPI
-	})
+	control{ctx: context.Background(), done: make(chan struct{}), console: console, resized: resized}.handle(
+		func(any) error {
+			calls++
+			return errAPI
+		})
 
 	if calls != 1 {
 		t.Errorf("送信回数 = %d, 失敗したら繰り返さないこと", calls)
@@ -200,16 +252,17 @@ func TestSendResizesStopsOnError(t *testing.T) {
 }
 
 // サイズを取得できなければ送らない
-func TestSendResizesWithoutSize(t *testing.T) {
+func TestControlWithoutSize(t *testing.T) {
 	console := newFakeConsole()
 	console.sizeErr = errAPI
 	resized := make(chan struct{}, 1)
 	resized <- struct{}{}
 
-	sendResizes(console, resized, func(any) error {
-		t.Error("サイズが分からないのに送信している")
-		return nil
-	})
+	control{ctx: context.Background(), done: make(chan struct{}), console: console, resized: resized}.handle(
+		func(any) error {
+			t.Error("サイズが分からないのに送信している")
+			return nil
+		})
 }
 
 // 端末でない入出力ではraw modeにできない
@@ -295,19 +348,81 @@ func TestControlHandler(t *testing.T) {
 	console := newFakeConsole()
 	resized := make(chan struct{}, 1)
 	resized <- struct{}{}
-	close(resized)
 
-	controlHandler(console, resized)(conn)
+	// 1件届いたらexecが終わった扱いにして、ハンドラを終えさせる
+	done := make(chan struct{})
+	first := make(chan received, 1)
+	go func() {
+		first <- <-got
+		close(done)
+	}()
 
-	first := <-got
+	controlHandler(control{
+		ctx: context.Background(), done: done, console: console, resized: resized,
+	})(conn)
+
 	want := api.InstanceExecControl{
 		Command: "window-resize",
 		Args:    map[string]string{"width": "80", "height": "24"},
 	}
-	if diff := cmp.Diff(want, first.control); diff != "" {
+	if diff := cmp.Diff(want, (<-first).control); diff != "" {
 		t.Errorf("送信内容 mismatch (-want +got):\n%s", diff)
 	}
-	if second := <-got; !second.closed {
+	if last := <-got; !last.closed {
 		t.Error("終了時にcloseを送っていない")
+	}
+}
+
+// 端末を割り当てる場合、TERM を渡さないと vim / less などが動かない
+func TestAPIExecInteractivePassesTerm(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+	a.Console = newFakeConsole()
+
+	if _, err := a.Exec(context.Background(), "dev-x", []string{"/bin/sh"}, ExecOptions{
+		TTY:  true,
+		Term: "xterm-256color",
+	}); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got := f.lastExec.Environment["TERM"]; got != "xterm-256color" {
+		t.Errorf("TERM = %q, want xterm-256color", got)
+	}
+}
+
+// 端末を伴わない実行では TERM を渡さない
+// （進捗バーなど、端末向けの出力を誘発しないため）
+func TestAPIExecWithoutTTYOmitsTerm(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+
+	if _, err := a.Exec(context.Background(), "dev-x", []string{"true"}, ExecOptions{
+		Term: "xterm-256color",
+	}); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if _, ok := f.lastExec.Environment["TERM"]; ok {
+		t.Errorf("environment = %v, TERM を渡さないこと", f.lastExec.Environment)
+	}
+}
+
+// プロジェクトが TERM を指定した場合はそちらを尊重する
+func TestAPIExecTermCanBeOverridden(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+	a.Console = newFakeConsole()
+
+	if _, err := a.Exec(context.Background(), "dev-x", []string{"/bin/sh"}, ExecOptions{
+		TTY:  true,
+		Term: "xterm-256color",
+		Env:  map[string]string{"TERM": "dumb"},
+	}); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got := f.lastExec.Environment["TERM"]; got != "dumb" {
+		t.Errorf("TERM = %q, 明示指定を優先すること", got)
 	}
 }
