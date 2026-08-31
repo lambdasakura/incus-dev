@@ -10,9 +10,12 @@
 ```bash
 idev up
 idev provision
-idev shell -- <command>
+idev exec -- <command>
 idev status --json
 ```
+
+`idev exec` は擬似端末を割り当てない。端末の有無で挙動が変わらないため、
+スクリプトやエージェントからはこちらを使う（対話が要る場合のみ `idev shell`）。
 
 Incusの内部（instance名、device、profile）を知らなくても利用できる。
 
@@ -44,17 +47,17 @@ idev rebuild --force
 idev up || exit 1
 ```
 
-`idev shell -- <command>` はコンテナ内コマンドの終了コードをそのまま返すため、
+`idev exec` / `idev shell` はコンテナ内コマンドの終了コードをそのまま返すため、
 テストの成否をそのまま扱える。
 
 ```bash
-idev shell -- make test        # テストが失敗すれば非0
+idev exec -- make test        # テストが失敗すれば非0
 ```
 
 出力は端末以外へ渡しても壊れないため、パイプで加工してよい。
 
 ```bash
-idev shell -- go test ./... 2>&1 | tail -20
+idev exec -- go test ./... 2>&1 | tail -20
 ```
 
 ## 7.4 状態を機械可読に取れる
@@ -91,8 +94,8 @@ idev status --json
 ビルド・テスト・実行はIncusコンテナ内で行う。ホスト側で直接実行しない。
 
     idev up                    # 環境の構築（初回・設定変更後）
-    idev shell -- make test    # テスト
-    idev shell -- make build   # ビルド
+    idev exec -- make test     # テスト
+    idev exec -- make build    # ビルド
     idev shell                 # 対話シェル
 
 環境に必要なものを追加する場合は `.incus-dev/dev.yml` の provision を編集し、
@@ -101,7 +104,21 @@ idev status --json
 provisionステップは再実行される前提で、冪等に書くこと。
 ```
 
-## 7.6 注意
+## 7.6 Agent Skill
+
+Claude Code のようにAgent Skillを読み込むツールでは、
+リポジトリの [`skills/incus-devkit/`](../../skills/incus-devkit/) をそのまま使える。
+
+```bash
+cp -r skills/incus-devkit ~/.claude/skills/          # 全プロジェクトで使う
+cp -r skills/incus-devkit <project>/.claude/skills/  # そのプロジェクトだけ
+```
+
+原則・コマンドの対応表・`dev.yml` の書き方・エラーからの切り分けが入っている。
+
+---
+
+## 7.7 注意
 
 - `idev up` は既存のinstanceを破壊しない。環境を作り直したい場合のみ
   `idev rebuild --force` を使う

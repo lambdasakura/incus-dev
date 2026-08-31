@@ -1,0 +1,69 @@
+# .incus-dev/dev.yml
+#
+# このファイルと同じディレクトリ配下だけで、開発環境を再現できる状態に保つ。
+# 相対パスはすべてプロジェクトルート（.incus-dev/ の親）基準。
+schema: 1
+
+project:
+  # instance名 dev-<name> の元になる。同じマシン上で衝突しない名前にする。
+  name: my-project
+
+instance:
+  # Dockerfile や CI に合わせる。
+  #   images:ubuntu/24.04 / images:debian/12 / images:alpine/3.21
+  image: images:ubuntu/24.04
+
+  # ホストに存在するProfileの名前参照。devkitはProfileを作らない。
+  # profiles: [default]
+
+  # Incusのinstance configをそのまま渡す。値は文字列で書く。
+  config:
+    limits.cpu: "4"
+    limits.memory: 8GiB
+
+  # workspace以外にホストのディレクトリを共有したい場合。
+  # devices:
+  #   assets:
+  #     type: disk
+  #     source: ./assets
+  #     path: /assets
+
+# 既定でプロジェクトルートが /workspace へ共有される。変える必要は普通ない。
+# workspace:
+#   target: /workspace
+#   idmap: auto
+
+# コンテナ内での既定のユーザー・シェル・作業ディレクトリ。
+# shell:
+#   user: developer
+#   command: /bin/bash
+
+# instanceを作り直しても残したいもの（ビルドキャッシュなど）。
+# volumes:
+#   cache:
+#     path: /root/.cache
+#     size: 10GiB
+
+# 値は書かない。ホストの環境変数・ファイルから注入する。
+# secrets:
+#   GITHUB_TOKEN:
+#     env: GITHUB_TOKEN
+
+# 環境の中身。**何度実行しても壊れないように書く。**
+provision:
+  - name: base packages
+    run: |
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        ca-certificates curl git make
+
+  # 冪等の例: 入っていたら何もしない
+  # - name: go toolchain
+  #   run: |
+  #     test -x /usr/local/go/bin/go && exit 0
+  #     curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+
+  - name: project deps
+    run: make deps
+    cwd: /workspace

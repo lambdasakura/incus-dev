@@ -85,6 +85,12 @@ incus-devkit/
 │   ├── dev-v1.schema.json
 │   └── embed.go
 │
+├── skills/                     # AIエージェント向けAgent Skill
+│   └── incus-devkit/
+│       ├── SKILL.md
+│       ├── references/
+│       └── templates/
+│
 ├── examples/                   # ドキュメント用サンプル（実行時には使用しない）
 │   ├── minimal/
 │   ├── shell-based/

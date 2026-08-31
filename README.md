@@ -105,6 +105,7 @@ make test-integration   # Incus実機に対する統合テスト
 | --- | --- |
 | [マニュアル](docs/manual/README.md) | 使い方。導入、チュートリアル、リファレンス、構成例 |
 | [トラブルシューティング](docs/troubleshooting.md) | ホスト環境に起因する問題への対処 |
+| [skills/incus-devkit](skills/incus-devkit/) | AIエージェント向けAgent Skill |
 | [仕様書](docs/spec/README.md) | 設計仕様 |
 
 ## 困ったときは

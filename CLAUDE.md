@@ -26,9 +26,11 @@ Incusでプロジェクト単位の開発環境を構築・管理するCLIツー
 | `docs/spec/` | 設計仕様。実装判断の基準 |
 | `docs/manual/` | 利用者向けマニュアル。CLIの挙動を変えたら追従させる |
 | `docs/troubleshooting.md` | ホスト環境起因の問題 |
+| `skills/` | AIエージェント向けAgent Skill |
 
 CLIのフラグ・出力・既定値を変更した場合、`docs/manual/03-commands.md` と
-`docs/manual/04-dev-yml.md` の該当箇所も更新する。
+`docs/manual/04-dev-yml.md`、および `skills/incus-devkit/` の該当箇所も更新する。
+スキルは `test/skills_test.go` が雛形の妥当性とコマンド名の実在を検査する。
 
 ## 仕様書
 
