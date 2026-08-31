@@ -108,8 +108,9 @@ idev up
 idev up --restart
 ```
 
-`security.nesting` のように反映へ再起動が必要な変更があるとき、
-instanceを再起動する。既定では警告のみを表示する。
+反映に再起動が必要な変更（`raw.idmap` / `security.nesting` /
+`security.privileged`）があるとき、instanceを再起動する。
+既定では警告のみを表示する。
 
 ```bash
 idev up --dry-run

@@ -149,7 +149,15 @@ device）には一切触れない。
 
 ### 5.4.5 再起動を要する設定
 
-一部の設定は変更にinstance再起動を要する。
+一部の設定は変更にinstance再起動を要する。対象は以下。
+
+```text
+raw.idmap
+security.nesting
+security.privileged
+```
+
+`limits.*` は含めない。コンテナでは増減とも実行中に反映されるためである。
 
 devkitは再起動が必要な変更を検出した場合、既定では警告のみを表示する。
 

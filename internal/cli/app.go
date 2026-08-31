@@ -620,6 +620,9 @@ func (a *App) settleRestart(ctx context.Context, running bool, before, desired m
 }
 
 // restartRequiredKeys は変更に再起動を要するconfigキー。
+//
+// limits.* は含めない。コンテナでは増減とも実行中に反映されるためである
+// （実機で確認済み。VMは対象外なので考慮しない）。
 var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
 
 // restartRequiredChanges は反映に再起動が必要な変更を返す。

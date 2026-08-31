@@ -150,7 +150,7 @@ Debian系以外のimageでは失敗するので、その場合は `bootstrap` �
 
 ## 書くときの注意
 
-- `instance.config` の値は文字列で書く（`"8"`。`8` は拒否される）
+- `instance.config` の値は数値・真偽値で書いてもよい（文字列へ変換される）
 - `user.incus-devkit.*` は devkit が管理に使うので書かない
 - `-` で始まるキー、`=` を含むキーは使えない
 - `profiles: []` にする場合、root diskとネットワークも自分で宣言する

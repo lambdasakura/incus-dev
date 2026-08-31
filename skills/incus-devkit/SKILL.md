@@ -88,8 +88,8 @@ provision:
 
 - `instance.config` や `instance.devices`（CPU・メモリ・追加マウント）を
   変えた場合は `idev provision` ではなく **`idev up`**
-- 反映に再起動が要る設定（`security.nesting` など）は警告が出る。
-  再起動してよければ `idev up --restart`
+- 反映に再起動が要る設定（`raw.idmap` / `security.nesting` /
+  `security.privileged`）は警告が出る。再起動してよければ `idev up --restart`
 - 長いprovisionの一部だけ試すときは `idev provision --list` で番号を見て
   `idev provision --step 3` / `--from 3`
 

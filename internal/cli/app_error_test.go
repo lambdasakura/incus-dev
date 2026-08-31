@@ -700,11 +700,23 @@ func TestRestartRequiredKeys(t *testing.T) {
 			if err := app.Up(context.Background(), UpOptions{}); err != nil {
 				t.Fatalf("Up() error = %v", err)
 			}
-			if !strings.Contains(errOut.String(), key) {
-				t.Errorf("warning = %q, %q の変更を警告すること", errOut.String(), key)
+			// 出力全体で照合すると、workspaceのパスなどに偶然含まれて
+			// 通ってしまう。警告行そのものを見る。
+			if got := warningLine(errOut.String()); !strings.Contains(got, key) {
+				t.Errorf("warning = %q, %q の変更を警告すること", got, key)
 			}
 		})
 	}
+}
+
+// warningLine は再起動を促す警告の行を返す。無ければ空文字列。
+func warningLine(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "restart it to apply") {
+			return line
+		}
+	}
+	return ""
 }
 
 // 宣言から消えたキーは unset しないため、変更として警告しない。
