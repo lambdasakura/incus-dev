@@ -471,7 +471,14 @@ func (a *App) ensureRunning(ctx context.Context) error {
 			return err
 		}
 	}
-	return a.client.WaitReady(ctx, a.instance, incus.WaitOptions{})
+	err = a.client.WaitReady(ctx, a.instance, incus.WaitOptions{})
+	if errors.Is(err, incus.ErrNetworkNotReady) {
+		// アドレスが現れない構成もありうるため、ここでは止めない。
+		// ネットワークを使うステップが失敗したときの手がかりとして残す。
+		a.log.Warn(err.Error() + "; steps that need network access may fail")
+		return nil
+	}
+	return err
 }
 
 // runProvisioning はbootstrapとprovisionを順に実行する（仕様 06-provisioning.md 6.1）。

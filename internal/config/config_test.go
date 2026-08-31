@@ -795,3 +795,10 @@ func TestValidateRejectsEqualsInConfigKey(t *testing.T) {
 		t.Errorf("error = %q", err.Error())
 	}
 }
+
+func TestValidateRejectsEqualsInDeviceKey(t *testing.T) {
+	err := parseErr(t, minimal+"  devices:\n    data:\n      type: disk\n      \"a=b\": x\n")
+	if !strings.Contains(err.Error(), "=") {
+		t.Errorf("error = %q", err.Error())
+	}
+}

@@ -22,6 +22,8 @@ type Fake struct {
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
 	// FailReady が真の場合 WaitReady が失敗する。
 	FailReady bool
+	// NetworkNotReady が真の場合 WaitReady が incus.ErrNetworkNotReady を返す。
+	NetworkNotReady bool
 	// FailOn は操作名のprefixに対して返すエラー。
 	// 例: {"create": errBoom} とすると CreateInstance が失敗する。
 	FailOn map[string]error
@@ -265,6 +267,9 @@ func (f *Fake) WaitReady(_ context.Context, name string, _ incus.WaitOptions) er
 	}
 	if f.FailReady {
 		return fmt.Errorf("instance %s did not become ready", name)
+	}
+	if f.NetworkNotReady {
+		return fmt.Errorf("%w: instance %s", incus.ErrNetworkNotReady, name)
 	}
 	return nil
 }

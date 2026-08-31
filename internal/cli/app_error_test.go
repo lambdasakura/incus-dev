@@ -767,3 +767,33 @@ func TestNoWarningForKeysRemovedFromConfig(t *testing.T) {
 		t.Errorf("warning = %q, 変更していないキーを警告しないこと", errOut.String())
 	}
 }
+
+// ネットワークが割り当てられなくても、provisionは実行する。
+// アドレスが現れない構成もあるため、ここで止めると回避手段が無くなる。
+func TestUpContinuesWhenNetworkNotReady(t *testing.T) {
+	client := incustest.New()
+	client.NetworkNotReady = true
+
+	cfg, err := config.Parse([]byte(rootYAML+"provision:\n  - run: echo hi\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background()); err != nil {
+		t.Fatalf("Up() error = %v, 警告に留めて続行すること", err)
+	}
+	if !strings.Contains(errOut.String(), "network") {
+		t.Errorf("warning = %q, ネットワーク未割り当てを伝えること", errOut.String())
+	}
+	if len(client.Execs) == 0 {
+		t.Error("provisionステップが実行されていない")
+	}
+}

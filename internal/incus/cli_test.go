@@ -366,9 +366,14 @@ func TestRemoteQualification(t *testing.T) {
 }
 
 func TestWaitReady(t *testing.T) {
+	const noNIC = `[{"name":"dev-x","status":"Running","expanded_devices":{"root":{"type":"disk"}}}]`
+
 	attempts := 0
 	f := &runnertest.Fake{}
-	f.Handler = func(runner.Command) (runner.Result, error) {
+	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Args[0] == "list" {
+			return runner.Result{Stdout: []byte(noNIC)}, nil
+		}
 		attempts++
 		if attempts < 3 {
 			return runner.Result{ExitCode: 1}, errors.New("instance is not running")
@@ -594,10 +599,220 @@ func TestProfileExistsUsesRemote(t *testing.T) {
 }
 
 func TestWaitReadyUsesDefaults(t *testing.T) {
-	f := &runnertest.Fake{}
+	f := &runnertest.Fake{Stdout: map[string]string{
+		"incus list": `[{"name":"dev-x","status":"Running","expanded_devices":{"root":{"type":"disk"}}}]`,
+	}}
 
 	// 既定値でも即座に成功すること（fakeは成功を返す）
 	if err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{}); err != nil {
 		t.Errorf("WaitReady() error = %v", err)
+	}
+}
+
+// instanceが起動しても、ネットワークが使えるまでには間がある。
+// パッケージ導入を伴うステップが初回から失敗しないよう、割り当てを待つ。
+func TestWaitReadyWaitsForNetworkAddress(t *testing.T) {
+	const noAddress = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},` +
+		`"state":{"network":{"lo":{"addresses":[{"family":"inet","address":"127.0.0.1","scope":"local"}]}}}}]`
+	const withAddress = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},` +
+		`"state":{"network":{"eth0":{"addresses":[{"family":"inet","address":"10.0.0.2","scope":"global"}]}}}}]`
+
+	calls := 0
+	f := &runnertest.Fake{}
+	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Args[0] != "list" {
+			return runner.Result{}, nil // exec は成功する
+		}
+		calls++
+		if calls < 3 {
+			return runner.Result{Stdout: []byte(noAddress)}, nil
+		}
+		return runner.Result{Stdout: []byte(withAddress)}, nil
+	}
+
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:  2 * time.Second,
+		Interval: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("WaitReady() error = %v", err)
+	}
+	if calls < 3 {
+		t.Errorf("list呼び出し = %d回, アドレスが付くまで待つこと", calls)
+	}
+}
+
+// アドレスが付かない場合は、失敗ではなく判別可能なエラーで知らせる。
+// 静的設定などアドレスが現れない構成もあるため、呼び出し側が判断できるようにする。
+func TestWaitReadyReportsNetworkNotReady(t *testing.T) {
+	const noAddress = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},"state":{"network":{}}}]`
+
+	f := &runnertest.Fake{Stdout: map[string]string{"incus list": noAddress}}
+
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:        time.Second,
+		Interval:       time.Millisecond,
+		NetworkTimeout: 10 * time.Millisecond,
+	})
+	if !errors.Is(err, incus.ErrNetworkNotReady) {
+		t.Errorf("error = %v, want ErrNetworkNotReady", err)
+	}
+}
+
+// NICを持たないinstanceではネットワークを待たない
+func TestWaitReadySkipsNetworkWithoutNIC(t *testing.T) {
+	const noNIC = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"root":{"type":"disk"}},"state":{"network":{}}}]`
+
+	f := &runnertest.Fake{Stdout: map[string]string{"incus list": noNIC}}
+
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:        time.Second,
+		Interval:       time.Millisecond,
+		NetworkTimeout: time.Minute, // 待つならタイムアウトするはず
+	})
+	if err != nil {
+		t.Errorf("WaitReady() error = %v, NICが無ければ待たないこと", err)
+	}
+}
+
+// IPv6(ULA)が先に付く環境で、IPv4の割り当てまで待つこと。
+// IPv6だけの時点ではデフォルトルートが無く、外部へ出られない。
+func TestWaitReadyWaitsForIPv4(t *testing.T) {
+	const ipv6Only = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},` +
+		`"state":{"network":{"eth0":{"addresses":[` +
+		`{"family":"inet6","address":"fd42::1","scope":"global"}]}}}}]`
+	const dualStack = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},` +
+		`"state":{"network":{"eth0":{"addresses":[` +
+		`{"family":"inet6","address":"fd42::1","scope":"global"},` +
+		`{"family":"inet","address":"10.0.0.2","scope":"global"}]}}}}]`
+
+	calls := 0
+	f := &runnertest.Fake{}
+	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Args[0] != "list" {
+			return runner.Result{}, nil
+		}
+		calls++
+		if calls < 3 {
+			return runner.Result{Stdout: []byte(ipv6Only)}, nil
+		}
+		return runner.Result{Stdout: []byte(dualStack)}, nil
+	}
+
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:   2 * time.Second,
+		Interval:  time.Millisecond,
+		IPv4Grace: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("WaitReady() error = %v", err)
+	}
+	if calls < 3 {
+		t.Errorf("list呼び出し = %d回, IPv4が付くまで待つこと", calls)
+	}
+}
+
+// IPv6しか付かない環境では、猶予時間を過ぎたら先へ進む
+func TestWaitReadyProceedsWithIPv6Only(t *testing.T) {
+	const ipv6Only = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},` +
+		`"state":{"network":{"eth0":{"addresses":[` +
+		`{"family":"inet6","address":"fd42::1","scope":"global"}]}}}}]`
+
+	f := &runnertest.Fake{Stdout: map[string]string{"incus list": ipv6Only}}
+
+	start := time.Now()
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:        time.Second,
+		Interval:       time.Millisecond,
+		NetworkTimeout: time.Minute,
+		IPv4Grace:      20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("WaitReady() error = %v, IPv6のみでも進むこと", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("elapsed = %v, 猶予時間を超えて待たないこと", elapsed)
+	}
+}
+
+func TestWaitReadyTimesOutWithoutError(t *testing.T) {
+	// 非0終了だがエラーは返さない実装でも、メッセージが壊れないこと
+	f := &runnertest.Fake{}
+	f.Handler = func(runner.Command) (runner.Result, error) {
+		return runner.Result{ExitCode: 1}, nil
+	}
+
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:  10 * time.Millisecond,
+		Interval: time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("WaitReady() = nil error, want timeout error")
+	}
+	if strings.Contains(err.Error(), "%!w") {
+		t.Errorf("error = %q, nilを%%wへ渡さないこと", err.Error())
+	}
+}
+
+func TestWaitReadyPropagatesInstanceError(t *testing.T) {
+	wantErr := errors.New("list failed")
+	f := &runnertest.Fake{Err: map[string]error{"incus list": wantErr}}
+
+	err := newCLI(f).WaitReady(context.Background(), "dev-x", incus.WaitOptions{
+		Timeout:  time.Second,
+		Interval: time.Millisecond,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestWaitNetworkStopsOnContextCancel(t *testing.T) {
+	const noAddress = `[{"name":"dev-x","status":"Running",` +
+		`"expanded_devices":{"eth0":{"type":"nic"}},"state":{"network":{}}}]`
+
+	ctx, cancel := context.WithCancel(context.Background())
+	f := &runnertest.Fake{}
+	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Args[0] == "list" {
+			cancel() // 1回目の状態取得後に中断する
+			return runner.Result{Stdout: []byte(noAddress)}, nil
+		}
+		return runner.Result{}, nil
+	}
+
+	err := newCLI(f).WaitReady(ctx, "dev-x", incus.WaitOptions{
+		Timeout:        time.Second,
+		NetworkTimeout: time.Minute,
+		Interval:       10 * time.Millisecond,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestInstanceAddressHelpers(t *testing.T) {
+	// 状態が取得できていない場合
+	var empty incus.Instance
+	if empty.HasGlobalAddress() || empty.HasIPv4Address() {
+		t.Error("状態が無い場合はアドレス無しとすること")
+	}
+
+	inst := incus.Instance{
+		State: &incus.InstanceState{Network: map[string]incus.NetworkState{
+			// ループバックとリンクローカルは対象外
+			"lo":   {Addresses: []incus.NetworkAddress{{Family: "inet", Address: "127.0.0.1", Scope: "local"}}},
+			"eth0": {Addresses: []incus.NetworkAddress{{Family: "inet6", Address: "fe80::1", Scope: "link"}}},
+		}},
+	}
+	if inst.HasGlobalAddress() {
+		t.Error("グローバルでないアドレスを数えないこと")
 	}
 }

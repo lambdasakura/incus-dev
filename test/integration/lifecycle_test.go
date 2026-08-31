@@ -295,3 +295,22 @@ provision:
 		t.Errorf("limits.cpu = %q", got)
 	}
 }
+
+// 新規作成直後でも、ネットワークを使うステップが成功すること。
+//
+// instanceが起動してコマンドを実行できるようになった時点では、
+// まだIPv4が割り当てられておらず外部へ出られない。ここを待たないと
+// パッケージ導入を伴うプロジェクトは初回のupが必ず失敗する。
+func TestFirstUpCanUseNetwork(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+provision:
+  - name: install package
+    run: command -v jq >/dev/null 2>&1 || apk add --no-cache jq
+`)
+
+	f.mustRun("up")
+
+	if got := f.mustRun("shell", "--", "sh", "-c", "command -v jq"); !strings.Contains(got, "jq") {
+		t.Errorf("パッケージが導入されていない: %q", got)
+	}
+}

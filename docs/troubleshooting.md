@@ -26,7 +26,17 @@ WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.21/main: temporary er
 
 コンテナ内でIPアドレスは割り当てられており、DNSも引けるのに外へ出られない。
 
-### 原因
+### 原因（1）: 起動直後でネットワークがまだ使えない
+
+instanceが起動してコマンドを実行できるようになった時点では、
+まだIPv4が割り当てられておらずデフォルトルートも入っていない。
+
+devkitはIPv4の割り当てを待ってからprovisionを開始するため、
+通常この問題は起きない。`idev up` が
+`network address not assigned` の警告を出していた場合は、
+ネットワーク構成側の問題を疑う。
+
+### 原因（2）: Dockerとの競合
 
 **ホストにDockerが入っている場合、DockerとIncusのファイアウォール設定が競合する。**
 
