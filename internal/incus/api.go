@@ -464,7 +464,7 @@ func (a *API) DeleteSnapshot(ctx context.Context, instance, snapshot string) err
 
 // Exec はコンテナ内でコマンドを実行し、終了コードを返す。
 func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error) {
-	req, err := execRequest(argv, opt)
+	req, err := newExecRequest(argv, opt)
 	if err != nil {
 		return 0, err
 	}
@@ -530,8 +530,8 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	return exitCodeOf(op.Get()), nil
 }
 
-// execRequest はexec要求を組み立てる。
-func execRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error) {
+// newExecRequest はIncusへ送るexec要求を組み立てる。実行はしない。
+func newExecRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error) {
 	env := map[string]string{}
 	if opt.TTY && opt.Term != "" {
 		// Incusは既定でTERMを設定しない。端末向けのプログラムが
