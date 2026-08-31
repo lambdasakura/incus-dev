@@ -90,7 +90,7 @@ cmd/idev
    └─▶ internal/cli
           ├─▶ internal/project     project root 探索
           ├─▶ internal/config      dev.yml の解釈とvalidation
-          ├─▶ internal/incus       Incus操作（interface + API実装 / CLI実装）
+          ├─▶ internal/incus       Incus操作（interface + API実装）
           └─▶ internal/provision   bootstrap / ステップ実行
                  ├─▶ internal/incus    run ステップ
                  └─▶ internal/runner   ansible ステップ
@@ -99,10 +99,11 @@ cmd/idev
 守るべき制約：
 
 - `internal/config` はIncus操作もステップ実行も行わない（解釈とvalidationのみ）
-- Incus操作は既定でGo client library（`internal/incus/api.go`）を使う。
-  端末を伴う実行だけCLI実装へ委譲する（`docs/spec/05-incus.md` 5.7.1）
+- Incus操作はGo client library（`internal/incus/api.go`）で行う。
+  `incus` コマンドを呼び出さない（`docs/spec/05-incus.md` 5.7.1）
 - `internal/incus` / `internal/provision` はCLIの出力形式を知らない
-- 外部コマンド実行は `internal/runner` に集約する。他パッケージで `os/exec` を直接使わない
+- 外部コマンド実行（ansible-playbook / git）は `internal/runner` に集約する。
+  他パッケージで `os/exec` を直接使わない
 - `os.Exit` は `cmd/idev/main.go` のみ。他は `error` を返す
 - 外部プロセスを伴う関数は第一引数に `context.Context` を取る
 

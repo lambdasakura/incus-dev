@@ -32,15 +32,15 @@ type cliConfig interface {
 // remoteやimageサーバの解決には incus コマンドと同じ設定
 // （~/.config/incus/config.yml）を使う。挙動を揃えるためである。
 // パスを空にすると LoadConfig が自動判別し、設定が無ければ既定を返す。
-func Connect(target Target, terminal Client) (*API, error) {
+func Connect(target Target) (*API, error) {
 	config, err := cliconfig.LoadConfig("")
 	if err != nil {
 		return nil, fmt.Errorf("load incus client configuration: %w", err)
 	}
-	return connect(config, config.DefaultRemote, target, terminal)
+	return connect(config, config.DefaultRemote, target)
 }
 
-func connect(config cliConfig, defaultRemote string, target Target, terminal Client) (*API, error) {
+func connect(config cliConfig, defaultRemote string, target Target) (*API, error) {
 	remote := target.Remote
 	if remote == "" {
 		remote = defaultRemote
@@ -55,9 +55,8 @@ func connect(config cliConfig, defaultRemote string, target Target, terminal Cli
 	}
 
 	return &API{
-		Server:   server,
-		Images:   &configImageResolver{config: config},
-		Terminal: terminal,
+		Server: server,
+		Images: &configImageResolver{config: config},
 	}, nil
 }
 

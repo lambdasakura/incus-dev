@@ -673,34 +673,6 @@ func TestUpPropagatesEnsureRunningLookupError(t *testing.T) {
 	}
 }
 
-// idev shell で利用者が入力したコマンドは、診断のため表示してよい
-func TestShellCommandIsNotRedacted(t *testing.T) {
-	cmdRunner := &runnertest.Fake{}
-	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Root = t.TempDir()
-
-	client := &incus.CLI{Runner: cmdRunner, Project: "default"}
-	cmdRunner.Stdout = map[string]string{
-		"incus list": `[{"name":"dev-example-project","status":"Running",` +
-			`"config":{"user.incus-devkit.project":"example-project"}}]`,
-	}
-
-	app := NewApp(AppOptions{
-		Config: cfg, Client: client, Runner: cmdRunner,
-		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
-	})
-	if err := app.Shell(context.Background(), []string{"make", "test"}); err != nil {
-		t.Fatalf("Shell() error = %v", err)
-	}
-
-	if got := cmdRunner.LastCommand(); !strings.Contains(got, "make test") {
-		t.Errorf("表示 = %q, 利用者が入力したコマンドは表示すること", got)
-	}
-}
-
 // 再起動が必要なキーの一覧を取り違えないこと（仕様 05-incus.md 5.4.5）
 func TestRestartRequiredKeys(t *testing.T) {
 	for _, key := range []string{"raw.idmap", "security.nesting", "security.privileged"} {
@@ -1504,13 +1476,15 @@ func TestVolumePropagatesErrors(t *testing.T) {
 	})
 }
 
-// secrets はホストから取り込み、表示時は隠す（仕様 03-configuration.md 3.12）
-func TestSecretsAreInjectedAndRedacted(t *testing.T) {
-	cmdRunner := &runnertest.Fake{}
-	cmdRunner.Stdout = map[string]string{
-		"incus list": `[{"name":"dev-example-project","status":"Running",` +
-			`"expanded_devices":{"root":{"type":"disk"}},` +
-			`"config":{"user.incus-devkit.project":"example-project"}}]`,
+// secrets はホストから取り込み、ステップへ渡す（仕様 03-configuration.md 3.12）
+func TestSecretsAreInjected(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	var got incus.ExecOptions
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		got = opt
+		return 0, nil
 	}
 
 	cfg, err := config.Parse([]byte(rootYAML+`
@@ -1527,8 +1501,8 @@ provision:
 
 	app := NewApp(AppOptions{
 		Config: cfg,
-		Client: &incus.CLI{Runner: cmdRunner, Project: "default"},
-		Runner: cmdRunner,
+		Client: client,
+		Runner: &runnertest.Fake{},
 		Out:    &bytes.Buffer{},
 		LookupEnv: func(k string) (string, bool) {
 			return "s3cret-from-host", k == "HOST_TOKEN"
@@ -1540,11 +1514,12 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	if raw := cmdRunner.LastArgv(); !strings.Contains(raw, "API_TOKEN=s3cret-from-host") {
-		t.Errorf("実引数 = %q, 秘密情報を渡すこと", raw)
+	if got.Env["API_TOKEN"] != "s3cret-from-host" {
+		t.Errorf("env = %v, ホストから取り込んだ値を渡すこと", got.Env)
 	}
-	if display := cmdRunner.LastCommand(); strings.Contains(display, "s3cret-from-host") {
-		t.Errorf("表示 = %q, 値を隠すこと", display)
+	// 表示しうる変数と混ぜない（仕様 04-cli.md 4.10）
+	if _, ok := got.PublicEnv["API_TOKEN"]; ok {
+		t.Errorf("公開env = %v, 秘密情報を含めないこと", got.PublicEnv)
 	}
 }
 

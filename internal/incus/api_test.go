@@ -56,8 +56,14 @@ type fakeServer struct {
 	opErr map[string]error
 	// execMeta は ExecInstance の完了時メタデータ。
 	execMeta map[string]any
+	// beforeExec は ExecInstance の直前に呼ばれる。
+	beforeExec func()
+	// beforeInstance は GetInstanceFull の直前に呼ばれる。
+	beforeInstance func()
 	// lastExec は最後の exec 要求。
 	lastExec api.InstanceExecPost
+	// lastExecArgs は最後の exec に渡された入出力・制御の指定。
+	lastExecArgs *incusclient.InstanceExecArgs
 	// lastCreate は最後の作成要求。
 	lastCreate api.InstancesPost
 	// lastVolume は最後のボリューム作成要求。
@@ -97,6 +103,9 @@ func (f *fakeServer) addInstance(name string, put api.InstancePut) *api.Instance
 }
 
 func (f *fakeServer) GetInstanceFull(name string) (*api.InstanceFull, string, error) {
+	if f.beforeInstance != nil {
+		f.beforeInstance()
+	}
 	if err := f.record("GetInstanceFull"); err != nil {
 		return nil, "", err
 	}
@@ -155,6 +164,10 @@ func (f *fakeServer) DeleteInstance(name string) (incusclient.Operation, error) 
 
 func (f *fakeServer) ExecInstance(_ string, exec api.InstanceExecPost, args *incusclient.InstanceExecArgs) (incusclient.Operation, error) {
 	f.lastExec = exec
+	f.lastExecArgs = args
+	if f.beforeExec != nil {
+		f.beforeExec()
+	}
 	if err := f.record("ExecInstance"); err != nil {
 		return nil, err
 	}
@@ -630,25 +643,6 @@ func TestAPIExecRejectsNonNumericUser(t *testing.T) {
 	}
 }
 
-// 端末を伴う実行はCLIへ委譲する
-func TestAPIExecDelegatesTTY(t *testing.T) {
-	terminal := &recordingClient{}
-	a, _ := newAPI(newFakeServer())
-	a.Terminal = terminal
-
-	if _, err := a.Exec(context.Background(), "dev-x", []string{"/bin/sh"}, ExecOptions{TTY: true}); err != nil {
-		t.Fatalf("Exec() error = %v", err)
-	}
-	if !terminal.called {
-		t.Error("端末を伴う実行がCLIへ委譲されていない")
-	}
-
-	a.Terminal = nil
-	if _, err := a.Exec(context.Background(), "dev-x", []string{"/bin/sh"}, ExecOptions{TTY: true}); err == nil {
-		t.Error("委譲先が無ければエラーになること")
-	}
-}
-
 func TestAPIPropagatesErrors(t *testing.T) {
 	ctx := context.Background()
 
@@ -726,17 +720,6 @@ func TestExitCodeOf(t *testing.T) {
 			}
 		})
 	}
-}
-
-// recordingClient は委譲先の呼び出しを記録する。
-type recordingClient struct {
-	Client
-	called bool
-}
-
-func (r *recordingClient) Exec(context.Context, string, []string, ExecOptions) (int, error) {
-	r.called = true
-	return 0, nil
 }
 
 func TestAPIInstanceExists(t *testing.T) {

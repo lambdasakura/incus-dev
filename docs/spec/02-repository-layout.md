@@ -57,10 +57,10 @@ incus-devkit/
 │   │
 │   ├── incus/                  # Incus操作層
 │   │   ├── client.go           # interface定義
-│   │   ├── api.go              # Go client library 実装（既定）
+│   │   ├── api.go              # Go client library 実装
 │   │   ├── connect.go          # remote / image の解決
-│   │   ├── cli.go              # incus CLI 実装（端末・退避経路）
-│   │   ├── wait.go             # 起動待ち（実装間で共有）
+│   │   ├── exec_tty.go         # 端末を伴う実行
+│   │   ├── wait.go             # 起動待ち
 │   │   └── name.go             # instance命名規則
 │   │
 │   ├── provision/              # bootstrap / provision ステップの実行

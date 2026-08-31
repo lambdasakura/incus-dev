@@ -254,13 +254,13 @@ instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で�
 
 ### 5.7.1 実装方針
 
-既定では公式Go client library
+Incus操作は公式Go client library
 
 ```text
 github.com/lxc/incus/v6/client
 ```
 
-を用いた実装 (`internal/incus/api.go`) を使う。利点：
+を用いた実装 (`internal/incus/api.go`) に一本化する。利点：
 
 - CLI出力のパースが不要になる
 - 型付きのAPIレスポンスを扱える
@@ -271,31 +271,17 @@ remote・project・imageの解決には `incus` コマンドと同じ設定
 （`~/.config/incus/config.yml`）を読む (`internal/incus/connect.go`)。
 利用者から見た挙動を `incus` コマンドと揃えるためである。
 
-**例外：端末を伴う実行。**
-`idev shell` のようにTTYを割り当てる実行は、raw modeへの切り替えと
-ウィンドウサイズ変更の追従が必要になる。ここはCLI実装
-(`internal/incus/cli.go`) へ委譲する（`API.Terminal`）。
+### 5.7.2 端末を伴う実行
 
-CLI実装は退避経路としても維持する。環境変数
+`idev shell` のようにTTYを割り当てる実行では、ホスト側の端末操作が要る
+(`internal/incus/exec_tty.go`)。
 
-```text
-IDEV_USE_INCUS_CLI=1
-```
+- 入力をそのままコンテナへ渡すため、ホストの端末をraw modeへ切り替える。
+  **失敗しても必ず元へ戻す**（戻さないとシェルが壊れる）
+- 端末サイズを `InstanceExecPost.Width` / `Height` で渡す
+- SIGWINCH を受けたら、制御用websocketへ `window-resize` を送る
 
-を設定すると、すべての操作を `incus` コマンド経由で行う。
-API側の不具合や、APIでは再現しないCLI固有の挙動を切り分けるために使う。
+端末操作は `Console` interfaceの背後に置き、テストではfakeへ差し替える。
+サイズを取得できない場合はIncus側の既定に任せ、サイズ送信に失敗した場合は
+表示の乱れにとどめて実行そのものは継続する。
 
-どちらの実装も同じ `Client` interfaceを満たし、
-起動待ち (`internal/incus/wait.go`) は共有する。
-
-### 5.7.2 出力パース
-
-CLI実装で状態を取得する場合は、人間向け出力ではなく
-機械可読な形式を用いる。
-
-```bash
-incus list <name> --format json
-incus config show <name>
-```
-
-得られたJSON/YAMLは型付き構造体へデコードする。

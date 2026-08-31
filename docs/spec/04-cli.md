@@ -364,9 +364,9 @@ idev -v up
 対象：
 
 ```text
-incus
 ansible-playbook
 git
+Incus API の呼び出し
 コンテナ内で実行した run ステップ
 ```
 

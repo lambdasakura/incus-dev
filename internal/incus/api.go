@@ -2,8 +2,10 @@ package incus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,16 +41,21 @@ type imageResolver interface {
 	Resolve(ctx context.Context, ref string) (incusclient.ImageServer, *api.Image, error)
 }
 
-// API はIncusのHTTP APIを直接呼ぶ Client 実装。
-//
-// CLI出力のパースが不要になり、型付きで扱える。
-// ただし端末を伴う実行だけは、端末制御の都合でCLIへ委譲する
-// （仕様 05-incus.md 5.7.1）。
+// API はIncusのHTTP APIを呼ぶ Client 実装。
 type API struct {
 	Server server
 	Images imageResolver
-	// Terminal は端末を伴う実行に使う。
-	Terminal Client
+	// Console は端末を伴う実行で操作するホスト側の端末。
+	// nilならプロセスの標準入出力を使う。
+	Console Console
+}
+
+// console は端末を伴う実行で使う端末を返す。
+func (a *API) console() Console {
+	if a.Console != nil {
+		return a.Console
+	}
+	return &osConsole{In: os.Stdin, Out: os.Stdout}
 }
 
 var _ Client = (*API)(nil)
@@ -116,7 +123,7 @@ func (a *API) InstanceExists(ctx context.Context, name string) (bool, error) {
 	switch {
 	case err == nil:
 		return true, nil
-	case isNotFound(err):
+	case errors.Is(err, ErrInstanceNotFound):
 		return false, nil
 	default:
 		return false, err
@@ -382,17 +389,56 @@ func (a *API) DeleteSnapshot(ctx context.Context, instance, snapshot string) err
 }
 
 // Exec はコンテナ内でコマンドを実行し、終了コードを返す。
-//
-// 端末を伴う実行は端末制御（raw mode、ウィンドウサイズ変更）が必要なため、
-// CLIへ委譲する（仕様 05-incus.md 5.7.1）。
 func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error) {
-	if opt.TTY {
-		if a.Terminal == nil {
-			return 0, fmt.Errorf("interactive exec requires the incus command")
-		}
-		return a.Terminal.Exec(ctx, name, argv, opt)
+	req, err := execRequest(argv, opt)
+	if err != nil {
+		return 0, err
 	}
 
+	dataDone := make(chan bool)
+	args := &incusclient.InstanceExecArgs{
+		Stdin:    opt.Stdin,
+		Stdout:   opt.Stdout,
+		Stderr:   opt.Stderr,
+		DataDone: dataDone,
+	}
+
+	if opt.TTY {
+		// 端末を割り当てる場合、キー入力をそのままコンテナへ渡すため
+		// ホスト側の端末をraw modeにする。復元しないとシェルが壊れる。
+		console := a.console()
+
+		restore, err := console.MakeRaw()
+		if err != nil {
+			return 0, err
+		}
+		defer restore()
+
+		req.Interactive = true
+		// 取得できない場合は指定せず、Incus側の既定に任せる。
+		if width, height, err := console.Size(); err == nil {
+			req.Width, req.Height = width, height
+		}
+
+		resized, stop := console.Resized()
+		defer stop()
+		args.Control = controlHandler(console, resized)
+	}
+
+	op, err := a.Server.ExecInstance(name, req, args)
+	if err != nil {
+		return 0, fmt.Errorf("exec in %s: %w", name, err)
+	}
+	if err := op.WaitContext(ctx); err != nil {
+		return 0, fmt.Errorf("exec in %s: %w", name, err)
+	}
+	<-dataDone
+
+	return exitCodeOf(op.Get()), nil
+}
+
+// execRequest はexec要求を組み立てる。
+func execRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error) {
 	env := maps.Clone(opt.PublicEnv)
 	if env == nil {
 		env = map[string]string{}
@@ -408,29 +454,13 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	if opt.User != "" {
 		uid, err := strconv.ParseUint(opt.User, 10, 32)
 		if err != nil {
-			// incusのexecはUIDのみを受け付ける。
+			// IncusのexecはUIDのみを受け付ける。
 			// ユーザー名の解決は呼び出し側の責務であり、黙って無視しない。
-			return 0, fmt.Errorf("exec user must be a numeric uid, got %q", opt.User)
+			return req, fmt.Errorf("exec user must be a numeric uid, got %q", opt.User)
 		}
 		req.User = uint32(uid)
 	}
-
-	dataDone := make(chan bool)
-	op, err := a.Server.ExecInstance(name, req, &incusclient.InstanceExecArgs{
-		Stdin:    opt.Stdin,
-		Stdout:   opt.Stdout,
-		Stderr:   opt.Stderr,
-		DataDone: dataDone,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("exec in %s: %w", name, err)
-	}
-	if err := op.WaitContext(ctx); err != nil {
-		return 0, fmt.Errorf("exec in %s: %w", name, err)
-	}
-	<-dataDone
-
-	return exitCodeOf(op.Get()), nil
+	return req, nil
 }
 
 // exitCodeOf は完了したexec操作から終了コードを取り出す。

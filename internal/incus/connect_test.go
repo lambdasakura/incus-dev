@@ -112,7 +112,7 @@ func serverProject(t *testing.T, client *API) string {
 func TestConnectUsesDefaultRemote(t *testing.T) {
 	config := newFakeCLIConfig()
 
-	client, err := connect(config, "local", Target{}, nil)
+	client, err := connect(config, "local", Target{})
 	if err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
@@ -126,9 +126,8 @@ func TestConnectUsesDefaultRemote(t *testing.T) {
 
 func TestConnectUsesTarget(t *testing.T) {
 	config := newFakeCLIConfig()
-	terminal := &recordingClient{}
 
-	client, err := connect(config, "local", Target{Remote: "lab", Project: "dev"}, terminal)
+	client, err := connect(config, "local", Target{Remote: "lab", Project: "dev"})
 	if err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
@@ -138,16 +137,13 @@ func TestConnectUsesTarget(t *testing.T) {
 	if got := serverProject(t, client); got != "dev" {
 		t.Errorf("project = %q, want dev", got)
 	}
-	if client.Terminal != terminal {
-		t.Error("端末付き実行の委譲先が設定されていない")
-	}
 }
 
 func TestConnectError(t *testing.T) {
 	config := newFakeCLIConfig()
 	config.instanceErr = errAPI
 
-	_, err := connect(config, "local", Target{Remote: "lab"}, nil)
+	_, err := connect(config, "local", Target{Remote: "lab"})
 	if !errors.Is(err, errAPI) || !strings.Contains(err.Error(), "lab") {
 		t.Errorf("error = %v, 接続先が分かるエラーにすること", err)
 	}
@@ -157,7 +153,7 @@ func TestConnectError(t *testing.T) {
 func TestConnectLoadsCLIConfig(t *testing.T) {
 	t.Setenv("INCUS_CONF", t.TempDir())
 
-	if _, err := Connect(Target{Remote: "does-not-exist"}, nil); err == nil {
+	if _, err := Connect(Target{Remote: "does-not-exist"}); err == nil {
 		t.Error("未知のremoteはエラーになること")
 	}
 }
@@ -170,7 +166,7 @@ func TestConnectBrokenCLIConfig(t *testing.T) {
 	}
 	t.Setenv("INCUS_CONF", dir)
 
-	_, err := Connect(Target{}, nil)
+	_, err := Connect(Target{})
 	if err == nil || !strings.Contains(err.Error(), "incus client configuration") {
 		t.Errorf("error = %v", err)
 	}

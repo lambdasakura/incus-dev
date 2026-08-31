@@ -295,15 +295,14 @@ incus info | head -3        # 同じ設定で接続できるか
 
 `incus` コマンドでも接続できない場合は、devkitではなくIncus側の問題である。
 
-### CLI経由へ切り替える
+### 設定を確認する
 
-API実装に起因する問題かを切り分けるため、
-すべての操作を `incus` コマンド経由で行う退避経路がある。
+`incus` コマンドが入っている環境では、同じ設定で接続できるかを比べられる。
 
 ```bash
-IDEV_USE_INCUS_CLI=1 idev up
+incus remote list           # remote の一覧と既定
+incus project list          # project の一覧
 ```
 
-これで解決する場合、API実装側の不具合である可能性が高い。
-なお `idev shell` のように端末を割り当てる実行は、
-この環境変数の有無にかかわらず常に `incus` コマンドへ委譲する。
+`--incus-remote` / `--incus-project` で指定した名前が、
+この一覧に存在するかを確認する。

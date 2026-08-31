@@ -30,18 +30,6 @@ type globalFlags struct {
 // defaultIncusProject は指定が無い場合に使うIncus project。
 const defaultIncusProject = "default"
 
-// useCLIEnv が設定されている場合、API ではなく incus コマンドを使う。
-// APIで問題が起きたときの逃げ道として残す。
-const useCLIEnv = "IDEV_USE_INCUS_CLI"
-
-// incusClient はIncus操作の実装を返す。
-func incusClient(target incus.Target, terminal *incus.CLI) (incus.Client, error) {
-	if os.Getenv(useCLIEnv) != "" {
-		return terminal, nil
-	}
-	return incus.Connect(target, terminal)
-}
-
 // errAborted は確認を拒否したことを示す。
 var errAborted = errors.New("aborted")
 
@@ -87,6 +75,20 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	return root
 }
 
+// resolveTarget は操作対象のIncusを決める。
+//
+// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
+func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
+	project := g.incusProject
+	if project == "" {
+		project = cfg.IncusProject()
+	}
+	if project == "" {
+		project = defaultIncusProject
+	}
+	return incus.Target{Remote: g.incusRemote, Project: project}
+}
+
 // newApp はproject探索と設定読み込みを行い、Appを構成する。
 func newApp(g *globalFlags) (*App, error) {
 	start := g.directory
@@ -107,21 +109,11 @@ func newApp(g *globalFlags) (*App, error) {
 		return nil, err
 	}
 
-	// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
-	incusProject := g.incusProject
-	if incusProject == "" {
-		incusProject = cfg.IncusProject()
-	}
-	if incusProject == "" {
-		incusProject = defaultIncusProject
-	}
+	target := resolveTarget(g, cfg)
 
 	cmdRunner := runner.NewWithLogger(newLogger(os.Stderr, g.verbose))
 
-	// 端末を伴う実行だけはCLIへ委譲する（端末制御の都合。仕様 05-incus.md 5.7.1）。
-	terminal := &incus.CLI{Runner: cmdRunner, Remote: g.incusRemote, Project: incusProject}
-
-	client, err := incusClient(incus.Target{Remote: g.incusRemote, Project: incusProject}, terminal)
+	client, err := incus.Connect(target)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +128,8 @@ func newApp(g *globalFlags) (*App, error) {
 		ErrOut:       os.Stderr,
 		Verbose:      g.verbose,
 		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
-		Remote:       g.incusRemote,
-		IncusProject: incusProject,
+		Remote:       target.Remote,
+		IncusProject: target.Project,
 	})
 }
 

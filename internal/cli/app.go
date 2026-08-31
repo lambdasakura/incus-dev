@@ -426,12 +426,10 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 		User: user,
 		// 端末に接続されていない場合に擬似端末を割り当てると、
 		// 出力へCRが混入しパイプやリダイレクトが壊れる。
-		TTY: tty,
-	}
-	if !opt.TTY {
-		opt.Stdin = a.in
-		opt.Stdout = a.out
-		opt.Stderr = a.errOut
+		TTY:    tty,
+		Stdin:  a.in,
+		Stdout: a.out,
+		Stderr: a.errOut,
 	}
 
 	code, err := a.client.Exec(ctx, a.instance, argv, opt)

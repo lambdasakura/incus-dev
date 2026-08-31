@@ -358,32 +358,26 @@ func TestIsTerminal(t *testing.T) {
 // グローバルフラグが Incus 操作層まで届くこと
 // （マニュアル 03-commands.md が契約として提示している）
 func TestNewAppWiresIncusFlags(t *testing.T) {
-	// 接続せずに配線だけを確認したいのでCLI実装を使う
-	t.Setenv(useCLIEnv, "1")
-
-	root := testProject(t, rootYAML)
-
-	app, err := newApp(&globalFlags{
-		directory:    root,
-		incusRemote:  "dev-server",
-		incusProject: "development",
-	})
+	cfg, err := config.Load(filepath.Join(testProject(t, rootYAML), ".incus-dev", "dev.yml"))
 	if err != nil {
-		t.Fatalf("newApp() error = %v", err)
+		t.Fatal(err)
 	}
 
-	client, ok := app.client.(*incus.CLI)
-	if !ok {
-		t.Fatalf("client = %T, want *incus.CLI", app.client)
-	}
-	if client.Remote != "dev-server" {
-		t.Errorf("Remote = %q, want dev-server", client.Remote)
-	}
-	if client.Project != "development" {
-		t.Errorf("Project = %q, want development", client.Project)
+	target := resolveTarget(&globalFlags{incusRemote: "dev-server", incusProject: "development"}, cfg)
+	if target.Remote != "dev-server" || target.Project != "development" {
+		t.Errorf("target = %+v", target)
 	}
 
 	// ansible inventory へ渡す値も同じであること
+	app := NewApp(AppOptions{
+		Config:       cfg,
+		Client:       incustest.New(),
+		Runner:       &runnertest.Fake{},
+		Remote:       target.Remote,
+		IncusProject: target.Project,
+		CheckIDMap:   func(int, int) error { return nil },
+	})
+
 	env, err := app.env()
 	if err != nil {
 		t.Fatal(err)
@@ -559,30 +553,14 @@ func TestIncusProjectPrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(useCLIEnv, "1")
-
-			app, err := newApp(&globalFlags{
-				directory:    testProject(t, tt.yaml),
-				incusRemote:  "local",
-				incusProject: tt.flag,
-			})
-			if err != nil {
-				t.Fatalf("newApp() error = %v", err)
-			}
-
-			client, ok := app.client.(*incus.CLI)
-			if !ok {
-				t.Fatalf("client = %T", app.client)
-			}
-			if client.Project != tt.want {
-				t.Errorf("Project = %q, want %q", client.Project, tt.want)
-			}
-			env, err := app.env()
+			cfg, err := config.Load(filepath.Join(testProject(t, tt.yaml), ".incus-dev", "dev.yml"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := env.IncusProject; got != tt.want {
-				t.Errorf("env.IncusProject = %q, want %q", got, tt.want)
+
+			got := resolveTarget(&globalFlags{incusRemote: "local", incusProject: tt.flag}, cfg)
+			if got.Project != tt.want {
+				t.Errorf("Project = %q, want %q", got.Project, tt.want)
 			}
 		})
 	}
@@ -717,32 +695,4 @@ func TestSnapshotCommandsPropagateFactoryError(t *testing.T) {
 			}
 		})
 	}
-}
-
-// 既定ではIncus APIを直接使い、環境変数でCLI実装へ切り替えられる
-func TestIncusClientSelection(t *testing.T) {
-	target := incus.Target{Remote: "local", Project: "default"}
-	terminal := &incus.CLI{}
-
-	t.Run("既定はAPI", func(t *testing.T) {
-		got, err := incusClient(target, terminal)
-		if err != nil {
-			t.Fatalf("incusClient() error = %v", err)
-		}
-		if _, ok := got.(*incus.API); !ok {
-			t.Errorf("client = %T, want *incus.API", got)
-		}
-	})
-
-	t.Run("環境変数でCLIへ切り替え", func(t *testing.T) {
-		t.Setenv(useCLIEnv, "1")
-
-		got, err := incusClient(target, terminal)
-		if err != nil {
-			t.Fatalf("incusClient() error = %v", err)
-		}
-		if got != incus.Client(terminal) {
-			t.Errorf("client = %T, want the CLI implementation", got)
-		}
-	})
 }
