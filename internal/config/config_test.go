@@ -802,3 +802,68 @@ func TestValidateRejectsEqualsInDeviceKey(t *testing.T) {
 		t.Errorf("error = %q", err.Error())
 	}
 }
+
+// shell セクション（仕様 3.13）
+func TestShellSettings(t *testing.T) {
+	c := parse(t, minimal+`
+shell:
+  user: developer
+  command: /bin/bash
+  cwd: /workspace/src
+`)
+	sh := c.ShellOrDefault()
+	if sh.User != "developer" || sh.Command != "/bin/bash" || sh.Cwd != "/workspace/src" {
+		t.Errorf("ShellOrDefault() = %+v", sh)
+	}
+}
+
+func TestShellDefaults(t *testing.T) {
+	c := parse(t, minimal)
+
+	sh := c.ShellOrDefault()
+	if sh.Command != config.DefaultShell {
+		t.Errorf("Command = %q, want %q", sh.Command, config.DefaultShell)
+	}
+	if sh.Cwd != "/workspace" {
+		t.Errorf("Cwd = %q, workspace.target を既定にすること", sh.Cwd)
+	}
+	if sh.User != "" {
+		t.Errorf("User = %q, 既定は指定なし", sh.User)
+	}
+}
+
+// workspace.target を変えたら shell の既定も追従する
+func TestShellCwdFollowsWorkspace(t *testing.T) {
+	c := parse(t, minimal+"workspace:\n  target: /src\n")
+
+	if got := c.ShellOrDefault().Cwd; got != "/src" {
+		t.Errorf("Cwd = %q, want /src", got)
+	}
+}
+
+// incus セクション（仕様 3.13）
+func TestIncusProjectSetting(t *testing.T) {
+	c := parse(t, minimal+"incus:\n  project: development\n")
+
+	if c.Incus == nil || c.Incus.Project != "development" {
+		t.Errorf("Incus = %+v", c.Incus)
+	}
+}
+
+func TestValidateRejectsFlagLikeShellValues(t *testing.T) {
+	for _, y := range []string{
+		minimal + "shell:\n  user: \"-x\"\n",
+		minimal + "shell:\n  command: \"--login\"\n",
+	} {
+		if err := parseErr(t, y); !strings.Contains(err.Error(), "must not start with") {
+			t.Errorf("error = %q", err.Error())
+		}
+	}
+}
+
+func TestValidateShellCwdMustBeAbsolute(t *testing.T) {
+	err := parseErr(t, minimal+"shell:\n  cwd: relative\n")
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error = %q", err.Error())
+	}
+}

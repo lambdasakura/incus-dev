@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus/incustest"
@@ -1041,5 +1043,86 @@ func TestIncusTargetDefaults(t *testing.T) {
 	}
 	if got := incusTarget("", "dev"); got != "local / dev" {
 		t.Errorf("incusTarget() = %q", got)
+	}
+}
+
+// shell / exec は dev.yml の shell 設定に従う（仕様 3.13）
+func TestShellUsesConfiguredSettings(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	var got incus.ExecOptions
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		got = opt
+		return 0, nil
+	}
+
+	body := rootYAML + "shell:\n  command: /bin/bash\n  cwd: /workspace/src\n  user: \"1000\"\n"
+	if err := appWith(t, body, client).Shell(context.Background(), nil); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	if diff := cmp.Diff([]string{"/bin/bash"}, client.Execs[0]); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	}
+	if got.Cwd != "/workspace/src" || got.User != "1000" {
+		t.Errorf("ExecOptions = %+v", got)
+	}
+}
+
+// ユーザー名指定は su へ振り替える（incus exec --user はUIDのみ）
+func TestShellWithNamedUser(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	body := rootYAML + "shell:\n  user: developer\n  command: /bin/bash\n"
+	if err := appWith(t, body, client).Shell(context.Background(), []string{"make", "test"}); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	want := []string{"su", "-s", "/bin/bash", "developer", "-c", "make test"}
+	if diff := cmp.Diff(want, client.Execs[0]); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// exec は端末を割り当てない
+func TestExecDoesNotAllocateTTY(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	var tty bool
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		tty = opt.TTY
+		return 0, nil
+	}
+
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, Interactive: true, // 端末があってもexecでは割り当てない
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Exec(context.Background(), []string{"make", "test"}); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if tty {
+		t.Error("exec は擬似端末を割り当てないこと")
+	}
+}
+
+func TestExecRequiresCommand(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	err := appWith(t, rootYAML, client).Exec(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "idev shell") {
+		t.Errorf("error = %v, shellの案内を含むこと", err)
 	}
 }

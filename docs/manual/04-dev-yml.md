@@ -30,6 +30,14 @@ workspace:                         # 任意
   target: /workspace
   idmap: auto
 
+shell:                             # 任意。idev shell / idev exec の既定
+  user: developer
+  command: /bin/bash
+  cwd: /workspace
+
+incus:                             # 任意
+  project: development
+
 bootstrap:                         # 任意
   - run: command -v python3 || apk add python3
 

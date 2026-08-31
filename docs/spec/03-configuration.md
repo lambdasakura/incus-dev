@@ -598,23 +598,48 @@ Secretが必要な場合は、以下から注入する方式を優先する。
 
 ---
 
-## 3.13 将来的な拡張予定フィールド
+## 3.13 shell
+
+`idev shell` と `idev exec` の既定を指定する。
+
+```yaml
+shell:
+  user: developer      # 実行ユーザー。省略時はinstanceの既定（root）
+  command: /bin/bash   # 起動するシェル。既定 /bin/sh
+  cwd: /workspace/src  # 作業ディレクトリ。既定は workspace.target
+```
+
+`user` に数値uidを指定した場合はIncusのexecへそのまま渡す。
+ユーザー名の場合はコンテナ内で `su` を用いて切り替える
+（Incusのexecはuidしか受け付けないため）。
+
+---
+
+## 3.14 incus
+
+Incus側の操作対象を指定する。
+
+```yaml
+incus:
+  project: development
+```
+
+CLIの `--incus-project` が指定された場合はそちらが優先される。
+どちらも無ければ `default` を使う。
+
+remoteの指定は現時点では対象外とする。
+remoteを使うとworkspaceのbind mountがホスト側パスを前提とするため
+成立せず、共有方式そのものを決め直す必要があるためである。
+
+---
+
+## 3.15 将来的な拡張予定フィールド
 
 以下は初期実装では対象外だが、後方互換に追加できる構造としておく。
 
 ```yaml
 incus:
-  remote: local
-  project: development
-
-shell:
-  user: developer
-  command: /bin/bash
-  cwd: /workspace
-
-provision:
-  - galaxy:                       # ansible-galaxy install
-      requirements: .incus-dev/ansible/requirements.yml
+  remote: dev-server
 ```
 
-詳細は [05-incus.md](05-incus.md)、[09-roadmap.md](09-roadmap.md) を参照。
+詳細は [09-roadmap.md](09-roadmap.md) を参照。

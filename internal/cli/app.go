@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
@@ -18,10 +19,6 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
-
-// DefaultShellCommand は idev shell が起動するシェル。
-// 将来的に dev.yml の shell.command で上書き可能にする（仕様 3.13）。
-const DefaultShellCommand = "/bin/sh"
 
 // AppOptions は App の構成。
 type AppOptions struct {
@@ -264,21 +261,40 @@ func (a *App) Rebuild(ctx context.Context) error {
 
 // Shell はコンテナ内でinteractive shell（または指定コマンド）を実行する。
 func (a *App) Shell(ctx context.Context, argv []string) error {
+	return a.execInContainer(ctx, argv, a.interactive)
+}
+
+// Exec はコンテナ内でコマンドを実行する。端末は割り当てない。
+//
+// スクリプトやCIから使うことを想定し、shellと違って対話にならない。
+func (a *App) Exec(ctx context.Context, argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("exec requires a command; use 'idev shell' for an interactive shell")
+	}
+	return a.execInContainer(ctx, argv, false)
+}
+
+// execInContainer はコンテナ内でコマンドを実行する。
+func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureRunning(ctx); err != nil {
 		return err
 	}
+
+	sh := a.cfg.ShellOrDefault()
 	if len(argv) == 0 {
-		argv = []string{DefaultShellCommand}
+		argv = []string{sh.Command}
 	}
+	argv, user := asUser(argv, sh)
 
 	opt := incus.ExecOptions{
-		Cwd: a.cfg.WorkspaceOrDefault().Target,
+		Cwd:  sh.Cwd,
+		User: user,
 		// 端末に接続されていない場合に擬似端末を割り当てると、
 		// 出力へCRが混入しパイプやリダイレクトが壊れる。
-		TTY: a.interactive,
+		TTY: tty,
 	}
 	if !opt.TTY {
 		opt.Stdin = a.in
@@ -300,6 +316,21 @@ func (a *App) Shell(ctx context.Context, argv []string) error {
 		return &ExitCodeError{Code: code}
 	}
 	return nil
+}
+
+// asUser は指定ユーザーで実行するためのargvと、incusへ渡すユーザー指定を返す。
+//
+// incus exec --user はUIDのみを受け付けるため、ユーザー名の場合は
+// コンテナ内で su を使って切り替える（run ステップと同じ扱い）。
+func asUser(argv []string, sh config.Shell) (out []string, user string) {
+	if sh.User == "" {
+		return argv, ""
+	}
+	if _, err := strconv.Atoi(sh.User); err == nil {
+		return argv, sh.User
+	}
+
+	return []string{"su", "-s", sh.Command, sh.User, "-c", strings.Join(argv, " ")}, ""
 }
 
 // statusReport は status の出力内容。

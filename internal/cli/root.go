@@ -27,6 +27,9 @@ type globalFlags struct {
 	incusProject string
 }
 
+// defaultIncusProject は指定が無い場合に使うIncus project。
+const defaultIncusProject = "default"
+
 // appFactory はコマンドが使う App を生成する。テストでは差し替える。
 type appFactory func(*globalFlags) (*App, error)
 
@@ -52,12 +55,14 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	pf.BoolVarP(&g.verbose, "verbose", "v", false, "詳細を出力する")
 	pf.StringVarP(&g.directory, "directory", "C", "", "探索を開始するディレクトリ（既定: カレントディレクトリ）")
 	pf.StringVar(&g.incusRemote, "incus-remote", "local", "Incus remote")
-	pf.StringVar(&g.incusProject, "incus-project", "default", "Incus project")
+	pf.StringVar(&g.incusProject, "incus-project", "",
+		"Incus project（未指定なら dev.yml の incus.project、それも無ければ default）")
 
 	root.AddCommand(
 		newUpCommand(g, factory),
 		newProvisionCommand(g, factory),
 		newShellCommand(g, factory),
+		newExecCommand(g, factory),
 		newStatusCommand(g, factory),
 		newDestroyCommand(g, factory),
 		newRebuildCommand(g, factory),
@@ -86,11 +91,20 @@ func newApp(g *globalFlags) (*App, error) {
 		return nil, err
 	}
 
+	// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
+	incusProject := g.incusProject
+	if incusProject == "" {
+		incusProject = cfg.IncusProject()
+	}
+	if incusProject == "" {
+		incusProject = defaultIncusProject
+	}
+
 	cmdRunner := runner.NewWithLogger(newLogger(os.Stderr, g.verbose))
 	client := &incus.CLI{
 		Runner:  cmdRunner,
 		Remote:  g.incusRemote,
-		Project: g.incusProject,
+		Project: incusProject,
 	}
 
 	return NewApp(AppOptions{
@@ -103,7 +117,7 @@ func newApp(g *globalFlags) (*App, error) {
 		Verbose:      g.verbose,
 		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
 		Remote:       g.incusRemote,
-		IncusProject: g.incusProject,
+		IncusProject: incusProject,
 	}), nil
 }
 
@@ -189,6 +203,24 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		},
 	}
 	// idev shell -- bash -lc "..." の -lc を idev のフラグと解釈させない。
+	c.Flags().SetInterspersed(false)
+
+	return c
+}
+
+func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	c := &cobra.Command{
+		Use:   "exec -- <command>",
+		Short: "コンテナ内でコマンドを実行する（端末を割り当てない）",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := newApp(g)
+			if err != nil {
+				return err
+			}
+			return app.Exec(cmd.Context(), args)
+		},
+	}
+	// idev exec -- ls -l の -l を idev のフラグと解釈させない。
 	c.Flags().SetInterspersed(false)
 
 	return c

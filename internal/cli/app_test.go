@@ -785,7 +785,7 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
-	if diff := cmp.Diff([]string{cli.DefaultShellCommand}, client.Execs[0]); diff != "" {
+	if diff := cmp.Diff([]string{config.DefaultShell}, client.Execs[0]); diff != "" {
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
 	if gotCwd != "/workspace" {

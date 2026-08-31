@@ -52,6 +52,7 @@ func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateSteps(raw, "bootstrap", false, ps)
 	validateSteps(raw, "provision", true, ps)
 	validateInstance(c, ps)
+	validateShell(c, ps)
 	validateStepValues(c, ps)
 	validateWorkspace(c, ps)
 
@@ -112,6 +113,24 @@ func parseVersion(v string) (major, minor int, err error) {
 		}
 	}
 	return major, minor, nil
+}
+
+// validateShell は shell 設定を検証する。
+func validateShell(c *Config, ps *problems) {
+	if c.Shell == nil {
+		return
+	}
+	for _, f := range []struct{ field, value string }{
+		{"user", c.Shell.User},
+		{"command", c.Shell.Command},
+	} {
+		if strings.HasPrefix(f.value, "-") {
+			ps.add("shell."+f.field, "must not start with %q", "-")
+		}
+	}
+	if c.Shell.Cwd != "" && !filepath.IsAbs(c.Shell.Cwd) {
+		ps.add("shell.cwd", "must be an absolute path in the container, got %q", c.Shell.Cwd)
+	}
 }
 
 // validateStepValues は、コンテナ内でのコマンド実行時に

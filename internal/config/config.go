@@ -53,6 +53,8 @@ type Config struct {
 	// Bootstrap は省略(nil)と明示的な空リストを区別する（仕様 3.8）。
 	Bootstrap *[]Step `json:"bootstrap,omitempty"`
 	Provision []Step  `json:"provision,omitempty"`
+	Shell     *Shell  `json:"shell,omitempty"`
+	Incus     *Incus  `json:"incus,omitempty"`
 
 	// Root はプロジェクトrootの絶対パス。Load時に設定される。
 	Root string `json:"-"`
@@ -84,6 +86,48 @@ func (i Instance) TypeOrDefault() string {
 		return DefaultInstanceType
 	}
 	return i.Type
+}
+
+// Shell は idev shell / idev exec の既定。
+type Shell struct {
+	// User は実行ユーザー。空ならinstanceの既定（root）。
+	User string `json:"user,omitempty"`
+	// Command は起動するシェル。
+	Command string `json:"command,omitempty"`
+	// Cwd は作業ディレクトリ。空なら workspace.target。
+	Cwd string `json:"cwd,omitempty"`
+}
+
+// Incus はIncus側の操作対象。
+type Incus struct {
+	// Project はIncus project名。空ならCLIの指定（既定 default）。
+	Project string `json:"project,omitempty"`
+}
+
+// ShellOrDefault は既定値を補ったshell設定を返す。
+func (c *Config) ShellOrDefault() Shell {
+	sh := Shell{Command: DefaultShell, Cwd: c.WorkspaceOrDefault().Target}
+	if c.Shell == nil {
+		return sh
+	}
+	if c.Shell.User != "" {
+		sh.User = c.Shell.User
+	}
+	if c.Shell.Command != "" {
+		sh.Command = c.Shell.Command
+	}
+	if c.Shell.Cwd != "" {
+		sh.Cwd = c.Shell.Cwd
+	}
+	return sh
+}
+
+// IncusProject は dev.yml で指定されたIncus projectを返す。未指定なら空。
+func (c *Config) IncusProject() string {
+	if c.Incus == nil {
+		return ""
+	}
+	return c.Incus.Project
 }
 
 // Workspace はworking treeのマウント宣言。

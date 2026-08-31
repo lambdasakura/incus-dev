@@ -12,6 +12,7 @@ idev
 idev up
 idev provision
 idev shell
+idev exec
 idev status
 idev destroy
 idev rebuild

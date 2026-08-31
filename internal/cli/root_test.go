@@ -536,3 +536,42 @@ func TestUpDryRunFlag(t *testing.T) {
 		t.Errorf("calls = %v, --dry-run はinstanceを作らないこと", client.Calls)
 	}
 }
+
+// Incus project は CLI指定 > dev.yml > default の順で決まる
+func TestIncusProjectPrecedence(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		flag string
+		want string
+	}{
+		{"既定", rootYAML, "", "default"},
+		{"dev.ymlの指定", rootYAML + "incus:\n  project: from-config\n", "", "from-config"},
+		{"CLIの指定が優先", rootYAML + "incus:\n  project: from-config\n", "from-flag", "from-flag"},
+		{"CLIのみ", rootYAML, "from-flag", "from-flag"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, err := newApp(&globalFlags{
+				directory:    testProject(t, tt.yaml),
+				incusRemote:  "local",
+				incusProject: tt.flag,
+			})
+			if err != nil {
+				t.Fatalf("newApp() error = %v", err)
+			}
+
+			client, ok := app.client.(*incus.CLI)
+			if !ok {
+				t.Fatalf("client = %T", app.client)
+			}
+			if client.Project != tt.want {
+				t.Errorf("Project = %q, want %q", client.Project, tt.want)
+			}
+			if got := app.env().IncusProject; got != tt.want {
+				t.Errorf("env.IncusProject = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
