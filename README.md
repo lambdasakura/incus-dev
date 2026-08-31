@@ -52,11 +52,15 @@ idev validate      # dev.ymlを検証する（Incusへは変更を加えない�
 idev up            # instanceを用意し、bootstrapとprovisionを実行する
 idev status        # 状態を表示する（--json でmachine-readable）
 idev shell         # コンテナ内でshellを開く
-idev shell -- make test
+idev exec -- make test   # コンテナ内でコマンドを実行する（端末は割り当てない）
 idev provision     # instanceを作り直さずprovisionのみ再実行する
+idev snapshot create before-upgrade   # 退避しておく（restore で戻せる）
 idev rebuild       # 破棄して作り直す
 idev destroy       # instanceを削除する（ホスト側のソースは削除しない）
 ```
+
+コンテナ内コマンドの終了コードはそのまま返る（`idev exec -- make test || exit 1`）。
+スクリプトやCIからは、端末の有無で挙動が変わらない `idev exec` を使う。
 
 詳しい使い方は **[マニュアル](docs/manual/README.md)** を参照。
 構成例は [examples/](examples/) にもある。
@@ -93,9 +97,12 @@ make install   # $GOBIN へインストール
 ## 開発
 
 ```bash
-make check              # gofmt / go vet / go test（Incus不要）
+make check              # lint + test（Incus不要）
 make test-integration   # Incus実機に対する統合テスト
 ```
+
+`make lint` は golangci-lint を使い、無ければ gofmt / go vet で代替する
+（`make tools` で導入できる）。
 
 開発方針は [CLAUDE.md](CLAUDE.md)、仕様は [docs/spec/](docs/spec/README.md) を参照。
 
@@ -132,5 +139,5 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 | Incus API（Go client library）での操作 | 実装済み（`incus` コマンドを必要としない） |
 | `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
 | `--incus-remote` | フラグは通るが未検証（workspaceの共有方式が未定） |
-| `instance.type: virtual-machine` | Incusへ素通しするが未検証 |
+| `instance.type: virtual-machine` | 未検証（workspaceの共有方式がコンテナ前提） |
 | `validate --check-host` | 未実装 |
