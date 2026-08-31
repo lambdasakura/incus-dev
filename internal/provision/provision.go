@@ -117,6 +117,8 @@ func (e *Executor) runStep(ctx context.Context, step config.Step, env Env) error
 		return e.execRun(ctx, step.Run, env)
 	case step.Ansible != nil:
 		return e.execAnsible(ctx, step.Ansible, env)
+	case step.Galaxy != nil:
+		return e.execGalaxy(ctx, step.Galaxy, env)
 	default:
 		return fmt.Errorf("step has neither run nor ansible")
 	}

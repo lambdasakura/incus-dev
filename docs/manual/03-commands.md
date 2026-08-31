@@ -92,6 +92,17 @@ idev up
 **既にあるinstanceを破壊することはない。** `dev.yml` を変更したあとに
 再実行すれば、リソースやdeviceの変更が反映される。
 
+`dev.yml` から設定やdeviceを削除した場合も追従する。ただし
+**devkitが適用したものだけ** が対象で、`incus config set` などで
+手動追加した設定には触れない。
+
+```bash
+idev up --restart
+```
+
+`security.nesting` のように反映へ再起動が必要な変更があるとき、
+instanceを再起動する。既定では警告のみを表示する。
+
 idev が作ったものでないinstanceが同名で存在する場合は、
 何もせずに失敗する（誤って壊さないため）。
 

@@ -127,35 +127,41 @@ YAML
 
 ### 5.4.4 削除の扱い
 
-MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunsetは行わない。
+`dev.yml` から削除された設定は、**devkitが適用したものに限り** 取り消す。
 
-理由：devkitが管理していない設定（利用者が手動で追加したもの）を
-誤って削除する危険があるため。
-
-クリーンな状態が必要な場合は `idev rebuild` を使用する。
-
-例外として、**devkit自身が設定したidmap関連のキー**（`raw.idmap`）は、
-方式を切り替えた際に取り消す。利用者が書いたキーには触れない。
-残したままにすると、`raw.idmap` と `shift` が二重に適用されるためである。
-
-将来的には、devkitが適用したキーの一覧を
+devkitは適用したconfigキーとdevice名を、instance自身へ記録する。
 
 ```text
-user.incus-devkit.managed
+user.incus-devkit.managed  = limits.cpu,limits.memory,raw.idmap
+user.incus-devkit.devices  = extdata,workspace
 ```
 
-に記録し、差分をunsetする方式を検討する。
+`idev up` のたびに記録と宣言を突き合わせ、記録にあって宣言に無いものを
+取り消す。記録に無いもの（利用者が `incus config set` で手動追加した設定や
+device）には一切触れない。
+
+記録を持たない古いinstanceに対しては、devkit自身が設定したidmapキー
+（`raw.idmap`）のみを対象とする。
+
+完全にクリーンな状態が必要な場合は `idev rebuild` を使用する。
 
 ### 5.4.5 再起動を要する設定
 
 一部の設定は変更にinstance再起動を要する。
 
-devkitは再起動が必要な変更を検出した場合、以下のいずれかとする。
+devkitは再起動が必要な変更を検出した場合、既定では警告のみを表示する。
 
-- 明示的に警告し、再起動が必要である旨を表示する
-- `--restart` 等の明示的な指示があった場合のみ再起動する
+```bash
+idev up --restart
+```
 
-利用者の作業中プロセスを予期せず停止させてはならない。
+が指定された場合に限り、instanceを再起動して反映する。
+
+利用者の作業中プロセスを予期せず停止させてはならないため、
+再起動は明示的な指示があった場合のみ行う。
+
+対象は devkit が実際に変更・取り消したキーに限る。
+触れていないキーを含めると、何もしていないのに警告が出続けてしまう。
 
 ---
 

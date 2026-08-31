@@ -867,3 +867,82 @@ func TestValidateShellCwdMustBeAbsolute(t *testing.T) {
 		t.Errorf("error = %q", err.Error())
 	}
 }
+
+// galaxy ステップ（仕様 06-provisioning.md 6.5.5）
+func TestGalaxyStep(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "collections: []\n")
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+      extra_args: ["--force"]
+`)
+
+	c, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	g := c.Provision[0].Galaxy
+	if g == nil {
+		t.Fatal("Galaxy = nil")
+	}
+	if g.Requirements != ".incus-dev/ansible/requirements.yml" {
+		t.Errorf("Requirements = %q", g.Requirements)
+	}
+	if len(g.ExtraArgs) != 1 || g.ExtraArgs[0] != "--force" {
+		t.Errorf("ExtraArgs = %v", g.ExtraArgs)
+	}
+}
+
+func TestGalaxyStepErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "requirements欠落",
+			yaml: minimal + "provision:\n  - galaxy: {}\n",
+			want: "requirements",
+		},
+		{
+			name: "runとの併用",
+			yaml: minimal + "provision:\n  - run: echo\n    galaxy:\n      requirements: r.yml\n",
+			want: "provision[0]",
+		},
+		{
+			name: "ansibleとの併用",
+			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    galaxy:\n      requirements: r.yml\n",
+			want: "provision[0]",
+		},
+		{
+			name: "bootstrapでは使えない",
+			yaml: minimal + "bootstrap:\n  - galaxy:\n      requirements: r.yml\n",
+			want: "bootstrap[0]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestGalaxyRequirementsMustExist(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+provision:
+  - galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "requirements.yml") {
+		t.Errorf("error = %v", err)
+	}
+}

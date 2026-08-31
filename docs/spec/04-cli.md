@@ -66,6 +66,14 @@ idev up
 - 既存instanceがdevkit管理下でない場合は明示的に失敗する
 - 既存instanceに対しても、`dev.yml` の宣言内容は再適用する
   （[05-incus.md](05-incus.md) 参照）
+- 宣言から消えた設定・deviceは、devkitが適用したものに限り取り消す
+
+```bash
+idev up --restart
+```
+
+反映に再起動が必要な変更があれば、instanceを再起動する。
+既定では警告のみを表示する（作業中のプロセスを予期せず止めないため）。
 
 ---
 

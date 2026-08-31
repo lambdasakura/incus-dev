@@ -6,6 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 )
 
 func mustParse(t *testing.T, yaml string) *config.Config {
@@ -123,5 +124,115 @@ func TestIsManagedBy(t *testing.T) {
 				t.Errorf("isManagedBy() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// devkitが適用したキーを記録し、削除に追従できるようにする（仕様 05-incus.md 5.4.4）
+func TestDesiredConfigRecordsManagedKeys(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+`)
+	got := desiredConfig(cfg, rawPlan)[managedKeysKey]
+
+	if got != "limits.cpu,limits.memory,raw.idmap" {
+		t.Errorf("%s = %q", managedKeysKey, got)
+	}
+}
+
+func TestStaleConfigKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		current map[string]string
+		yaml    string
+		want    []string
+	}{
+		{
+			name: "宣言から消えたキーを取り消す",
+			current: map[string]string{
+				managedKeysKey:  "limits.cpu,limits.memory,raw.idmap",
+				"limits.cpu":    "8",
+				"limits.memory": "16GiB",
+			},
+			yaml: planBase + "  config:\n    limits.cpu: \"8\"\n",
+			want: []string{"limits.memory"},
+		},
+		{
+			name: "利用者が手で足したキーには触れない",
+			current: map[string]string{
+				managedKeysKey:     "limits.cpu,raw.idmap",
+				"security.nesting": "true", // devkit管理外
+			},
+			yaml: planBase + "  config:\n    limits.cpu: \"8\"\n",
+			want: nil,
+		},
+		{
+			name:    "記録が無い場合はidmapのみ追従する",
+			current: map[string]string{idmapConfigKey: "uid 1000 0"},
+			yaml:    planBase + "workspace:\n  idmap: shift\n",
+			want:    []string{idmapConfigKey},
+		},
+		{
+			name:    "記録も差分も無ければ何もしない",
+			current: map[string]string{managedKeysKey: "raw.idmap", idmapConfigKey: "uid 1000 0"},
+			yaml:    planBase,
+			want:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, tt.yaml)
+			plan, err := resolveIDMap(cfg, 1000, 1000, permitted)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := staleConfigKeys(tt.current, desiredConfig(cfg, plan), plan)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("staleConfigKeys() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// deviceも同様に、devkitが作ったものだけ削除に追従する
+func TestStaleDevices(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    keep:
+      type: disk
+      source: /srv/a
+      path: /a
+`)
+	current := &incus.Instance{
+		Config: map[string]string{managedDevicesKey: "gone,keep,workspace"},
+		Devices: map[string]incus.Device{
+			"keep":      {"type": "disk"},
+			"gone":      {"type": "disk"}, // 宣言から消えた
+			"manual":    {"type": "nic"},  // 利用者が手で追加
+			"workspace": {"type": "disk"},
+		},
+	}
+
+	got := staleDevices(current, desiredDevices(cfg, rawPlan))
+	if diff := cmp.Diff([]string{"gone"}, got); diff != "" {
+		t.Errorf("staleDevices() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestDesiredConfigRecordsManagedDevices(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    data:
+      type: disk
+      source: /srv/a
+      path: /a
+`)
+	got := desiredConfig(cfg, rawPlan)[managedDevicesKey]
+
+	if got != "data,workspace" {
+		t.Errorf("%s = %q", managedDevicesKey, got)
 	}
 }

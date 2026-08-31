@@ -131,8 +131,14 @@ func (a *App) env() provision.Env {
 	}
 }
 
+// UpOptions は idev up の挙動。
+type UpOptions struct {
+	// Restart が真の場合、反映に再起動が必要な変更があれば再起動する。
+	Restart bool
+}
+
 // Up はinstanceを用意し、bootstrapとprovisionを実行する（仕様 04-cli.md 4.1）。
-func (a *App) Up(ctx context.Context) error {
+func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
 	// instanceを作る前に、ホスト側の前提を確認する。
@@ -156,7 +162,7 @@ func (a *App) Up(ctx context.Context) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
-		if err := a.reapplyInstance(ctx, inst, plan); err != nil {
+		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
@@ -226,10 +232,14 @@ func (a *App) ListSteps() error {
 
 // stepKind はステップの種別を返す。
 func stepKind(step config.Step) string {
-	if step.Ansible != nil {
+	switch {
+	case step.Ansible != nil:
 		return "ansible"
+	case step.Galaxy != nil:
+		return "galaxy"
+	default:
+		return "run"
 	}
-	return "run"
 }
 
 // Destroy はinstanceを削除する。ホスト側のソースには触れない。
@@ -256,7 +266,7 @@ func (a *App) Rebuild(ctx context.Context) error {
 	case !errors.Is(err, incus.ErrInstanceNotFound):
 		return err
 	}
-	return a.Up(ctx)
+	return a.Up(ctx, UpOptions{})
 }
 
 // Shell はコンテナ内でinteractive shell（または指定コマンド）を実行する。
@@ -434,38 +444,66 @@ func (a *App) Validate() error {
 }
 
 // reapplyInstance は既存instanceへ宣言内容を再適用する。
-func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan) error {
+func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan, opt UpOptions) error {
 	desired := desiredConfig(a.cfg, plan)
 	// 適用前の状態を控える。適用後は差分が分からなくなるため。
 	before := maps.Clone(inst.Config)
 
-	// idmap方式を切り替えた場合、devkitが以前設定したキーを残さない。
-	stale := staleIDMapKeys(inst.Config, plan)
+	// 宣言から消えた、devkit適用済みのキーとdeviceを取り消す。
+	stale := staleConfigKeys(inst.Config, desired, plan)
 	if len(stale) > 0 {
+		a.log.Info("Removing config no longer declared: " + strings.Join(stale, ", "))
 		if err := a.client.UnsetConfig(ctx, a.instance, stale); err != nil {
 			return err
 		}
 	}
+	if devices := staleDevices(inst, desiredDevices(a.cfg, plan)); len(devices) > 0 {
+		a.log.Info("Removing devices no longer declared: " + strings.Join(devices, ", "))
+		if err := a.client.RemoveDevices(ctx, a.instance, devices); err != nil {
+			return err
+		}
+	}
+
 	if err := a.client.ApplyConfig(ctx, a.instance, desired); err != nil {
 		return err
 	}
+	return a.settleRestart(ctx, inst.IsRunning(), before, desired, stale, opt)
+}
 
-	a.warnRestartRequired(inst.IsRunning(), before, desired, stale)
-	return nil
+// settleRestart は再起動が必要な変更に対処する（仕様 05-incus.md 5.4.5）。
+//
+// 既定では警告に留める。利用者の作業中プロセスを予期せず止めないため、
+// 再起動は明示的に指示された場合のみ行う。
+func (a *App) settleRestart(ctx context.Context, running bool, before, desired map[string]string, unset []string, opt UpOptions) error {
+	changed := restartRequiredChanges(running, before, desired, unset)
+	if len(changed) == 0 {
+		return nil
+	}
+
+	if !opt.Restart {
+		a.log.Warn(fmt.Sprintf(
+			"%s changed but the instance is running; restart it to apply (idev up --restart)",
+			strings.Join(changed, ", ")))
+		return nil
+	}
+
+	a.log.Info("Restarting instance to apply " + strings.Join(changed, ", "))
+	if err := a.client.StopInstance(ctx, a.instance); err != nil {
+		return err
+	}
+	return a.client.StartInstance(ctx, a.instance)
 }
 
 // restartRequiredKeys は変更に再起動を要するconfigキー。
 var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
 
-// warnRestartRequired は稼働中instanceで即座に反映されない変更を警告する
-// （仕様 05-incus.md 5.4.5）。
+// restartRequiredChanges は反映に再起動が必要な変更を返す。
 //
-// devkitが実際に変更したキーのみを対象とする。宣言から消えたキーは
-// unset しない方針（仕様 5.4.4）なので、それを変更として扱うと
-// 何もしていないのに警告が出続けてしまう。
-func (a *App) warnRestartRequired(running bool, before, desired map[string]string, unset []string) {
+// devkitが実際に変更・取り消したキーのみを対象とする。
+// 触れていないキーを含めると、何もしていないのに警告が出続けてしまう。
+func restartRequiredChanges(running bool, before, desired map[string]string, unset []string) []string {
 	if !running {
-		return
+		return nil
 	}
 
 	var changed []string
@@ -479,15 +517,9 @@ func (a *App) warnRestartRequired(running bool, before, desired map[string]strin
 			changed = append(changed, k)
 		}
 	}
-	if len(changed) == 0 {
-		return
-	}
 	slices.Sort(changed)
-	changed = slices.Compact(changed)
 
-	a.log.Warn(fmt.Sprintf(
-		"%s changed but the instance is running; restart it to apply (idev rebuild --force, or incus restart %s)",
-		strings.Join(changed, ", "), a.instance))
+	return slices.Compact(changed)
 }
 
 // idmapPlan は適用するidmap方針を解決する。

@@ -269,6 +269,20 @@ func (c *CLI) ApplyDevices(ctx context.Context, name string, devices map[string]
 	return nil
 }
 
+// RemoveDevices は指定されたdeviceを削除する。
+//
+// devkit自身が作成したdeviceを取り消すために使う。
+// 利用者が手で追加したdeviceへは使わない（仕様 05-incus.md 5.4.4）。
+func (c *CLI) RemoveDevices(ctx context.Context, name string, devices []string) error {
+	for _, dev := range devices {
+		if _, err := c.run(ctx, "remove device "+dev,
+			c.args([]string{"config", "device", "remove"}, c.qualify(name), dev)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ProfileExists はProfileの存在を返す。devkitはProfileを作成しない（REQ-007）。
 func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 	args := c.args([]string{"profile", "list"}, "--format", "json")

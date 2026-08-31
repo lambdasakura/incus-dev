@@ -130,7 +130,10 @@ func isTerminal(f *os.File) bool {
 }
 
 func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	var dryRun bool
+	var (
+		dryRun  bool
+		restart bool
+	)
 
 	c := &cobra.Command{
 		Use:   "up",
@@ -144,11 +147,15 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if dryRun {
 				return app.Plan(cmd.Context())
 			}
-			return app.Up(cmd.Context())
+			return app.Up(cmd.Context(), UpOptions{Restart: restart})
 		},
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", false,
 		"実行予定の操作を表示するだけで、Incusへ変更を加えない")
+	c.Flags().BoolVar(&restart, "restart", false,
+		"反映に再起動が必要な変更があれば、instanceを再起動する")
+
+	c.MarkFlagsMutuallyExclusive("dry-run", "restart")
 
 	return c
 }

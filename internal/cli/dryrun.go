@@ -169,8 +169,11 @@ func provisionActions(cfg *config.Config) []string {
 	total := len(cfg.Provision)
 	for i, step := range cfg.Provision {
 		detail := ""
-		if step.Ansible != nil {
+		switch {
+		case step.Ansible != nil:
 			detail = " " + step.Ansible.Playbook
+		case step.Galaxy != nil:
+			detail = " " + step.Galaxy.Requirements
 		}
 		out = append(out, fmt.Sprintf("Provision step %d/%d: %s (%s%s)",
 			i+1, total, step.DisplayName(i+1), stepKind(step), detail))

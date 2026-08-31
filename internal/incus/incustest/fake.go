@@ -225,6 +225,24 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	return nil
 }
 
+// RemoveDevices は指定されたdeviceを削除する。
+func (f *Fake) RemoveDevices(_ context.Context, name string, devices []string) error {
+	if len(devices) == 0 {
+		return nil
+	}
+	if err := f.record("removedevices %s %v", name, devices); err != nil {
+		return err
+	}
+	inst, ok := f.Instances[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
+	}
+	for _, dev := range devices {
+		delete(inst.Devices, dev)
+	}
+	return nil
+}
+
 // ProfileExists は Profiles に含まれるかを返す。
 func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	if err := f.record("profile %s", name); err != nil {

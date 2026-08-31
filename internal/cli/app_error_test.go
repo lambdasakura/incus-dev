@@ -79,7 +79,7 @@ func TestUpPropagatesIncusErrors(t *testing.T) {
 				managed(client, "Running")
 			}
 
-			err := appWith(t, rootYAML, client).Up(context.Background())
+			err := appWith(t, rootYAML, client).Up(context.Background(), UpOptions{})
 			if !errors.Is(err, errBoom) {
 				t.Errorf("error = %v, want %v", err, errBoom)
 			}
@@ -310,7 +310,7 @@ func TestIDMapModeRespectsExplicitRawIDMap(t *testing.T) {
 	app := appWith(t, body, client)
 	app.checkIDMap = func(int, int) error { return errBoom }
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v, 明示指定時は検査しないこと", err)
 	}
 	if got := client.Instances["dev-example-project"].Config["raw.idmap"]; got != "both 1234 0" {
@@ -355,7 +355,7 @@ func TestUpCleansStaleIDMapConfig(t *testing.T) {
 	})
 
 	app := appWith(t, rootYAML+"workspace:\n  idmap: shift\n", client)
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 
@@ -380,7 +380,7 @@ func TestUpDisablesShiftWhenSwitchingToRaw(t *testing.T) {
 	})
 
 	app := appWith(t, rootYAML+"workspace:\n  idmap: raw\n", client)
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 
@@ -415,7 +415,7 @@ func TestUpWarnsWhenRestartRequired(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	out := errOut.String()
@@ -445,7 +445,7 @@ func TestUpDoesNotWarnWhenStopped(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if strings.Contains(errOut.String(), "restart") {
@@ -458,7 +458,7 @@ func TestUpFailsWhenInstanceNotReady(t *testing.T) {
 	client := incustest.New()
 	client.FailReady = true
 
-	err := appWith(t, rootYAML+"provision:\n  - run: never\n", client).Up(context.Background())
+	err := appWith(t, rootYAML+"provision:\n  - run: never\n", client).Up(context.Background(), UpOptions{})
 	if err == nil {
 		t.Fatal("Up() = nil error, ready待ちの失敗を報告すること")
 	}
@@ -526,7 +526,7 @@ func TestUpPropagatesUnsetError(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"unset": errBoom}
 
-	err := appWith(t, rootYAML+"workspace:\n  idmap: shift\n", client).Up(context.Background())
+	err := appWith(t, rootYAML+"workspace:\n  idmap: shift\n", client).Up(context.Background(), UpOptions{})
 	if !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
@@ -557,7 +557,7 @@ func TestUpDoesNotWarnWithoutRestartRequiredChanges(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if strings.Contains(errOut.String(), "restart") {
@@ -590,7 +590,7 @@ func TestUpWarnsWhenIDMapRemoved(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if !strings.Contains(errOut.String(), idmapConfigKey) {
@@ -603,7 +603,7 @@ func TestUpPropagatesProvisionError(t *testing.T) {
 	client := incustest.New()
 	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, errBoom }
 
-	err := appWith(t, rootYAML+"provision:\n  - run: failing\n", client).Up(context.Background())
+	err := appWith(t, rootYAML+"provision:\n  - run: failing\n", client).Up(context.Background(), UpOptions{})
 	if !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
@@ -667,7 +667,7 @@ func TestUpPropagatesEnsureRunningLookupError(t *testing.T) {
 		return nil
 	}
 
-	if err := appWith(t, rootYAML, client).Up(context.Background()); !errors.Is(err, errBoom) {
+	if err := appWith(t, rootYAML, client).Up(context.Background(), UpOptions{}); !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }
@@ -724,7 +724,7 @@ func TestRestartRequiredKeys(t *testing.T) {
 				CheckIDMap: func(int, int) error { return nil },
 			})
 
-			if err := app.Up(context.Background()); err != nil {
+			if err := app.Up(context.Background(), UpOptions{}); err != nil {
 				t.Fatalf("Up() error = %v", err)
 			}
 			if !strings.Contains(errOut.String(), key) {
@@ -763,7 +763,7 @@ func TestNoWarningForKeysRemovedFromConfig(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if strings.Contains(errOut.String(), "restart") {
@@ -790,7 +790,7 @@ func TestUpContinuesWhenNetworkNotReady(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v, 警告に留めて続行すること", err)
 	}
 	if !strings.Contains(errOut.String(), "network") {
@@ -1124,5 +1124,129 @@ func TestExecRequiresCommand(t *testing.T) {
 	err := appWith(t, rootYAML, client).Exec(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "idev shell") {
 		t.Errorf("error = %v, shellの案内を含むこと", err)
+	}
+}
+
+// 宣言から消えた設定とdeviceは、devkitが作ったものだけ取り消す
+// （仕様 05-incus.md 5.4.4）
+func TestUpRemovesUndeclaredManagedConfig(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Stopped",
+		Config: map[string]string{
+			managedProjectKey:  "example-project",
+			managedKeysKey:     "limits.cpu,limits.memory",
+			managedDevicesKey:  "extdata,workspace",
+			"limits.cpu":       "8",
+			"limits.memory":    "16GiB", // 宣言から消える
+			"security.nesting": "true",  // 利用者が手で追加したもの
+		},
+		Devices: map[string]incus.Device{
+			"workspace": {"type": "disk"},
+			"extdata":   {"type": "disk"}, // 宣言から消える
+			"manual":    {"type": "nic"},  // 利用者が手で追加したもの
+		},
+	})
+
+	body := rootYAML + "  config:\n    limits.cpu: \"8\"\n"
+	if err := appWith(t, body, client).Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	cfg := client.Instances["dev-example-project"].Config
+	if _, ok := cfg["limits.memory"]; ok {
+		t.Error("宣言から消えたキーが残っている")
+	}
+	if _, ok := cfg["security.nesting"]; !ok {
+		t.Error("利用者が手で追加したキーを消している")
+	}
+
+	devices := client.Instances["dev-example-project"].Devices
+	if _, ok := devices["extdata"]; ok {
+		t.Error("宣言から消えたdeviceが残っている")
+	}
+	if _, ok := devices["manual"]; !ok {
+		t.Error("利用者が手で追加したdeviceを消している")
+	}
+}
+
+// --restart を指定すると、反映に再起動が必要な変更で再起動する
+func TestUpRestartsWhenRequested(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+
+	body := rootYAML + "  config:\n    security.nesting: \"true\"\n"
+	if err := appWith(t, body, client).Up(context.Background(), UpOptions{Restart: true}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	if !client.Called("stop dev-example-project") {
+		t.Errorf("calls = %v, 再起動していない", client.Calls)
+	}
+	if !client.Instances["dev-example-project"].IsRunning() {
+		t.Error("再起動後に停止したままになっている")
+	}
+}
+
+// 再起動が不要なら --restart でも止めない
+func TestUpDoesNotRestartWithoutChanges(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			idmapConfigKey:    fmt.Sprintf("uid %d 0\ngid %d 0", os.Getuid(), os.Getgid()),
+		},
+	})
+
+	if err := appWith(t, rootYAML, client).Up(context.Background(), UpOptions{Restart: true}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if client.Called("stop") {
+		t.Errorf("calls = %v, 変更が無ければ再起動しないこと", client.Calls)
+	}
+}
+
+func TestUpPropagatesRestartErrors(t *testing.T) {
+	for _, failOn := range []string{"stop", "start"} {
+		t.Run(failOn, func(t *testing.T) {
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+			client.FailOn = map[string]error{failOn: errBoom}
+
+			body := rootYAML + "  config:\n    security.nesting: \"true\"\n"
+			err := appWith(t, body, client).Up(context.Background(), UpOptions{Restart: true})
+			if !errors.Is(err, errBoom) {
+				t.Errorf("error = %v, want %v", err, errBoom)
+			}
+		})
+	}
+}
+
+func TestUpPropagatesRemoveDeviceError(t *testing.T) {
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Stopped",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedDevicesKey: "gone,workspace",
+		},
+		Devices: map[string]incus.Device{"gone": {"type": "disk"}},
+	})
+	client.FailOn = map[string]error{"removedevices": errBoom}
+
+	if err := appWith(t, rootYAML, client).Up(context.Background(), UpOptions{}); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }

@@ -927,3 +927,65 @@ provision:
 		t.Errorf("前提確認 = %d回, want 1", checks)
 	}
 }
+
+// galaxy ステップはホスト側で ansible-galaxy install を実行する
+func TestGalaxyStep(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "collections: []\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+      extra_args: ["--force"]
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{}
+	env := testEnv()
+	env.ProjectRoot = root
+	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	got := f.LastArgv()
+	for _, want := range []string{
+		"ansible-galaxy install -r",
+		filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"),
+		"--force",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("command = %q, %q を含むこと", got, want)
+		}
+	}
+	if dir := f.Calls[len(f.Calls)-1].Dir; dir != root {
+		t.Errorf("Dir = %q, want %q", dir, root)
+	}
+}
+
+// galaxy ステップでも ansible の前提を確認する
+func TestGalaxyStepChecksPrerequisites(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "requirements.yml"), "collections: []\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - galaxy:
+      requirements: .incus-dev/requirements.yml
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{Err: map[string]error{"ansible-playbook --version": errors.New("not found")}}
+	env := testEnv()
+	env.ProjectRoot = root
+
+	err = newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{})
+	if err == nil || !strings.Contains(err.Error(), "ansible") {
+		t.Errorf("error = %v, 前提の不足を報告すること", err)
+	}
+}

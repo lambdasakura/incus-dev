@@ -2,7 +2,9 @@ package cli
 
 import (
 	"maps"
+	"slices"
 	"strconv"
+	"strings"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
@@ -13,6 +15,10 @@ const (
 	managedProjectKey = config.ReservedConfigPrefix + "project"
 	managedRootKey    = config.ReservedConfigPrefix + "root"
 	managedSchemaKey  = config.ReservedConfigPrefix + "schema"
+	// managedKeysKey はdevkitが適用したinstance configキーの記録。
+	managedKeysKey = config.ReservedConfigPrefix + "managed"
+	// managedDevicesKey はdevkitが作成したdevice名の記録。
+	managedDevicesKey = config.ReservedConfigPrefix + "devices"
 )
 
 // idmapConfigKey は非特権コンテナでのuid/gid対応付けに使うキー。
@@ -33,7 +39,66 @@ func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	if v := plan.rawIDMap(); v != "" {
 		out[idmapConfigKey] = v
 	}
+
+	// 適用したキーとdeviceを記録し、宣言から消えたときに追従できるようにする
+	// （仕様 05-incus.md 5.4.4）。記録用のキー自身は含めない。
+	out[managedKeysKey] = strings.Join(managedNames(out), ",")
+	out[managedDevicesKey] = strings.Join(slices.Sorted(maps.Keys(desiredDevices(cfg, plan))), ",")
+
 	return out
+}
+
+// managedNames は記録対象のconfigキーを返す（devkitの管理用キーを除く）。
+func managedNames(desired map[string]string) []string {
+	out := make([]string, 0, len(desired))
+	for _, k := range slices.Sorted(maps.Keys(desired)) {
+		if !strings.HasPrefix(k, config.ReservedConfigPrefix) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// staleConfigKeys は宣言から消えた、devkit適用済みのconfigキーを返す。
+//
+// 記録（user.incus-devkit.managed）が無い古いinstanceでは、
+// devkit自身が設定したidmapキーだけを対象とする。
+func staleConfigKeys(current, desired map[string]string, plan idmapPlan) []string {
+	recorded, ok := current[managedKeysKey]
+	if !ok {
+		return staleIDMapKeys(current, plan)
+	}
+
+	var out []string
+	for _, k := range splitList(recorded) {
+		if _, want := desired[k]; !want {
+			if _, exists := current[k]; exists {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// staleDevices は宣言から消えた、devkit作成済みのdeviceを返す。
+func staleDevices(current *incus.Instance, desired map[string]incus.Device) []string {
+	var out []string
+	for _, name := range splitList(current.Config[managedDevicesKey]) {
+		if _, want := desired[name]; want {
+			continue
+		}
+		if _, exists := current.Devices[name]; exists {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func splitList(v string) []string {
+	if v == "" {
+		return nil
+	}
+	return strings.Split(v, ",")
 }
 
 // desiredDevices は dev.yml から適用すべきdeviceを組み立てる。

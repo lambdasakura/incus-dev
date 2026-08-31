@@ -160,11 +160,13 @@ type Client interface {
 
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 	StartInstance(ctx context.Context, name string) error
+	StopInstance(ctx context.Context, name string) error
 	DeleteInstance(ctx context.Context, name string) error
 
 	ApplyConfig(ctx context.Context, name string, config map[string]string) error
 	UnsetConfig(ctx context.Context, name string, keys []string) error
 	ApplyDevices(ctx context.Context, name string, devices map[string]Device) error
+	RemoveDevices(ctx context.Context, name string, devices []string) error
 
 	ProfileExists(ctx context.Context, name string) (bool, error)
 

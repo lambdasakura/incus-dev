@@ -108,7 +108,26 @@
           "propertyNames": { "minLength": 1 },
           "additionalProperties": { "$ref": "#/$defs/scalar" }
         },
-        "ansible": { "$ref": "#/$defs/ansible" }
+        "galaxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirements"],
+      "properties": {
+        "requirements": { "type": "string", "minLength": 1 },
+        "extra_args": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ansible": { "$ref": "#/$defs/ansible" },
+        "galaxy": { "$ref": "#/$defs/galaxy" }
+      }
+    },
+    "galaxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirements"],
+      "properties": {
+        "requirements": { "type": "string", "minLength": 1 },
+        "extra_args": { "type": "array", "items": { "type": "string" } }
       }
     },
     "ansible": {

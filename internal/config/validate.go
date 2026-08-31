@@ -162,6 +162,9 @@ func validateStepValues(c *Config, ps *problems) {
 // runOnlyFields は run ステップ専用のフィールド。
 var runOnlyFields = []string{"cwd", "env", "shell", "user"}
 
+// stepKinds はステップの種別を表すキー。
+var stepKinds = []string{"run", "ansible", "galaxy"}
+
 // validateSteps はステップの形（run/ansibleの排他性など）を生のドキュメントから検証する。
 // 位置情報を正確に報告するため、構造体ではなく raw を見る。
 func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *problems) {
@@ -175,19 +178,24 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 		if !ok {
 			continue
 		}
-		_, hasRun := m["run"]
-		_, hasAnsible := m["ansible"]
-
-		switch {
-		case hasRun && hasAnsible:
-			ps.add(path, "run and ansible are mutually exclusive; specify only one")
-		case !hasRun && !hasAnsible:
-			ps.add(path, "must specify either run or ansible")
+		var kinds []string
+		for _, kind := range stepKinds {
+			if _, ok := m[kind]; ok {
+				kinds = append(kinds, kind)
+			}
 		}
 
-		if hasAnsible {
+		switch {
+		case len(kinds) > 1:
+			ps.add(path, "%s are mutually exclusive; specify only one", strings.Join(kinds, " and "))
+		case len(kinds) == 0:
+			ps.add(path, "must specify one of: %s", strings.Join(stepKinds, ", "))
+		}
+
+		_, hasRun := m["run"]
+		if !hasRun && len(kinds) > 0 {
 			if !allowAnsible {
-				ps.add(path, "ansible steps are not allowed in %s; use run steps only", key)
+				ps.add(path, "only run steps are allowed in %s", key)
 			}
 			var extra []string
 			for _, f := range runOnlyFields {
@@ -320,6 +328,12 @@ func validatePaths(c *Config, ps *problems) {
 
 func checkStepPaths(c *Config, steps []Step, key string, ps *problems) {
 	for i, s := range steps {
+		if s.Galaxy != nil {
+			path := fmt.Sprintf("%s[%d].galaxy.requirements", key, i)
+			if _, err := os.Stat(c.ResolvePath(s.Galaxy.Requirements)); err != nil {
+				ps.add(path, "%v", err)
+			}
+		}
 		if s.Ansible == nil {
 			continue
 		}

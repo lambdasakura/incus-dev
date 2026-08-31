@@ -65,7 +65,7 @@ func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Bu
 func TestUpCreatesInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestUpCreatesInstance(t *testing.T) {
 func TestUpMountsWorkspace(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestUpDoesNotRecreateExistingInstance(t *testing.T) {
 		Config: map[string]string{"user.incus-devkit.project": "example-project"},
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if client.Called("create") {
@@ -144,7 +144,7 @@ func TestUpReappliesConfigToExistingInstance(t *testing.T) {
 		},
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if got := client.Instances["dev-example-project"].Config["limits.cpu"]; got != "16" {
@@ -157,7 +157,7 @@ func TestUpRefusesUnmanagedInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
 
-	err := app.Up(context.Background())
+	err := app.Up(context.Background(), cli.UpOptions{})
 	if err == nil {
 		t.Fatal("Up() = nil error, 管理外instanceでは失敗すること")
 	}
@@ -169,7 +169,7 @@ func TestUpRefusesUnmanagedInstance(t *testing.T) {
 func TestUpSetsManagedMarkers(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	cfg := client.Instances["dev-example-project"].Config
@@ -193,7 +193,7 @@ func TestUpFailsWhenProfileMissing(t *testing.T) {
 `)
 	client.Profiles = []string{"default"}
 
-	err := app.Up(context.Background())
+	err := app.Up(context.Background(), cli.UpOptions{})
 	if err == nil {
 		t.Fatal("Up() = nil error, 存在しないProfileでは失敗すること")
 	}
@@ -214,7 +214,7 @@ func TestUpAppliesNoProfiles(t *testing.T) {
       pool: default
       path: /
 `)
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=container profiles=[] noprofiles=true") {
@@ -227,7 +227,7 @@ func TestUpRunsProvisionSteps(t *testing.T) {
 provision:
   - run: echo provisioned
 `)
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 
@@ -509,7 +509,7 @@ func TestUpFallsBackToShiftWhenRawIDMapNotAllowed(t *testing.T) {
 		CheckIDMap: func(int, int) error { return errors.New("subuid is not configured") },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v, shiftへ退避して継続すること", err)
 	}
 
@@ -541,7 +541,7 @@ func TestUpFailsWhenExplicitRawIDMapNotAllowed(t *testing.T) {
 		CheckIDMap: func(int, int) error { return errors.New("subuid is not configured") },
 	})
 
-	err := app.Up(context.Background())
+	err := app.Up(context.Background(), cli.UpOptions{})
 	if err == nil {
 		t.Fatal("Up() = nil error, rawを明示した場合は失敗すること")
 	}
@@ -565,7 +565,7 @@ func TestUpSkipsIDMapCheckWhenDisabled(t *testing.T) {
 		CheckIDMap: func(int, int) error { return errors.New("must not be called") },
 	})
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v, idmap: none では検査しないこと", err)
 	}
 }
@@ -797,7 +797,7 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 func TestUpPassesInstanceType(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+"  type: virtual-machine\n")
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=virtual-machine") {
@@ -815,7 +815,7 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 		return 0, nil
 	}
 
-	if err := app.Up(context.Background()); err != nil {
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
 
