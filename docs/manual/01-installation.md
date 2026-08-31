@@ -20,7 +20,7 @@ Ansibleを使うかどうかは **プロジェクトごとの選択** であり�
 
 ## 1.2 Incusの準備
 
-Incusが利用できることを確認する。
+Incusが利用できることを確認する。`incus` コマンドがあるなら、それが手軽である。
 
 ```bash
 incus info | head -3
@@ -28,6 +28,17 @@ incus profile list
 ```
 
 `default` profile が存在していれば、そのまま使い始められる。
+
+`incus` コマンドを入れていない場合は、`idev` の導入後（1.3）に
+プロジェクトのディレクトリで確認できる。
+
+```bash
+idev status
+```
+
+Incusへ接続できていれば、instanceがまだ無くても状態が表示される。
+接続できない場合はその旨のエラーになる
+（[トラブルシューティング](../troubleshooting.md#6-incus-apiとの通信で失敗する) 参照）。
 
 ## 1.3 idevの導入
 

@@ -2,7 +2,6 @@ package incus
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -130,19 +129,6 @@ func toAPIDevices(devices map[string]Device) map[string]map[string]string {
 		out[name] = dev
 	}
 	return out
-}
-
-// InstanceExists はinstanceの存在を返す。
-func (a *API) InstanceExists(ctx context.Context, name string) (bool, error) {
-	_, err := a.Instance(ctx, name)
-	switch {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, ErrInstanceNotFound):
-		return false, nil
-	default:
-		return false, err
-	}
 }
 
 // CreateInstance はinstanceを作成する（起動はしない）。

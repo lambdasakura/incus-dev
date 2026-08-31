@@ -453,9 +453,9 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 	return nil
 }
 
-// asUser は指定ユーザーで実行するためのargvと、incusへ渡すユーザー指定を返す。
+// asUser は指定ユーザーで実行するためのargvと、Incusへ渡すユーザー指定を返す。
 //
-// incus exec --user はUIDのみを受け付けるため、ユーザー名の場合は
+// Incusのexecはuidしか受け付けないため、ユーザー名の場合は
 // コンテナ内で su を使って切り替える（run ステップと同じ扱い）。
 func asUser(argv []string, sh config.Shell) (out []string, user string) {
 	if sh.User == "" {

@@ -101,15 +101,6 @@ func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error)
 	return inst, nil
 }
 
-// InstanceExists はinstanceの存在を返す。
-func (f *Fake) InstanceExists(ctx context.Context, name string) (bool, error) {
-	if _, err := f.Instance(ctx, name); err != nil {
-		//nolint:nilerr // 存在しないことはエラーではない
-		return false, nil
-	}
-	return true, nil
-}
-
 // CreateInstance はinstanceを登録する。状態は Stopped になる。
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
 	if err := f.record("create %s image=%s type=%s profiles=%v noprofiles=%v config=%v devices=%v",

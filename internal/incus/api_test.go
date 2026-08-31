@@ -405,10 +405,6 @@ func TestAPIInstanceNotFound(t *testing.T) {
 		t.Errorf("error = %v, want ErrInstanceNotFound", err)
 	}
 
-	ok, err := a.InstanceExists(context.Background(), "dev-missing")
-	if ok || err != nil {
-		t.Errorf("InstanceExists() = %v, %v", ok, err)
-	}
 }
 
 func TestAPICreateInstance(t *testing.T) {
@@ -980,19 +976,19 @@ func TestExitCodeOf(t *testing.T) {
 	}
 }
 
-func TestAPIInstanceExists(t *testing.T) {
+// 通信できないことを「存在しない」と混同しないこと
+func TestAPIInstanceDistinguishesFailureFromAbsence(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
+	f.err["GetInstanceFull"] = errAPI
 	a, _ := newAPI(f)
 
-	if ok, err := a.InstanceExists(context.Background(), "dev-x"); !ok || err != nil {
-		t.Errorf("InstanceExists() = %v, %v", ok, err)
+	_, err := a.Instance(context.Background(), "dev-x")
+	if !errors.Is(err, errAPI) {
+		t.Errorf("error = %v, want %v", err, errAPI)
 	}
-
-	f.err["GetInstanceFull"] = errAPI
-	ok, err := a.InstanceExists(context.Background(), "dev-x")
-	if ok || !errors.Is(err, errAPI) {
-		t.Errorf("InstanceExists() = %v, %v, 通信失敗を「存在しない」と混同しないこと", ok, err)
+	if errors.Is(err, ErrInstanceNotFound) {
+		t.Error("通信失敗を「存在しない」として扱っている")
 	}
 }
 

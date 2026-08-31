@@ -45,10 +45,10 @@ func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) e
 	return nil
 }
 
-// runArgv はコンテナ内で実行するargvと、incusへ渡すユーザー指定を返す。
+// runArgv はコンテナ内で実行するargvと、Incusへ渡すユーザー指定を返す。
 //
-// incus exec --user はUIDのみを受け付けるため、ユーザー名が指定された場合は
-// su でユーザーを切り替え、incusへは何も渡さない。
+// Incusのexecはuidしか受け付けない（ユーザー名を解決しない）ため、
+// 名前が指定された場合は su で切り替え、Incusへは何も渡さない。
 func runArgv(step *config.RunStep) (argv []string, user string) {
 	shell := step.ShellOrDefault()
 
