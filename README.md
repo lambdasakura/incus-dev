@@ -66,6 +66,7 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 | 対象 | 必要なもの |
 | --- | --- |
 | ホスト | Incus、`idev` バイナリ |
+| ホスト（`idev shell` を使う場合） | `incus` コマンド（端末を伴う実行のみ委譲する） |
 | ホスト（ansibleステップを使う場合） | `ansible-playbook`、`community.general` collection |
 | コンテナ | なし（SSH Serverは不要） |
 
@@ -128,6 +129,7 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 | `volumes`（永続ボリューム） | 実装済み |
 | `secrets`（ホスト環境変数・ファイルからの注入） | 実装済み |
 | `shell`（user / command / cwd）、`incus.project` | 実装済み |
+| Incus API（Go client library）での操作 | 実装済み（端末を伴う実行のみ `incus` コマンドへ委譲） |
 | `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
 | `--incus-remote` | フラグは通るが未検証（workspaceの共有方式が未定） |
 | `instance.type: virtual-machine` | Incusへ素通しするが未検証 |

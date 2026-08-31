@@ -11,6 +11,7 @@
 | `incus profile(s) not found on this host` | [3](#3-profileが見つからない) |
 | `is not managed by devkit` | [4](#4-instanceがdevkit管理外と言われる) |
 | ansibleステップが失敗する | [5](#5-ansibleステップが失敗する) |
+| Incusへ接続できない、API呼び出しが失敗する | [6](#6-incus-apiとの通信で失敗する) |
 
 ---
 
@@ -277,3 +278,32 @@ bootstrap:
 
 パッケージ導入を伴うため、この経路は **コンテナからの外部通信** に依存する。
 失敗する場合はまず [1](#1-コンテナから外部へ通信できない) を確認すること。
+
+---
+
+## 6. Incus APIとの通信で失敗する
+
+`idev` はIncusのGo client libraryからAPIを直接呼ぶ。
+接続先や証明書の解決には `incus` コマンドと同じ設定
+（`~/.config/incus/config.yml`）を読む。
+
+### まず確認する
+
+```bash
+incus info | head -3        # 同じ設定で接続できるか
+```
+
+`incus` コマンドでも接続できない場合は、devkitではなくIncus側の問題である。
+
+### CLI経由へ切り替える
+
+API実装に起因する問題かを切り分けるため、
+すべての操作を `incus` コマンド経由で行う退避経路がある。
+
+```bash
+IDEV_USE_INCUS_CLI=1 idev up
+```
+
+これで解決する場合、API実装側の不具合である可能性が高い。
+なお `idev shell` のように端末を割り当てる実行は、
+この環境変数の有無にかかわらず常に `incus` コマンドへ委譲する。

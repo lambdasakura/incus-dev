@@ -274,7 +274,7 @@ project root検出にGitを利用してもよい。
 | JSON Schema | `github.com/santhosh-tekuri/jsonschema` |
 | ログ | 標準 `log/slog` |
 | テスト | 標準 `testing`（必要なら `github.com/google/go-cmp`） |
-| Incus API（将来） | `github.com/lxc/incus/client` |
+| Incus API | `github.com/lxc/incus/v6/client` |
 
 標準ライブラリで十分な領域に依存を追加しない。
 

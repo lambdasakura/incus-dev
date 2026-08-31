@@ -254,26 +254,39 @@ instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で�
 
 ### 5.7.1 実装方針
 
-MVPでは `incus` CLIをラップした実装 (`internal/incus/cli.go`) を用いる。
-
-理由：
-
-- 対象Incus versionのCLI互換性を確認しやすい
-- `idev shell` のような端末を伴う操作を扱いやすい
-
-将来的に、公式Go client library
+既定では公式Go client library
 
 ```text
-github.com/lxc/incus/client
+github.com/lxc/incus/v6/client
 ```
 
-を用いた実装へ差し替え可能とする。これにより以下の利点が得られる。
+を用いた実装 (`internal/incus/api.go`) を使う。利点：
 
 - CLI出力のパースが不要になる
 - 型付きのAPIレスポンスを扱える
-- CLIのバージョン差異の影響を受けにくい
+- CLIのバージョン差異や出力形式の変更の影響を受けにくい
+- `incus` コマンドの存在に依存しない
 
-ただし `idev shell` は端末制御の都合上、CLI呼び出しを維持してよい。
+remote・project・imageの解決には `incus` コマンドと同じ設定
+（`~/.config/incus/config.yml`）を読む (`internal/incus/connect.go`)。
+利用者から見た挙動を `incus` コマンドと揃えるためである。
+
+**例外：端末を伴う実行。**
+`idev shell` のようにTTYを割り当てる実行は、raw modeへの切り替えと
+ウィンドウサイズ変更の追従が必要になる。ここはCLI実装
+(`internal/incus/cli.go`) へ委譲する（`API.Terminal`）。
+
+CLI実装は退避経路としても維持する。環境変数
+
+```text
+IDEV_USE_INCUS_CLI=1
+```
+
+を設定すると、すべての操作を `incus` コマンド経由で行う。
+API側の不具合や、APIでは再現しないCLI固有の挙動を切り分けるために使う。
+
+どちらの実装も同じ `Client` interfaceを満たし、
+起動待ち (`internal/incus/wait.go`) は共有する。
 
 ### 5.7.2 出力パース
 

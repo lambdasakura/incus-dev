@@ -11,10 +11,10 @@
 - `os/exec` による外部コマンド呼び出しが標準ライブラリで完結する
 - 構造体タグによるYAML/JSONの型付きデコードが自然に書ける
 - 標準の `testing` によりテストが容易
-- Incusの公式Go client library (`github.com/lxc/incus/client`) を将来利用できる
+- Incusの公式Go client library (`github.com/lxc/incus/v6/client`) をそのまま利用できる
 
 ただし、アーキテクチャ上Go固有機能への過剰な依存は避ける。
-外部コマンド（incus / ansible-playbook / git）との境界はインターフェースとして
+外部（Incus / ansible-playbook / git）との境界はインターフェースとして
 定義し、実装差し替えが可能な形に保つ。
 
 ---
@@ -57,7 +57,10 @@ incus-devkit/
 │   │
 │   ├── incus/                  # Incus操作層
 │   │   ├── client.go           # interface定義
-│   │   ├── cli.go              # incus CLI 実装
+│   │   ├── api.go              # Go client library 実装（既定）
+│   │   ├── connect.go          # remote / image の解決
+│   │   ├── cli.go              # incus CLI 実装（端末・退避経路）
+│   │   ├── wait.go             # 起動待ち（実装間で共有）
 │   │   └── name.go             # instance命名規則
 │   │
 │   ├── provision/              # bootstrap / provision ステップの実行

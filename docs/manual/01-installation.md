@@ -6,9 +6,17 @@
 | --- | --- |
 | ホスト | Incus（動作確認は6.0系）、`idev` バイナリ |
 | ホスト（ansibleステップを使う場合のみ） | `ansible-playbook`、`community.general` collection |
+| ホスト（`idev shell` を使う場合のみ） | `incus` コマンド |
 | コンテナ | なし。SSH Serverは導入しない |
 
 `idev` は単一の静的バイナリで、実行時に言語ランタイムを必要としない。
+
+Incusの操作はGoのclient libraryからAPIで行う。
+`incus` コマンドが要るのは端末を割り当てる実行（`idev shell`）だけで、
+これはターミナル制御のためにCLIへ委譲している。
+remoteやimageの解決には `incus` コマンドと同じ設定
+（`~/.config/incus/config.yml`）を読むため、
+`incus` コマンドで接続できるIncusはそのまま `idev` からも使える。
 
 Ansibleを使うかどうかは **プロジェクトごとの選択** であり、
 シェルスクリプトだけで構成するなら不要。

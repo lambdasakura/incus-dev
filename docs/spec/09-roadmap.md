@@ -86,6 +86,7 @@ dev.yml の secrets（ホストからの注入）
 project.scope（複数checkout / ブランチ別instance）
 galaxy ステップ型（ansible-galaxy install）
 設定・deviceの削除追従（user.incus-devkit.managed / .devices）
+Incus Go client library への移行（端末を伴う実行のみCLIへ委譲）
 ```
 
 残る候補：
@@ -95,8 +96,6 @@ galaxy ステップ型（ansible-galaxy install）
 
 virtual-machine サポート
 Incus remote
-
-Incus Go client library への移行
 ```
 
 ### virtual-machine と Incus remote を保留する理由

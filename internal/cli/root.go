@@ -30,6 +30,18 @@ type globalFlags struct {
 // defaultIncusProject は指定が無い場合に使うIncus project。
 const defaultIncusProject = "default"
 
+// useCLIEnv が設定されている場合、API ではなく incus コマンドを使う。
+// APIで問題が起きたときの逃げ道として残す。
+const useCLIEnv = "IDEV_USE_INCUS_CLI"
+
+// incusClient はIncus操作の実装を返す。
+func incusClient(target incus.Target, terminal *incus.CLI) (incus.Client, error) {
+	if os.Getenv(useCLIEnv) != "" {
+		return terminal, nil
+	}
+	return incus.Connect(target, terminal)
+}
+
 // errAborted は確認を拒否したことを示す。
 var errAborted = errors.New("aborted")
 
@@ -105,10 +117,13 @@ func newApp(g *globalFlags) (*App, error) {
 	}
 
 	cmdRunner := runner.NewWithLogger(newLogger(os.Stderr, g.verbose))
-	client := &incus.CLI{
-		Runner:  cmdRunner,
-		Remote:  g.incusRemote,
-		Project: incusProject,
+
+	// 端末を伴う実行だけはCLIへ委譲する（端末制御の都合。仕様 05-incus.md 5.7.1）。
+	terminal := &incus.CLI{Runner: cmdRunner, Remote: g.incusRemote, Project: incusProject}
+
+	client, err := incusClient(incus.Target{Remote: g.incusRemote, Project: incusProject}, terminal)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewAppFor(AppOptions{
