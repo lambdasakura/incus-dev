@@ -24,16 +24,17 @@ dev-example-project
 プレフィックス `dev-` は「開発環境用instance」を意味するものであり、
 コマンド名 `idev` とは独立している。`incus list` での可読性を優先する。
 
-ただし同一マシン上で複数checkoutを利用する可能性を考慮する。
-
-将来的には以下のような方式をサポート可能とする。
+同一マシン上で複数のチェックアウトを扱う場合、`project.scope` で
+区別の仕方を選べる（[03-configuration.md](03-configuration.md) 3.5）。
 
 ```text
-dev-example-project-main
-dev-example-project-a8f213
+scope: name    dev-example-project              （既定）
+scope: path    dev-example-project-cb958c73     チェックアウト先ごと
+scope: branch  dev-example-project-feature-x    ブランチごと
 ```
 
-初期実装では単純なproject name方式でよい。
+既定は従来どおりプロジェクト名のみとし、明示的に指定した場合のみ
+名前が変わるようにする。既存の環境が意図せず別物になることを避けるため。
 
 命名ロジックは単独の純粋関数として実装し、単体テスト可能にする。
 

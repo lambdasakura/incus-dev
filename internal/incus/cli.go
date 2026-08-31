@@ -309,6 +309,42 @@ func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 	return false, nil
 }
 
+// CreateSnapshot はinstanceのスナップショットを作成する。
+func (c *CLI) CreateSnapshot(ctx context.Context, instance, snapshot string) error {
+	_, err := c.run(ctx, "create snapshot "+snapshot,
+		c.args([]string{"snapshot", "create"}, c.qualify(instance), snapshot))
+	return err
+}
+
+// Snapshots はinstanceのスナップショット一覧を返す。
+func (c *CLI) Snapshots(ctx context.Context, instance string) ([]Snapshot, error) {
+	res, err := c.run(ctx, "list snapshots",
+		c.args([]string{"snapshot", "list"}, c.qualify(instance), "--format", "json"))
+	if err != nil {
+		return nil, err
+	}
+
+	var snapshots []Snapshot
+	if err := json.Unmarshal(res.Stdout, &snapshots); err != nil {
+		return nil, fmt.Errorf("parse snapshot list: %w", err)
+	}
+	return snapshots, nil
+}
+
+// RestoreSnapshot はinstanceをスナップショットの状態へ戻す。
+func (c *CLI) RestoreSnapshot(ctx context.Context, instance, snapshot string) error {
+	_, err := c.run(ctx, "restore snapshot "+snapshot,
+		c.args([]string{"snapshot", "restore"}, c.qualify(instance), snapshot))
+	return err
+}
+
+// DeleteSnapshot はスナップショットを削除する。
+func (c *CLI) DeleteSnapshot(ctx context.Context, instance, snapshot string) error {
+	_, err := c.run(ctx, "delete snapshot "+snapshot,
+		c.args([]string{"snapshot", "delete"}, c.qualify(instance), snapshot))
+	return err
+}
+
 // Exec はコンテナ内でコマンドを実行し、終了コードを返す。
 func (c *CLI) Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error) {
 	args := runner.Args(c.args([]string{"exec"}, c.qualify(name))...)

@@ -816,3 +816,107 @@ func TestInstanceAddressHelpers(t *testing.T) {
 		t.Error("グローバルでないアドレスを数えないこと")
 	}
 }
+
+func TestSnapshotCommands(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*incus.CLI) error
+		want string
+	}{
+		{"create", func(c *incus.CLI) error {
+			return c.CreateSnapshot(context.Background(), "dev-x", "s1")
+		}, "incus snapshot create --project default dev-x s1"},
+		{"restore", func(c *incus.CLI) error {
+			return c.RestoreSnapshot(context.Background(), "dev-x", "s1")
+		}, "incus snapshot restore --project default dev-x s1"},
+		{"delete", func(c *incus.CLI) error {
+			return c.DeleteSnapshot(context.Background(), "dev-x", "s1")
+		}, "incus snapshot delete --project default dev-x s1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &runnertest.Fake{}
+			if err := tt.call(newCLI(f)); err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			if got := f.LastArgv(); got != tt.want {
+				t.Errorf("command = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSnapshotsParsesList(t *testing.T) {
+	f := &runnertest.Fake{Stdout: map[string]string{
+		"incus snapshot list": `[{"name":"s1","created_at":"2026-08-31T05:28:02Z"},{"name":"s2"}]`,
+	}}
+
+	got, err := newCLI(f).Snapshots(context.Background(), "dev-x")
+	if err != nil {
+		t.Fatalf("Snapshots() error = %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "s1" || got[1].Name != "s2" {
+		t.Fatalf("Snapshots() = %+v", got)
+	}
+	if got[0].CreatedAt.IsZero() {
+		t.Error("created_at を読めていない")
+	}
+	want := "incus snapshot list --project default dev-x --format json"
+	if cmd := f.LastArgv(); cmd != want {
+		t.Errorf("command = %q, want %q", cmd, want)
+	}
+}
+
+func TestSnapshotsReportsMalformedJSON(t *testing.T) {
+	f := &runnertest.Fake{Stdout: map[string]string{"incus snapshot list": "{"}}
+
+	if _, err := newCLI(f).Snapshots(context.Background(), "dev-x"); err == nil ||
+		!strings.Contains(err.Error(), "parse snapshot list") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestSnapshotCommandsPropagateErrors(t *testing.T) {
+	wantErr := errors.New("snapshot failed")
+	ops := map[string]func(*incus.CLI) error{
+		"create":  func(c *incus.CLI) error { return c.CreateSnapshot(context.Background(), "dev-x", "s") },
+		"list":    func(c *incus.CLI) error { _, err := c.Snapshots(context.Background(), "dev-x"); return err },
+		"restore": func(c *incus.CLI) error { return c.RestoreSnapshot(context.Background(), "dev-x", "s") },
+		"delete":  func(c *incus.CLI) error { return c.DeleteSnapshot(context.Background(), "dev-x", "s") },
+	}
+
+	for name, call := range ops {
+		t.Run(name, func(t *testing.T) {
+			f := &runnertest.Fake{Err: map[string]error{"incus snapshot": wantErr}}
+
+			if err := call(newCLI(f)); !errors.Is(err, wantErr) {
+				t.Errorf("error = %v, want %v", err, wantErr)
+			}
+		})
+	}
+}
+
+func TestRemoveDevices(t *testing.T) {
+	f := &runnertest.Fake{}
+
+	if err := newCLI(f).RemoveDevices(context.Background(), "dev-x", []string{"a", "b"}); err != nil {
+		t.Fatalf("RemoveDevices() error = %v", err)
+	}
+	if len(f.Calls) != 2 {
+		t.Fatalf("calls = %v", f.Commands())
+	}
+	want := "incus config device remove --project default dev-x b"
+	if got := f.LastArgv(); got != want {
+		t.Errorf("command = %q, want %q", got, want)
+	}
+}
+
+func TestRemoveDevicesPropagatesError(t *testing.T) {
+	wantErr := errors.New("remove failed")
+	f := &runnertest.Fake{Err: map[string]error{"incus config device remove": wantErr}}
+
+	if err := newCLI(f).RemoveDevices(context.Background(), "dev-x", []string{"a"}); !errors.Is(err, wantErr) {
+		t.Errorf("error = %v, want %v", err, wantErr)
+	}
+}

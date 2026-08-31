@@ -44,6 +44,8 @@ type AppOptions struct {
 	// Host はworkspaceの対応付けに使うホスト側のID。
 	// nilの場合は実行ユーザーのものを使う。
 	Host *HostIDs
+	// Branch は project.scope: branch のときに現在のブランチ名を返す。
+	Branch branchFunc
 }
 
 // HostIDs はホスト側のuid/gid。
@@ -71,7 +73,20 @@ type App struct {
 }
 
 // NewApp は App を構成する。
+//
+// instance名の決定に失敗する場合（project.scope: branch でGitが使えないなど）は
+// NewAppFor を使う。
 func NewApp(opt AppOptions) *App {
+	app, err := NewAppFor(opt)
+	if err != nil {
+		// 既定のscopeでは失敗しない。テストや既定構成のための簡便な入口。
+		panic(err)
+	}
+	return app
+}
+
+// NewAppFor は App を構成する。instance名の決定に失敗した場合はエラーを返す。
+func NewAppFor(opt AppOptions) (*App, error) {
 	out := opt.Out
 	if out == nil {
 		out = io.Discard
@@ -92,6 +107,11 @@ func NewApp(opt AppOptions) *App {
 		host = &HostIDs{UID: os.Getuid(), GID: os.Getgid()}
 	}
 
+	name, err := instanceNameFor(opt.Config, opt.Branch)
+	if err != nil {
+		return nil, err
+	}
+
 	return &App{
 		cfg:    opt.Config,
 		client: opt.Client,
@@ -107,12 +127,12 @@ func NewApp(opt AppOptions) *App {
 		errOut:       errOut,
 		log:          log,
 		interactive:  opt.Interactive,
-		instance:     incus.InstanceName(opt.Config.Project.Name),
+		instance:     name,
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
 		host:         *host,
-	}
+	}, nil
 }
 
 // InstanceName は対象instance名を返す。

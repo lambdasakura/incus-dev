@@ -17,6 +17,7 @@ idev status
 idev destroy
 idev rebuild
 idev validate
+idev snapshot
 ```
 
 ## 4.0 共通フラグ
@@ -225,6 +226,23 @@ idev rebuild --force
 
 `dev.yml` から削除した設定を確実に消したい場合の正規手段でもある
 （[05-incus.md](05-incus.md) 5.4.4 参照）。
+
+---
+
+## 4.6.1 `idev snapshot`
+
+instanceのスナップショットを操作する。
+
+```bash
+idev snapshot create [name]     # 名前を省略すると日時（20060102-150405）
+idev snapshot list
+idev snapshot restore <name>    # 破壊的。確認を求める（--force で省略）
+idev snapshot delete <name>     # 同上
+```
+
+- 対象はdevkit管理下のinstanceに限る
+- 復元してもホスト側のworkspaceには影響しない
+  （bind mountであり、instanceの状態ではないため）
 
 ---
 

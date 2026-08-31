@@ -139,6 +139,12 @@ type ExecOptions struct {
 	Stderr io.Writer
 }
 
+// Snapshot はinstanceのスナップショット。
+type Snapshot struct {
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // WaitOptions はinstanceのready待ちの制御。
 type WaitOptions struct {
 	// Timeout はコマンドを実行できるようになるまでの待ち時間。
@@ -169,6 +175,11 @@ type Client interface {
 	RemoveDevices(ctx context.Context, name string, devices []string) error
 
 	ProfileExists(ctx context.Context, name string) (bool, error)
+
+	CreateSnapshot(ctx context.Context, instance, snapshot string) error
+	Snapshots(ctx context.Context, instance string) ([]Snapshot, error)
+	RestoreSnapshot(ctx context.Context, instance, snapshot string) error
+	DeleteSnapshot(ctx context.Context, instance, snapshot string) error
 
 	Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error)
 	WaitReady(ctx context.Context, name string, opt WaitOptions) error

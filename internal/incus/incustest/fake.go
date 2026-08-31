@@ -17,6 +17,8 @@ type Fake struct {
 	Instances map[string]*incus.Instance
 	// Profiles は存在するProfile名。
 	Profiles []string
+	// SnapshotsByInstance はinstanceごとのスナップショット。
+	SnapshotsByInstance map[string][]incus.Snapshot
 
 	// ExecFunc が設定されていれば Exec の応答に使用する。
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
@@ -254,6 +256,47 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// CreateSnapshot はスナップショットを登録する。
+func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) error {
+	if err := f.record("snapshot create %s %s", instance, snapshot); err != nil {
+		return err
+	}
+	if f.SnapshotsByInstance == nil {
+		f.SnapshotsByInstance = map[string][]incus.Snapshot{}
+	}
+	f.SnapshotsByInstance[instance] = append(f.SnapshotsByInstance[instance],
+		incus.Snapshot{Name: snapshot})
+	return nil
+}
+
+// Snapshots は登録済みのスナップショットを返す。
+func (f *Fake) Snapshots(_ context.Context, instance string) ([]incus.Snapshot, error) {
+	if err := f.record("snapshot list %s", instance); err != nil {
+		return nil, err
+	}
+	return f.SnapshotsByInstance[instance], nil
+}
+
+// RestoreSnapshot は復元を記録する。
+func (f *Fake) RestoreSnapshot(_ context.Context, instance, snapshot string) error {
+	return f.record("snapshot restore %s %s", instance, snapshot)
+}
+
+// DeleteSnapshot はスナップショットを削除する。
+func (f *Fake) DeleteSnapshot(_ context.Context, instance, snapshot string) error {
+	if err := f.record("snapshot delete %s %s", instance, snapshot); err != nil {
+		return err
+	}
+	kept := f.SnapshotsByInstance[instance][:0]
+	for _, s := range f.SnapshotsByInstance[instance] {
+		if s.Name != snapshot {
+			kept = append(kept, s)
+		}
+	}
+	f.SnapshotsByInstance[instance] = kept
+	return nil
 }
 
 // Exec は実行内容を記録し、ExecFunc があればその結果を返す。

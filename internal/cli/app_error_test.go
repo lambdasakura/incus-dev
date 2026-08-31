@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -1247,6 +1248,154 @@ func TestUpPropagatesRemoveDeviceError(t *testing.T) {
 	client.FailOn = map[string]error{"removedevices": errBoom}
 
 	if err := appWith(t, rootYAML, client).Up(context.Background(), UpOptions{}); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// snapshot 操作（仕様 09-roadmap.md）
+func TestSnapshotOperations(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+	out := &bytes.Buffer{}
+
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, CheckIDMap: func(int, int) error { return nil },
+	})
+	ctx := context.Background()
+
+	// 一覧（空）
+	if err := app.ListSnapshots(ctx); err != nil {
+		t.Fatalf("ListSnapshots() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "no snapshots") {
+		t.Errorf("output = %q", out.String())
+	}
+
+	// 名前を指定して作成
+	if err := app.CreateSnapshot(ctx, "before-upgrade"); err != nil {
+		t.Fatalf("CreateSnapshot() error = %v", err)
+	}
+	if !client.Called("snapshot create dev-example-project before-upgrade") {
+		t.Errorf("calls = %v", client.Calls)
+	}
+
+	// 名前を省略すると日時が付く
+	if err := app.CreateSnapshot(ctx, ""); err != nil {
+		t.Fatalf("CreateSnapshot() error = %v", err)
+	}
+	snapshots := client.SnapshotsByInstance["dev-example-project"]
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshots = %v", snapshots)
+	}
+	if _, err := time.Parse("20060102-150405", snapshots[1].Name); err != nil {
+		t.Errorf("自動命名 = %q, 日時形式であること", snapshots[1].Name)
+	}
+
+	// 一覧
+	out.Reset()
+	if err := app.ListSnapshots(ctx); err != nil {
+		t.Fatalf("ListSnapshots() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "before-upgrade") {
+		t.Errorf("output = %q", out.String())
+	}
+
+	// 復元と削除
+	if err := app.RestoreSnapshot(ctx, "before-upgrade"); err != nil {
+		t.Fatalf("RestoreSnapshot() error = %v", err)
+	}
+	if !client.Called("snapshot restore dev-example-project before-upgrade") {
+		t.Errorf("calls = %v", client.Calls)
+	}
+	if err := app.DeleteSnapshot(ctx, "before-upgrade"); err != nil {
+		t.Fatalf("DeleteSnapshot() error = %v", err)
+	}
+	if len(client.SnapshotsByInstance["dev-example-project"]) != 1 {
+		t.Errorf("削除されていない: %v", client.SnapshotsByInstance)
+	}
+}
+
+// snapshot 操作も devkit管理下のinstanceに限る
+func TestSnapshotRequiresManagedInstance(t *testing.T) {
+	ctx := context.Background()
+
+	ops := map[string]func(*App) error{
+		"create":  func(a *App) error { return a.CreateSnapshot(ctx, "x") },
+		"list":    func(a *App) error { return a.ListSnapshots(ctx) },
+		"restore": func(a *App) error { return a.RestoreSnapshot(ctx, "x") },
+		"delete":  func(a *App) error { return a.DeleteSnapshot(ctx, "x") },
+	}
+
+	for name, op := range ops {
+		t.Run(name, func(t *testing.T) {
+			client := incustest.New().AddInstance(&incus.Instance{
+				Name: "dev-example-project", Status: "Running",
+			})
+
+			if err := op(appWith(t, rootYAML, client)); err == nil {
+				t.Error("error = nil, 管理外instanceでは失敗すること")
+			}
+		})
+	}
+}
+
+func TestSnapshotPropagatesErrors(t *testing.T) {
+	ctx := context.Background()
+
+	ops := map[string]struct {
+		failOn string
+		call   func(*App) error
+	}{
+		"create":  {"snapshot create", func(a *App) error { return a.CreateSnapshot(ctx, "x") }},
+		"list":    {"snapshot list", func(a *App) error { return a.ListSnapshots(ctx) }},
+		"restore": {"snapshot restore", func(a *App) error { return a.RestoreSnapshot(ctx, "x") }},
+		"delete":  {"snapshot delete", func(a *App) error { return a.DeleteSnapshot(ctx, "x") }},
+	}
+
+	for name, tt := range ops {
+		t.Run(name, func(t *testing.T) {
+			client := incustest.New()
+			managed(client, "Running")
+			client.FailOn = map[string]error{tt.failOn: errBoom}
+
+			if err := tt.call(appWith(t, rootYAML, client)); !errors.Is(err, errBoom) {
+				t.Errorf("error = %v, want %v", err, errBoom)
+			}
+		})
+	}
+}
+
+func TestListSnapshotsWriteError(t *testing.T) {
+	client := incustest.New()
+	managed(client, "Running")
+
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: errWriter{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	// 空のとき
+	if err := app.ListSnapshots(context.Background()); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+	// 1件あるとき
+	client.SnapshotsByInstance = map[string][]incus.Snapshot{
+		"dev-example-project": {{Name: "s1", CreatedAt: time.Now()}},
+	}
+	if err := app.ListSnapshots(context.Background()); !errors.Is(err, errBoom) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }

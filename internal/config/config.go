@@ -65,9 +65,32 @@ type Runtime struct {
 	Version string `json:"version"`
 }
 
+// Scope はinstance名の区別の仕方。
+type Scope string
+
+const (
+	// ScopeName はプロジェクト名のみを使う（既定）。
+	ScopeName Scope = "name"
+	// ScopePath はチェックアウト先のパスで区別する。
+	ScopePath Scope = "path"
+	// ScopeBranch は現在のGitブランチで区別する。
+	ScopeBranch Scope = "branch"
+)
+
 // Project はプロジェクト情報。
 type Project struct {
 	Name string `json:"name"`
+	// Scope は同一マシンで複数のチェックアウトを扱う際の区別の仕方。
+	// 既定は name（従来どおりプロジェクト名のみ）。
+	Scope Scope `json:"scope,omitempty"`
+}
+
+// ScopeOrDefault は区別の仕方を返す。
+func (p Project) ScopeOrDefault() Scope {
+	if p.Scope == "" {
+		return ScopeName
+	}
+	return p.Scope
 }
 
 // Instance はIncus instanceの宣言。config / devices はIncusへの素通しである。

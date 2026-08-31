@@ -25,7 +25,8 @@
           "minLength": 1,
           "maxLength": 55,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
-        }
+        },
+        "scope": { "enum": ["name", "path", "branch"] }
       }
     },
     "instance": {

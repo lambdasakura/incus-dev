@@ -155,6 +155,28 @@ project:
 
 Incus instance名生成などに利用する（[05-incus.md](05-incus.md) 参照）。
 
+### scope
+
+同一マシンで複数のチェックアウトを扱う場合の、instance名の区別の仕方。
+
+```yaml
+project:
+  name: my-project
+  scope: path        # name（既定） | path | branch
+```
+
+| 値 | instance名 | 用途 |
+| --- | --- | --- |
+| `name`（既定） | `dev-my-project` | 従来どおり |
+| `path` | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
+| `branch` | `dev-my-project-feature-x` | ブランチごとに分ける（Gitが必要） |
+
+`branch` はコミットが無いリポジトリでもブランチ名を解決する。
+detached HEADの場合はコミットの短縮ハッシュを使う。
+
+既定を変えると既存の環境が別物になってしまうため、
+明示的に指定した場合のみ名前が変わる。
+
 ---
 
 ## 3.6 instance

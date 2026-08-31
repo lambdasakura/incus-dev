@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"
 )
 
 func mustParse(t *testing.T, yaml string) *config.Config {
@@ -234,5 +238,126 @@ func TestDesiredConfigRecordsManagedDevices(t *testing.T) {
 
 	if got != "data,workspace" {
 		t.Errorf("%s = %q", managedDevicesKey, got)
+	}
+}
+
+// 同一マシンで複数checkoutを扱えるようにする（仕様 05-incus.md 5.1）
+func TestInstanceNameScope(t *testing.T) {
+	tests := []struct {
+		name   string
+		scope  string
+		root   string
+		branch string
+		want   string
+	}{
+		{"既定は名前のみ", "", "/home/u/a", "main", "dev-example-project"},
+		{"name", "name", "/home/u/a", "main", "dev-example-project"},
+		{"branch", "branch", "/home/u/a", "feature/x", "dev-example-project-feature-x"},
+		{"branchが既定名", "branch", "/home/u/a", "main", "dev-example-project-main"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, planBase)
+			if tt.scope != "" {
+				cfg.Project.Scope = config.Scope(tt.scope)
+			}
+			cfg.Root = tt.root
+
+			got, err := instanceNameFor(cfg, func() (string, error) { return tt.branch, nil })
+			if err != nil {
+				t.Fatalf("instanceNameFor() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("instanceNameFor() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// path スコープは checkout ごとに異なる名前になる
+func TestInstanceNameScopePath(t *testing.T) {
+	name := func(root string) string {
+		cfg := mustParse(t, planBase)
+		cfg.Project.Scope = config.ScopePath
+		cfg.Root = root
+
+		got, err := instanceNameFor(cfg, nil)
+		if err != nil {
+			t.Fatalf("instanceNameFor() error = %v", err)
+		}
+		return got
+	}
+
+	a, b := name("/home/u/checkout-a"), name("/home/u/checkout-b")
+	if a == b {
+		t.Errorf("checkoutが違っても同じ名前になっている: %q", a)
+	}
+	if a != name("/home/u/checkout-a") {
+		t.Error("同じパスでは同じ名前になること")
+	}
+	for _, got := range []string{a, b} {
+		if !strings.HasPrefix(got, "dev-example-project-") {
+			t.Errorf("name = %q", got)
+		}
+	}
+}
+
+// branch を取得できない場合は、対処が分かるエラーにする
+func TestInstanceNameScopeBranchError(t *testing.T) {
+	cfg := mustParse(t, planBase)
+	cfg.Project.Scope = config.ScopeBranch
+
+	_, err := instanceNameFor(cfg, func() (string, error) { return "", errors.New("not a git repository") })
+	if err == nil || !strings.Contains(err.Error(), "branch") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// ブランチ名の取得は、コミットが無いリポジトリやdetached HEADでも成り立つこと
+func TestGitBranch(t *testing.T) {
+	tests := []struct {
+		name    string
+		fake    *runnertest.Fake
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "通常のブランチ",
+			fake: &runnertest.Fake{Stdout: map[string]string{"git -C /r symbolic-ref": "feature/x\n"}},
+			want: "feature/x",
+		},
+		{
+			name: "detached HEAD ではコミットハッシュ",
+			fake: &runnertest.Fake{
+				Err:    map[string]error{"git -C /r symbolic-ref": errors.New("not a symbolic ref")},
+				Stdout: map[string]string{"git -C /r rev-parse": "a8f213\n"},
+			},
+			want: "a8f213",
+		},
+		{
+			name:    "Gitリポジトリでない",
+			fake:    &runnertest.Fake{Err: map[string]error{"git": errors.New("not a git repository")}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gitBranch(context.Background(), tt.fake, "/r")()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("gitBranch() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("gitBranch() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("gitBranch() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

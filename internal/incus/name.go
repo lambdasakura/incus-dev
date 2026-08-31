@@ -17,6 +17,25 @@ const (
 // InstanceName はプロジェクト名からIncus instance名を生成する。
 // Incusのinstance名制約（英数字とハイフン、63文字以内）に適合するよう正規化する。
 func InstanceName(projectName string) string {
+	return InstanceNameWithSuffix(projectName, "")
+}
+
+// InstanceNameWithSuffix は接尾辞付きのinstance名を生成する。
+//
+// 同一マシンで複数のチェックアウトを区別するために使う（仕様 05-incus.md 5.1）。
+func InstanceNameWithSuffix(projectName, suffix string) string {
+	if suffix != "" {
+		projectName += "-" + suffix
+	}
+	return instanceName(projectName)
+}
+
+// ShortHash は名前を区別するための短い16進文字列を返す。
+func ShortHash(s string) string {
+	return shortHash(s)
+}
+
+func instanceName(projectName string) string {
 	var sb strings.Builder
 	prevDash := false
 	for _, r := range strings.ToLower(projectName) {

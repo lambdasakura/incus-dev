@@ -12,6 +12,7 @@ runtime:
 
 project:
   name: my-project                 # 必須。instance名の元になる
+  scope: name                      # 任意。name（既定）| path | branch
 
 instance:
   image: images:ubuntu/24.04       # 必須
