@@ -293,31 +293,37 @@ provisioning関連処理を `internal/provision` へ集約する。
 ```go
 package provision
 
-// Step は dev.yml の1ステップに対応する。
-type Step interface {
-    Name() string
-    Execute(ctx context.Context, env Env) error
-}
-
 // Env はdevkitが各ステップへ渡す実行文脈。
 type Env struct {
     ProjectName     string
-    ProjectRoot     string   // ホスト側
+    ProjectRoot     string // ホスト側
     Instance        string
-    Workspace       string   // コンテナ内
-    WorkspaceSource string   // ホスト側
+    Workspace       string // コンテナ内
+    WorkspaceSource string // ホスト側
     Remote          string
     IncusProject    string
 }
 
-type Runner struct {
-    Incus   incus.Client   // run ステップ用
-    Command runner.Runner  // ansible ステップ用
+// Selection は実行するステップの絞り込み（部分実行）。
+type Selection struct {
+    Only []string // 名前または番号
+    From string
 }
 
-func (r *Runner) Bootstrap(ctx context.Context, steps []Step, env Env) error
-func (r *Runner) Provision(ctx context.Context, steps []Step, env Env) error
+type Executor struct {
+    Incus  incus.Client  // run ステップ用
+    Runner runner.Runner // ansible ステップ用
+    Logger *slog.Logger
+    Stdout io.Writer
+    Stderr io.Writer
+}
+
+func (e *Executor) Bootstrap(ctx context.Context, cfg *config.Config, env Env) error
+func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env, sel Selection) error
 ```
 
-ステップ型の追加は、`Step` 実装の追加とconfigのデコード追加のみで
-完結する構造とする。
+ステップは `config.Step` として宣言的に表現し、`Executor` が種別ごとに
+実行する。ステップ型の追加は、`config` 側のデコードと
+`Executor` の分岐追加で完結する構造とする。
+
+

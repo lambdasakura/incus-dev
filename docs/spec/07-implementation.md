@@ -40,7 +40,6 @@ internal/cli            コマンド定義・入出力
 - timeout（`context.Context`）
 - exit code
 - エラー生成
-- dry-run対応
 
 例：
 
@@ -75,11 +74,20 @@ type Result struct {
   操作名・対象・コマンド・exit code・stderr を含むエラーを構築する
 - ログ出力時、Secretを含みうる引数・環境変数はマスクする
   （indexの指定間違いを防ぐため、`ArgList` で引数の追加と同時に区別を宣言する）
-- dry-runモードでは実行せず、実行予定コマンドを記録する
 - 対話実行（`idev shell`）では `os.Stdin` / `os.Stdout` / `os.Stderr` を直接引き継ぐ
 
 エラーは `fmt.Errorf("...: %w", err)` でラップし、
 呼び出し側は `errors.Is` / `errors.As` で判別する。
+
+### dry-runはこの層に置かない
+
+`internal/runner` は読み取りと変更を区別できない。dry-runでも
+`incus list` のような読み取りは実行する必要があるため、
+この層で実行を止めると計画そのものを立てられなくなる。
+
+dry-runの継ぎ目は `internal/cli/plan.go` の純粋関数群であり、
+`App.Plan` がそれらを使って実行予定を組み立てる
+（[04-cli.md](04-cli.md) 4.8）。
 
 ---
 

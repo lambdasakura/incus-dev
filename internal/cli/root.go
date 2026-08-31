@@ -116,7 +116,9 @@ func isTerminal(f *os.File) bool {
 }
 
 func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+
+	c := &cobra.Command{
 		Use:   "up",
 		Short: "instanceを用意し、bootstrapとprovisionを実行する",
 		Args:  cobra.NoArgs,
@@ -125,9 +127,16 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if dryRun {
+				return app.Plan(cmd.Context())
+			}
 			return app.Up(cmd.Context())
 		},
 	}
+	c.Flags().BoolVar(&dryRun, "dry-run", false,
+		"実行予定の操作を表示するだけで、Incusへ変更を加えない")
+
+	return c
 }
 
 func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {

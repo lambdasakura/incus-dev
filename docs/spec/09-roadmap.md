@@ -29,6 +29,14 @@ workspace bind mount（idmap: auto）
 devkit管理情報 user.incus-devkit.*
 ```
 
+### CLI補助
+
+```text
+up --dry-run
+provision --step / --from / --list
+status --json
+```
+
 ### Provisioning
 
 ```text

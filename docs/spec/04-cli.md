@@ -165,6 +165,8 @@ Workspace:  /home/user/src/example-project -> /workspace
 - runtime version
 - devkit管理下かどうか
 
+これらは実装済みである。
+
 ---
 
 ## 4.5 `idev destroy`
@@ -255,13 +257,9 @@ Incus daemonへの問い合わせ（Profileの実在確認など）は行わな�
 
 ## 4.8 Dry Run
 
-可能であれば、
-
 ```bash
 idev up --dry-run
 ```
-
-をサポートする。
 
 実際に変更せず、実行予定の操作を表示する。
 
@@ -277,7 +275,16 @@ Provision step 1/2: prepare (run)
 Provision step 2/2: main playbook (ansible .incus-dev/ansible/site.yml)
 ```
 
-初期MVPではoptionalとする。
+- ホスト側の前提（idmap、Profileの存在、管理下のinstanceか）は
+  `idev up` と同じように確認する。preflightとして使えるようにするため
+- Incusへの読み取りは行うが、変更は一切行わない
+- 既存instanceに対しては、現状との差分だけを表示する
+- devkitの管理用キー（`user.incus-devkit.*`）は常に設定されるため
+  1行にまとめる
+
+実行予定の算出は、実際に適用する経路と同じ関数
+（`desiredConfig` / `desiredDevices` / `staleIDMapKeys`）を使う。
+表示と実際の適用がずれないようにするため。
 
 ---
 

@@ -351,3 +351,34 @@ provision:
 		t.Errorf("output = %q, 選べるステップを示すこと", out)
 	}
 }
+
+// --dry-run はIncusへ一切変更を加えない（仕様 04-cli.md 4.8）
+func TestUpDryRun(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+provision:
+  - name: setup
+    run: "true"
+`)
+
+	out := f.mustRun("up", "--dry-run")
+
+	for _, want := range []string{
+		"Create instance " + f.instance,
+		"Add device workspace",
+		"Start instance",
+		"Provision step 1/1: setup (run)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output =\n%s\n%q を含むこと", out, want)
+		}
+	}
+	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+		t.Fatalf("instanceを作成している: %q", got)
+	}
+
+	// 実際に作ったあとは、既存instanceとして扱う
+	f.mustRun("up")
+	if out := f.mustRun("up", "--dry-run"); !strings.Contains(out, "Use existing instance") {
+		t.Errorf("output =\n%s\n既存instanceとして扱うこと", out)
+	}
+}

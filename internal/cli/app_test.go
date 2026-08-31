@@ -708,6 +708,7 @@ provision:
 			"user.incus-devkit.project": "example-project",
 			"limits.cpu":                "8",
 		},
+		Devices: map[string]incus.Device{"workspace": {"type": "disk"}},
 	})
 
 	if err := app.Status(context.Background(), true); err != nil {
@@ -730,7 +731,10 @@ provision:
 		"managed":          true,
 		"profiles":         []any{"default"},
 		"config":           map[string]any{"limits.cpu": "8"},
+		"devices":          []any{"workspace(disk)"},
 		"provision_steps":  float64(2),
+		"incus_remote":     "local",
+		"incus_project":    "default",
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("status --json のキー・値が変わっている (-want +got):\n%s", diff)

@@ -3,6 +3,7 @@ package provision_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -842,5 +843,87 @@ func TestProvisionRejectsUnknownStep(t *testing.T) {
 	}
 	if len(f.Calls) != 0 {
 		t.Errorf("calls = %v, 解決できない指定では何も実行しないこと", f.Commands())
+	}
+}
+
+// ansibleステップの前提が揃っていない場合、対処方法を示して止まる
+// （仕様 06-provisioning.md 6.5.1）
+func TestAnsiblePrerequisiteGuidance(t *testing.T) {
+	root, cfg := ansibleProject(t)
+
+	tests := []struct {
+		name    string
+		failOn  string
+		wantAny []string
+	}{
+		{
+			name:    "ansible-playbookが無い",
+			failOn:  "ansible-playbook --version",
+			wantAny: []string{"ansible-playbook", "install"},
+		},
+		{
+			name:    "community.generalが無い",
+			failOn:  "ansible-doc",
+			wantAny: []string{"community.general", "ansible-galaxy collection install"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &runnertest.Fake{Err: map[string]error{tt.failOn: errors.New("not found")}}
+
+			env := testEnv()
+			env.ProjectRoot = root
+			err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{})
+			if err == nil {
+				t.Fatal("Provision() = nil error, want error")
+			}
+			for _, want := range tt.wantAny {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+				}
+			}
+
+			// 前提が揃っていないなら playbook は実行しない
+			for _, c := range f.Argvs() {
+				if strings.HasPrefix(c, "ansible-playbook -i") {
+					t.Errorf("前提を満たさないのに実行している: %q", c)
+				}
+			}
+		})
+	}
+}
+
+// 前提の確認は1度だけ行う
+func TestAnsiblePrerequisiteCheckedOnce(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "site.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - ansible:
+      playbook: .incus-dev/ansible/site.yml
+  - ansible:
+      playbook: .incus-dev/ansible/site.yml
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{}
+	env := testEnv()
+	env.ProjectRoot = root
+	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	checks := 0
+	for _, c := range f.Argvs() {
+		if strings.HasPrefix(c, "ansible-doc") {
+			checks++
+		}
+	}
+	if checks != 1 {
+		t.Errorf("前提確認 = %d回, want 1", checks)
 	}
 }

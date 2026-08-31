@@ -156,3 +156,12 @@ func TestSelectWithoutSteps(t *testing.T) {
 		t.Errorf("Select() = %v, %v, 指定が無ければ空でよい", got, err)
 	}
 }
+
+// 同じステップを2回指定しても、実行は1回
+func TestSelectDeduplicates(t *testing.T) {
+	got := selectSteps(t, threeSteps, provision.Selection{Only: []string{"provision", "2"}})
+
+	if diff := cmp.Diff([]int{1}, got); diff != "" {
+		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+	}
+}

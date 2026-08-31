@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
@@ -57,6 +58,10 @@ type Executor struct {
 	// Stdout / Stderr はステップ出力の中継先。nilの場合は破棄する。
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// ansibleステップの前提確認は1度だけ行う。
+	ansibleCheck sync.Once
+	ansibleErr   error
 }
 
 // Bootstrap はbootstrapステップを実行する。

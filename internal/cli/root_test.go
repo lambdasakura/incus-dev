@@ -517,3 +517,22 @@ func TestProvisionFlagsAreMutuallyExclusive(t *testing.T) {
 		})
 	}
 }
+
+func TestUpDryRunFlag(t *testing.T) {
+	out := &bytes.Buffer{}
+	app, client := fakeApp(t, out)
+
+	root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	root.SetArgs([]string{"up", "--dry-run"})
+	root.SetOut(out)
+
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("up --dry-run: %v", err)
+	}
+	if !strings.Contains(out.String(), "Create instance") {
+		t.Errorf("output = %q", out.String())
+	}
+	if client.Called("create") {
+		t.Errorf("calls = %v, --dry-run はinstanceを作らないこと", client.Calls)
+	}
+}

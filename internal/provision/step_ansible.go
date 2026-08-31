@@ -24,8 +24,40 @@ const (
 	ConnectionPlugin = "community.general.incus"
 )
 
+// checkPrerequisites はansibleステップの前提が揃っているかを1度だけ確認する。
+//
+// 揃っていない場合、ansible-playbook の出力は原因が分かりにくいため、
+// 対処方法を示して先に止める（仕様 06-provisioning.md 6.5.1）。
+func (e *Executor) checkPrerequisites(ctx context.Context) error {
+	e.ansibleCheck.Do(func() {
+		if _, err := e.Runner.Run(ctx, runner.Command{
+			Name: "ansible-playbook",
+			Args: []string{"--version"},
+		}); err != nil {
+			e.ansibleErr = fmt.Errorf(
+				"ansible-playbook is required for ansible steps but could not be run: %w\n"+
+					"install Ansible on this host, or use run steps instead", err)
+			return
+		}
+
+		if _, err := e.Runner.Run(ctx, runner.Command{
+			Name: "ansible-doc",
+			Args: []string{"-t", "connection", ConnectionPlugin},
+		}); err != nil {
+			e.ansibleErr = fmt.Errorf(
+				"the %s connection plugin is required but was not found: %w\n"+
+					"install it with: ansible-galaxy collection install community.general", ConnectionPlugin, err)
+		}
+	})
+	return e.ansibleErr
+}
+
 // execAnsible はホスト側で ansible-playbook を実行する（仕様 06-provisioning.md 6.5）。
 func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, env Env) error {
+	if err := e.checkPrerequisites(ctx); err != nil {
+		return err
+	}
+
 	dir, err := os.MkdirTemp("", "idev-ansible-")
 	if err != nil {
 		return fmt.Errorf("create temporary directory: %w", err)

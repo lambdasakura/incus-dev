@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"
 )
 
 func TestWriteYAMLAndJSON(t *testing.T) {
@@ -90,7 +91,7 @@ func TestOrDefault(t *testing.T) {
 func TestExecAnsibleFailsWhenTempDirUnavailable(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "no-such-dir"))
 
-	e := &Executor{}
+	e := &Executor{Runner: &runnertest.Fake{}}
 	err := e.execAnsible(t.Context(), &config.AnsibleStep{Playbook: "site.yml"}, Env{ProjectRoot: t.TempDir()})
 
 	if err == nil || !strings.Contains(err.Error(), "temporary directory") {

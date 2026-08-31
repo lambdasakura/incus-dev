@@ -304,30 +304,39 @@ func (a *App) Shell(ctx context.Context, argv []string) error {
 
 // statusReport は status の出力内容。
 type statusReport struct {
-	Project   string            `json:"project"`
-	Instance  string            `json:"instance"`
-	Status    string            `json:"status"`
-	Image     string            `json:"image"`
-	Workspace string            `json:"workspace"`
-	Source    string            `json:"workspace_source"`
-	Exists    bool              `json:"exists"`
-	Managed   bool              `json:"managed"`
-	Profiles  []string          `json:"profiles,omitempty"`
-	Config    map[string]string `json:"config,omitempty"`
-	Steps     int               `json:"provision_steps"`
+	Project      string            `json:"project"`
+	Instance     string            `json:"instance"`
+	Status       string            `json:"status"`
+	Image        string            `json:"image"`
+	Workspace    string            `json:"workspace"`
+	Source       string            `json:"workspace_source"`
+	Exists       bool              `json:"exists"`
+	Managed      bool              `json:"managed"`
+	Profiles     []string          `json:"profiles,omitempty"`
+	Config       map[string]string `json:"config,omitempty"`
+	Devices      []string          `json:"devices,omitempty"`
+	Steps        int               `json:"provision_steps"`
+	Runtime      string            `json:"runtime,omitempty"`
+	Remote       string            `json:"incus_remote"`
+	IncusProject string            `json:"incus_project"`
 }
 
 // Status は対象instanceの状態を表示する。
 func (a *App) Status(ctx context.Context, asJSON bool) error {
 	ws := a.cfg.WorkspaceOrDefault()
 	report := statusReport{
-		Project:   a.cfg.Project.Name,
-		Instance:  a.instance,
-		Status:    "NOT CREATED",
-		Image:     a.cfg.Instance.Image,
-		Workspace: ws.Target,
-		Source:    a.cfg.WorkspaceSourcePath(),
-		Steps:     len(a.cfg.Provision),
+		Project:      a.cfg.Project.Name,
+		Instance:     a.instance,
+		Status:       "NOT CREATED",
+		Image:        a.cfg.Instance.Image,
+		Workspace:    ws.Target,
+		Source:       a.cfg.WorkspaceSourcePath(),
+		Steps:        len(a.cfg.Provision),
+		Remote:       a.remote,
+		IncusProject: a.incusProject,
+	}
+	if a.cfg.Runtime != nil {
+		report.Runtime = a.cfg.Runtime.Version
 	}
 
 	inst, err := a.client.Instance(ctx, a.instance)
@@ -338,6 +347,7 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 		report.Managed = isManagedBy(inst.Config, a.cfg.Project.Name)
 		report.Profiles = inst.Profiles
 		report.Config = limitsOf(inst.Config)
+		report.Devices = deviceSummary(inst.Devices)
 	case !errors.Is(err, incus.ErrInstanceNotFound):
 		return err
 	}
@@ -361,13 +371,18 @@ func (a *App) printStatus(r statusReport) error {
 	if r.Exists {
 		rows = append(rows,
 			[2]string{"Profiles", strings.Join(r.Profiles, ", ")},
+			[2]string{"Devices", strings.Join(r.Devices, ", ")},
 			[2]string{"Managed", yesNo(r.Managed)},
 		)
 		for _, k := range sortedKeys(r.Config) {
 			rows = append(rows, [2]string{k, r.Config[k]})
 		}
 	}
-	rows = append(rows, [2]string{"Provision", fmt.Sprintf("%d step(s)", r.Steps)})
+	rows = append(rows,
+		[2]string{"Provision", fmt.Sprintf("%d step(s)", r.Steps)},
+		[2]string{"Runtime", r.Runtime},
+		[2]string{"Incus", incusTarget(r.Remote, r.IncusProject)},
+	)
 
 	for _, row := range rows {
 		if row[1] == "" {
@@ -528,6 +543,30 @@ func (a *App) runProvisioning(ctx context.Context, sel provision.Selection) erro
 type ExitCodeError struct{ Code int }
 
 func (e *ExitCodeError) Error() string { return fmt.Sprintf("exited with code %d", e.Code) }
+
+// deviceSummary は device を「名前(型)」の一覧にする。
+func deviceSummary(devices map[string]incus.Device) []string {
+	out := make([]string, 0, len(devices))
+	for _, name := range slices.Sorted(maps.Keys(devices)) {
+		out = append(out, fmt.Sprintf("%s(%s)", name, devices[name].Type()))
+	}
+	return out
+}
+
+// incusTarget は操作対象のremoteとprojectを示す。
+func incusTarget(remote, project string) string {
+	if remote == "" && project == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s / %s", orDefault(remote, "local"), orDefault(project, "default"))
+}
+
+func orDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
 
 // limitsOf は表示対象のconfigキーを抽出する。
 func limitsOf(instanceConfig map[string]string) map[string]string {

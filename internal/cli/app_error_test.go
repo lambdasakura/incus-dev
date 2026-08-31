@@ -879,3 +879,167 @@ func TestListStepsWriteError(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 }
+
+// status は device・Incusの操作対象・runtime versionも示す（仕様 04-cli.md 4.4）
+func TestStatusShowsAdditionalFields(t *testing.T) {
+	out := &bytes.Buffer{}
+	cfg, err := config.Parse([]byte("schema: 1\nruntime:\n  version: \"1.0\"\n"+
+		"project:\n  name: example-project\ninstance:\n  image: images:ubuntu/24.04\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	client := incustest.New().AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+		Devices: map[string]incus.Device{
+			"workspace": {"type": "disk"},
+			"gpu0":      {"type": "gpu"},
+		},
+	})
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{}, Out: out,
+		Remote: "dev-server", IncusProject: "development",
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Status(context.Background(), false); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+
+	text := out.String()
+	for _, want := range []string{"gpu0(gpu), workspace(disk)", "Runtime:", "1.0", "dev-server / development"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("status =\n%s\n%q を含むこと", text, want)
+		}
+	}
+}
+
+// --dry-run はIncusへ変更を加えない（仕様 04-cli.md 4.8）
+func TestPlanDoesNotModifyAnything(t *testing.T) {
+	client := incustest.New()
+	out := &bytes.Buffer{}
+
+	cfg, err := config.Parse([]byte(rootYAML+"provision:\n  - run: \"true\"\n"), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Create instance dev-example-project") {
+		t.Errorf("output = %q", out.String())
+	}
+
+	for _, call := range client.Calls {
+		for _, mutating := range []string{"create", "start", "delete", "config", "devices", "exec", "unset"} {
+			if strings.HasPrefix(call, mutating) {
+				t.Errorf("変更操作を行っている: %q", call)
+			}
+		}
+	}
+}
+
+// dry-runでも前提の確認は行う
+func TestPlanChecksPrerequisites(t *testing.T) {
+	t.Run("Profileの不足", func(t *testing.T) {
+		client := incustest.New()
+		client.Profiles = nil
+
+		err := appWith(t, rootYAML+"  profiles:\n    - default\n", client).Plan(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "default") {
+			t.Errorf("error = %v, 不足しているProfileを報告すること", err)
+		}
+	})
+
+	t.Run("idmapが使えない", func(t *testing.T) {
+		cfg, err := config.Parse([]byte(rootYAML+"workspace:\n  idmap: raw\n"), config.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Root = t.TempDir()
+
+		app := NewApp(AppOptions{
+			Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+			Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return errBoom },
+		})
+		if err := app.Plan(context.Background()); !errors.Is(err, errBoom) {
+			t.Errorf("error = %v, want %v", err, errBoom)
+		}
+	})
+}
+
+func TestPlanRefusesUnmanagedInstance(t *testing.T) {
+	client := incustest.New().AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
+
+	err := appWith(t, rootYAML, client).Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not managed") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestPlanPropagatesLookupError(t *testing.T) {
+	client := incustest.New()
+	client.FailOn = map[string]error{"instance": errBoom}
+
+	if err := appWith(t, rootYAML, client).Plan(context.Background()); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+func TestPlanReportsWriteError(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: errWriter{}, CheckIDMap: func(int, int) error { return nil },
+	})
+	if err := app.Plan(context.Background()); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// dry-runでもidmapの退避は警告する
+func TestPlanWarnsOnIDMapFallback(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = t.TempDir()
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		CheckIDMap: func(int, int) error { return errBoom },
+	})
+
+	if err := app.Plan(context.Background()); err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "shift") {
+		t.Errorf("warning = %q, 退避を伝えること", errOut.String())
+	}
+}
+
+func TestIncusTargetDefaults(t *testing.T) {
+	if got := incusTarget("", ""); got != "" {
+		t.Errorf("incusTarget() = %q, 未設定なら空にすること", got)
+	}
+	if got := incusTarget("", "dev"); got != "local / dev" {
+		t.Errorf("incusTarget() = %q", got)
+	}
+}

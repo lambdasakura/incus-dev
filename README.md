@@ -126,6 +126,6 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 | `provision --step` / `--from` / `--list`（部分実行） | 実装済み |
 | `--incus-remote` / `--incus-project` | 実装済み（remoteはworkspaceのマウントが成立しないため未検証） |
 | `instance.type: virtual-machine` | Incusへ素通しするが未検証 |
-| `up --dry-run` | 未実装 |
+| `up --dry-run` | 実装済み |
 | `validate --check-host` | 未実装 |
 | snapshot / persistent volume / secrets | 未実装 |
