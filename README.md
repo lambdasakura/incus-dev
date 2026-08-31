@@ -118,22 +118,17 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 
 | 機能 | 状態 |
 | --- | --- |
-| `validate` / `up` / `status` / `shell` / `provision` / `rebuild` / `destroy` | 実装済み |
-| run / ansible ステップ、bootstrap（既定・上書き・無効化） | 実装済み |
-| instance config / devices の素通し、workspace mount | 実装済み |
-| idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
-| `status --json` | 実装済み |
+| `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` / `destroy` / `snapshot` | 実装済み |
+| run / ansible / galaxy ステップ、bootstrap（既定・上書き・無効化） | 実装済み |
 | `provision --step` / `--from` / `--list`（部分実行） | 実装済み |
-| `--incus-remote` / `--incus-project` | 実装済み（remoteはworkspaceのマウントが成立しないため未検証） |
-| `instance.type: virtual-machine` | Incusへ素通しするが未検証 |
 | `up --dry-run` / `up --restart` | 実装済み |
-| `idev exec`、`shell` の user/command/cwd 設定 | 実装済み |
-| `galaxy` ステップ（ansible-galaxy install） | 実装済み |
-| `dev.yml` の `incus.project` | 実装済み |
-| 設定・deviceの削除追従 | 実装済み |
-| `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
-| `idev snapshot`（create / list / restore / delete） | 実装済み |
+| `status --json` | 実装済み |
+| instance config / devices の素通し、削除追従 | 実装済み |
+| workspace mount と idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
 | `volumes`（永続ボリューム） | 実装済み |
-| `secrets`（ホストからの注入） | 実装済み |
+| `secrets`（ホスト環境変数・ファイルからの注入） | 実装済み |
+| `shell`（user / command / cwd）、`incus.project` | 実装済み |
+| `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
+| `--incus-remote` | フラグは通るが未検証（workspaceの共有方式が未定） |
+| `instance.type: virtual-machine` | Incusへ素通しするが未検証 |
 | `validate --check-host` | 未実装 |
-| snapshot / persistent volume / secrets | 未実装 |
