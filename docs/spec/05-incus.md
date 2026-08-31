@@ -209,12 +209,10 @@ CLI処理からIncusコマンド文字列を直接組み立てることを避け
 package incus
 
 type Client interface {
-    InstanceExists(ctx context.Context, name string) (bool, error)
-    Instance(ctx context.Context, name string) (Instance, error)
+    Instance(ctx context.Context, name string) (*Instance, error)
 
     CreateInstance(ctx context.Context, spec InstanceSpec) error
     StartInstance(ctx context.Context, name string) error
-    StopInstance(ctx context.Context, name string) error
     DeleteInstance(ctx context.Context, name string) error
 
     ApplyConfig(ctx context.Context, name string, cfg map[string]string) error
@@ -242,6 +240,10 @@ interfaceとして定義することで、以下を可能にする。
 
 - 単体テストでのfake実装（Incus daemon不要）
 - 将来的な実装差し替え
+
+interfaceには **実際に使う操作だけ** を並べる。
+instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で行う。
+差し替え時の負担がそのまま増えるため、使わない操作を含めない。
 
 ### 5.7.1 実装方針
 

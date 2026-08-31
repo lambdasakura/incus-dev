@@ -71,13 +71,14 @@ type WaitOptions struct {
 }
 
 // Client はIncus操作のインターフェース。テストではfakeへ差し替える。
+//
+// 実装差し替えの負担を増やさないよう、実際に使う操作だけを並べる。
+// instanceの存在確認は Instance と errors.Is(ErrInstanceNotFound) で行う。
 type Client interface {
 	Instance(ctx context.Context, name string) (*Instance, error)
-	InstanceExists(ctx context.Context, name string) (bool, error)
 
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 	StartInstance(ctx context.Context, name string) error
-	StopInstance(ctx context.Context, name string) error
 	DeleteInstance(ctx context.Context, name string) error
 
 	ApplyConfig(ctx context.Context, name string, config map[string]string) error
