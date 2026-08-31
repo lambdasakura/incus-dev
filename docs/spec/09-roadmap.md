@@ -78,8 +78,6 @@ galaxy ステップ型（ansible-galaxy install）
 
 idev exec
 idev shell の user / command / cwd 設定
-JSON output
-shell completion
 
 instance.config の削除追従（user.incus-devkit.managed による差分unset）
 再起動が必要な設定変更の自動処理
