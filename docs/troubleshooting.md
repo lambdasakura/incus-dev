@@ -1,47 +1,52 @@
-# トラブルシューティング
+# Troubleshooting
 
-ホスト側の環境に起因して `idev` が失敗する典型的なケースと対処。
+The usual ways `idev` fails because of the *host* environment, and what to do
+about them.
 
-いずれも `dev.yml` の書き方ではなく **ホスト側の前提** に関する問題である。
+*[日本語版 / Japanese](troubleshooting.ja.md)*
 
-| 症状 | 節 |
+None of these are about how you wrote `dev.yml`. They are all about
+**assumptions the host has to satisfy**.
+
+| Symptom | Section |
 | --- | --- |
-| provisionステップ中の `apt-get` / `apk` が失敗する、コンテナから名前解決やダウンロードができない | [1](#1-コンテナから外部へ通信できない) |
-| workspaceへ書き込めない、生成物がホスト側でrootの所有になる | [2](#2-workspaceの所有者がおかしい--書き込めない) |
-| `incus profile(s) not found on this host` | [3](#3-profileが見つからない) |
-| `is not managed by devkit` | [4](#4-instanceがdevkit管理外と言われる) |
-| ansibleステップが失敗する | [5](#5-ansibleステップが失敗する) |
-| Incusへ接続できない、API呼び出しが失敗する | [6](#6-incus-apiとの通信で失敗する) |
+| `apt-get` / `apk` fails during a provisioning step; the container cannot resolve names or download anything | [1](#1-no-network-access-from-the-container) |
+| Cannot write to the workspace; files end up owned by root on the host | [2](#2-workspace-is-owned-by-the-wrong-user--not-writable) |
+| `incus profile(s) not found on this host` | [3](#3-profile-not-found) |
+| `is not managed by devkit` | [4](#4-instance-is-said-to-be-unmanaged) |
+| An `ansible` step fails | [5](#5-an-ansible-step-fails) |
+| Cannot reach Incus; API calls fail | [6](#6-incus-api-calls-fail) |
 
 ---
 
-## 1. コンテナから外部へ通信できない
+## 1. No network access from the container
 
-### 症状
+### Symptom
 
-`idev up` のprovisionステップでパッケージ導入が失敗する。
+Package installation fails during a provisioning step of `idev up`.
 
 ```text
 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.21/main: temporary error (try again later)
 ```
 
-コンテナ内でIPアドレスは割り当てられており、DNSも引けるのに外へ出られない。
+The container has an IP address and DNS resolves, but nothing reaches the
+outside.
 
-### 原因（1）: 起動直後でネットワークがまだ使えない
+### Cause 1: the network is not up yet
 
-instanceが起動してコマンドを実行できるようになった時点では、
-まだIPv4が割り当てられておらずデフォルトルートも入っていない。
+When an instance has just started and can already run commands, it may not have
+an IPv4 address or a default route yet.
 
-`idev` はIPv4の割り当てを待ってからprovisionを開始するため、
-通常この問題は起きない。`idev up` が
-`network address not assigned` の警告を出していた場合は、
-ネットワーク構成側の問題を疑う。
+`idev` waits for the IPv4 address before it starts provisioning, so this
+normally does not happen. If `idev up` printed a `network address not assigned`
+warning, suspect the network configuration instead.
 
-### 原因（2）: Dockerとの競合
+### Cause 2: Docker
 
-**ホストにDockerが入っている場合、DockerとIncusのファイアウォール設定が競合する。**
+**If Docker is installed on the host, Docker's and Incus's firewall rules
+conflict.**
 
-Incusは自前のnftablesテーブルで自分のブリッジを許可する。
+Incus allows its own bridge in its own nftables table.
 
 ```text
 table inet incus / chain fwd.incusbr0 (policy accept)
@@ -49,53 +54,54 @@ table inet incus / chain fwd.incusbr0 (policy accept)
   ip version 4 oifname "incusbr0" accept
 ```
 
-一方Dockerは `ip filter` テーブルの **FORWARDチェーンのポリシーをDROPに設定する**。
+Docker, meanwhile, **sets the FORWARD chain policy in the `ip filter` table to
+DROP**.
 
-netfilterは同一フック（forward）に登録された全チェーンを評価し、
-**どこか一つでもDROPすればその時点で破棄する**。
-Incus側のacceptはDocker側のDROPを覆せないため、
-incusbr0を経由する転送だけが落ちる。
+netfilter evaluates every chain registered on the same hook (forward), and
+**a DROP anywhere discards the packet immediately**. Incus's accept cannot
+override Docker's DROP, so only forwarding through incusbr0 breaks.
 
-### 確認
+### Checking
 
 ```bash
-# FORWARDのポリシーがDROPになっているか
+# Is the FORWARD policy DROP?
 sudo iptables -S FORWARD
 
-# incusbr0向けの許可がどこにも無いことを確認する
-sudo iptables -L DOCKER-CT -v -n       # Docker自身のブリッジ用の戻り許可しか無い
-sudo iptables -L DOCKER-USER -v -n     # ここが空なら未対処
+# Confirm nothing allows incusbr0
+sudo iptables -L DOCKER-CT -v -n       # only Docker's own bridges get return traffic
+sudo iptables -L DOCKER-USER -v -n     # empty here means nothing has been done
 ```
 
-### 対処
+### Fix
 
-`DOCKER-USER` チェーンはFORWARDの先頭で評価されるため、ここで許可する。
+The `DOCKER-USER` chain is evaluated at the head of FORWARD, so allow the
+traffic there.
 
 ```bash
 sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
 sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ```
 
-**2行とも必要である。**
+**Both lines are required.**
 
-- 1行目: コンテナから外への送信
-- 2行目: 外からコンテナへの戻り。Dockerの戻り許可（`DOCKER-CT`）は
-  Docker自身のブリッジ (`docker0`, `br-*`) にしか適用されないため、
-  これが無いと「送信はできるが応答が返らない」状態になる
+- Line 1: outbound, container to the outside
+- Line 2: the return path. Docker's own return rule (`DOCKER-CT`) only applies
+  to Docker's bridges (`docker0`, `br-*`), so without this you get "packets go
+  out, nothing comes back"
 
-適用後、実際に通っているかはパケットカウンタで確認できる。
+The packet counters tell you whether traffic is actually taking these rules.
 
 ```bash
 sudo iptables -L DOCKER-USER -v -n
 ```
 
-### 永続化（重要）
+### Making it persist (important)
 
-`iptables -I` はメモリ上のルールであり、**再起動で失われる**。
-再起動後に同じ症状が再発する場合はこれが原因である。
+`iptables -I` only changes the in-memory ruleset, and is **lost on reboot**. If
+the symptom comes back after a reboot, this is why.
 
-`netfilter-persistent` などが入っていない環境では、
-systemd unitで再適用するのが確実で影響範囲も小さい。
+Where `netfilter-persistent` and friends are not installed, re-applying the
+rules from a systemd unit is reliable and narrow in scope.
 
 ```ini
 # /etc/systemd/system/incus-docker-forward.service
@@ -118,102 +124,109 @@ WantedBy=multi-user.target
 sudo systemctl enable --now incus-docker-forward.service
 ```
 
-代替として、Docker 27以降であれば以下でDockerがFORWARDポリシーを
-DROPにしなくなる。設定ファイルなので永続するが、効果が全ブリッジに及ぶ。
+Alternatively, on Docker 27 and later the following stops Docker from setting
+the FORWARD policy to DROP at all. It is a config file, so it persists — but it
+affects every bridge.
 
 ```json
 // /etc/docker/daemon.json
 { "ip-forward-no-drop": true }
 ```
 
-### ufwを使っている場合
+### If you use ufw
 
-ufwが **有効** な場合は、上記に加えて以下も必要になる。
+When ufw is **enabled**, you need the following as well as the rules above.
 
 ```bash
-sudo ufw allow in on incusbr0          # コンテナ → ホスト（DHCP / DNS）
-sudo ufw route allow in on incusbr0    # 転送（送信）
-sudo ufw route allow out on incusbr0   # 転送（戻り）
+sudo ufw allow in on incusbr0          # container -> host (DHCP / DNS)
+sudo ufw route allow in on incusbr0    # forwarding, outbound
+sudo ufw route allow out on incusbr0   # forwarding, return
 ```
 
-ufwが **無効**（`ufw status` が `inactive`）の場合、これらは
-`/etc/ufw/user.rules` に保存されるだけで一切適用されない。
-ufwを有効化した時点で必要になるため、先に入れておくこと自体は無害である。
+When ufw is **disabled** (`ufw status` says `inactive`), these are merely
+written to `/etc/ufw/user.rules` and have no effect. They will be needed the
+moment you enable ufw, so adding them ahead of time does no harm.
 
-なおufwを有効化しても `DOCKER-USER` の2行は依然として必要である。
-Dockerのチェーンがufwのチェーンより先に評価されるため。
+Note that enabling ufw does not remove the need for the two `DOCKER-USER`
+lines: Docker's chains are evaluated before ufw's.
 
 ---
 
-## 2. workspaceの所有者がおかしい / 書き込めない
+## 2. Workspace is owned by the wrong user / not writable
 
-### 症状
+### Symptom
 
-- コンテナ内から `/workspace` や、`instance.devices` でマウントした
-  ホストのディレクトリへ書き込めない
-- コンテナ内で作ったファイルがホスト側でrootの所有になり、sudoなしで消せない
-- `idev up` が `workspace idmap (raw.idmap) is not permitted on this host` で停止する
+- You cannot write to `/workspace`, or to a host directory mounted through
+  `instance.devices`, from inside the container
+- Files created in the container are owned by root on the host, and you cannot
+  delete them without sudo
+- `idev up` stops with `workspace idmap (raw.idmap) is not permitted on this host`
 
-### 原因と対処
+### Cause and fix
 
-非特権コンテナでホストのディレクトリを共有するには、uid/gidの対応付けが要る。
-`workspace.idmap` で方式を選べる（[マニュアル 4.6](manual/04-dev-yml.md#46-workspace)）。
+Sharing a host directory into an unprivileged container needs a uid/gid
+mapping. `workspace.idmap` chooses how ([manual 4.6](manual/04-dev-yml.md#46-workspace)).
 
-| 値 | ホスト側の追加設定 | コンテナが作ったファイルのホスト側所有者 |
+| Value | Extra host setup | Host-side owner of container-created files |
 | --- | --- | --- |
-| `auto`（既定） | 不要 | 環境依存（`raw` が使えれば実行ユーザー、でなければroot） |
-| `raw` | 必要 | 実行ユーザー |
-| `shift` | 不要 | root |
-| `none` | 不要 | （書き込み不可） |
+| `auto` (default) | none | depends on the host: the invoking user if `raw` works, otherwise root |
+| `raw` | required | the invoking user |
+| `shift` | none | root |
+| `none` | none | (not writable) |
 
-`raw`（最も望ましい挙動）を使うには、Incus daemon（root）が
-実行ユーザーのuid/gidを対応付ける許可が必要になる。
+`raw` — the behaviour you usually want — requires the Incus daemon (running as
+root) to be permitted to map your uid/gid.
 
 ```text
 /etc/subuid: root:1000:1
 /etc/subgid: root:1000:1
 ```
 
-**一般的なIncusのセットアップ手順に含まれる `root:1000000:1000000000` とは別物である。**
-そちらは「コンテナ内のuidをホストの1000000以降へ退避する」ための範囲であり、
-「ホストのuid 1000をコンテナへ持ち込む」許可は含まない。
+**This is not the same as the `root:1000000:1000000000` line that typical Incus
+setup instructions have you add.** That range is for shifting container uids up
+into the host's 1000000+ space; it does not grant permission to bring host uid
+1000 *into* a container.
 
-不足していると、コンテナ起動時に以下で失敗する。
+Without it, the container fails to start:
 
 ```text
 newuidmap: uid range [0-1) -> [1000-1001) not allowed
 ```
 
-追加後、incusの再起動は不要（`newuidmap` はコンテナ起動時に読む）。
+No Incus restart is needed after adding it — `newuidmap` reads the file when
+the container starts.
 
 ```bash
 grep '^root:' /etc/subuid /etc/subgid
 idev up
-incus config get dev-<project> raw.idmap    # "uid <uid> 0 / gid <gid> 0" が出れば適用済み
+incus config get dev-<project> raw.idmap    # "uid <uid> 0 / gid <gid> 0" means it applied
 ```
 
-追加しない場合、既定の `auto` は `shift`（idmapped mount）へ退避して動作を継続する。
-この場合もworkspaceは読み書きできるが、コンテナが作ったファイルはホスト側でrootの所有になる。
+If you do not add it, the default `auto` falls back to `shift` (an idmapped
+mount) and keeps going. The workspace is still readable and writable, but files
+the container creates are owned by root on the host.
 
 ---
 
-## 3. Profileが見つからない
+## 3. Profile not found
 
 ```text
 incus profile(s) not found on this host: gpu-nvidia
 devkit does not create profiles; create them or remove them from instance.profiles
 ```
 
-`idev` はIncus Profileを同梱も作成もしない。
-`instance.profiles` は **ホストに既に存在するProfileの名前参照** である。
+`idev` neither ships nor creates Incus profiles. `instance.profiles` is a
+**reference by name to profiles that already exist on the host**.
 
-対処のいずれか。
+Either:
 
-- ホスト側でProfileを作成する
-- `instance.profiles` から外し、必要な設定を `instance.config` / `instance.devices` に直接書く
+- create the profile on the host, or
+- drop it from `instance.profiles` and write what you need directly into
+  `instance.config` / `instance.devices`
 
-`profiles: []`（Profileを一切使わない）とする場合、
-root diskとネットワークもProfile由来であるため自分で宣言する必要がある。
+If you go as far as `profiles: []` (no profiles at all), remember that the root
+disk and the network also come from a profile, so you have to declare them
+yourself.
 
 ```yaml
 instance:
@@ -228,81 +241,82 @@ instance:
       network: incusbr0
 ```
 
-storage pool名やnetwork名はホストに依存するため、
-可搬性を優先するなら `default` profile を参照する方がよい。
+Storage pool and network names are host-specific, so referring to the `default`
+profile is the more portable choice.
 
 ---
 
-## 4. instanceがdevkit管理外と言われる
+## 4. Instance is said to be unmanaged
 
 ```text
 instance dev-example exists but is not managed by devkit for project "example"
 ```
 
-`idev` は自分が作成したinstanceに印を付けており、印が無いinstanceは
-誤って壊さないよう触れない。
+`idev` marks the instances it creates, and refuses to touch unmarked ones so it
+cannot destroy something it did not make.
 
 ```bash
 incus config get dev-<project> user.incus-devkit.project
 ```
 
-同名のinstanceを手動で作っていた場合は、削除するか
-`project.name` を変えてinstance名をずらす。
+If you created an instance of the same name by hand, either delete it or change
+`project.name` so the instance name no longer collides.
 
 ---
 
-## 5. ansibleステップが失敗する
+## 5. An `ansible` step fails
 
-### ホスト側
+### On the host
 
-`ansible-playbook` と `community.general` collection が必要である。
-`idev` は同梱しない。
+You need `ansible-playbook` and the `community.general` collection. `idev` does
+not ship either.
 
 ```bash
 ansible-galaxy collection install community.general
-ansible-doc -t connection community.general.incus   # 導入確認
+ansible-doc -t connection community.general.incus   # check it is installed
 ```
 
-### コンテナ側
+### In the container
 
-Ansible Moduleの実行にはコンテナ内のPythonが必要である。
-`bootstrap` を省略していて `provision` に ansible ステップがある場合、
-`idev` はDebian系を前提とした既定bootstrapでPythonの導入を試みる。
+Ansible modules need Python inside the container. If you omitted `bootstrap`
+and your `provision` has an `ansible` step, `idev` tries to install Python with
+its default bootstrap, which assumes a Debian-family image.
 
-Debian系以外のイメージではこれが失敗するため、`bootstrap` を明示する。
+On anything else that fails, so declare `bootstrap` explicitly.
 
 ```yaml
 bootstrap:
   - run: command -v python3 >/dev/null 2>&1 || dnf install -y python3
 ```
 
-パッケージ導入を伴うため、この経路は **コンテナからの外部通信** に依存する。
-失敗する場合はまず [1](#1-コンテナから外部へ通信できない) を確認すること。
+Because it installs a package, this path depends on **outbound network access
+from the container**. If it fails, check
+[1](#1-no-network-access-from-the-container) first.
 
 ---
 
-## 6. Incus APIとの通信で失敗する
+## 6. Incus API calls fail
 
-`idev` はIncusのGo client libraryからAPIを直接呼ぶ。
-接続先や証明書の解決には `incus` コマンドと同じ設定
-（`~/.config/incus/config.yml`）を読む。
+`idev` calls the Incus API directly through the Go client library. It reads the
+same configuration as the `incus` command (`~/.config/incus/config.yml`) to
+resolve the endpoint and certificates.
 
-### まず確認する
-
-```bash
-incus info | head -3        # 同じ設定で接続できるか
-```
-
-`incus` コマンドでも接続できない場合は、`idev` ではなくIncus側の問題である。
-
-### 設定を確認する
-
-`incus` コマンドが入っている環境では、同じ設定で接続できるかを比べられる。
+### Check this first
 
 ```bash
-incus remote list           # remote の一覧と既定
-incus project list          # project の一覧
+incus info | head -3        # does the same configuration connect?
 ```
 
-`--incus-remote` / `--incus-project` で指定した名前が、
-この一覧に存在するかを確認する。
+If the `incus` command cannot connect either, the problem is Incus, not `idev`.
+
+### Check the configuration
+
+Where the `incus` command is installed, you can compare against it.
+
+```bash
+incus remote list           # remotes, and which is the default
+incus project list          # projects
+```
+
+Confirm that the names you passed to `--incus-remote` / `--incus-project`
+appear in those lists.

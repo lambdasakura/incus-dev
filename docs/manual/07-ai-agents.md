@@ -1,11 +1,12 @@
-# 7. AIコーディングツールからの利用
+# 7. Driving idev from AI coding tools
 
-本ツールは Codex や Claude Code のようなAIエージェントから
-操作されることを想定して設計されている。
+This tool is designed to be driven by AI agents such as Codex and Claude Code.
 
-## 7.1 基本方針
+*[日本語版 / Japanese](ja/07-ai-agents.md)*
 
-エージェントに使わせるのは以下だけでよい。
+## 7.1 The basics
+
+An agent only needs these.
 
 ```bash
 idev up
@@ -14,18 +15,20 @@ idev exec -- <command>
 idev status --json
 ```
 
-`idev exec` は擬似端末を割り当てない。端末の有無で挙動が変わらないため、
-スクリプトやエージェントからはこちらを使う（対話が要る場合のみ `idev shell`）。
+`idev exec` allocates no pseudo-terminal. Its behaviour does not change with
+the presence of a terminal, which is what you want from a script or an agent
+(use `idev shell` only when you need interaction).
 
-Incusの内部（instance名、device、profile）を知らなくても利用できる。
+None of this requires knowing anything about Incus internals — instance names,
+devices, profiles.
 
-環境を変更したい場合、エージェントが編集すべき対象は
-**`.incus-dev/` 配下のファイルだけ** である。この一貫性が
-「どこを直せばよいか」の判断を単純にする。
+To change the environment, the only files an agent should edit are the ones
+**under `.incus-dev/`**. That consistency is what makes "where do I fix this?"
+an easy question.
 
-## 7.2 非対話で動く
+## 7.2 It runs non-interactively
 
-以下は確認を求めず実行できる。
+These never ask for confirmation.
 
 ```bash
 idev up
@@ -34,33 +37,34 @@ idev status
 idev validate
 ```
 
-破壊操作のみ確認するが、フラグで省略できる。
+Only the destructive operations ask, and a flag skips that.
 
 ```bash
 idev destroy --force
 idev rebuild --force
 ```
 
-## 7.3 終了コードで判定できる
+## 7.3 Exit codes mean something
 
 ```bash
 idev up || exit 1
 ```
 
-`idev exec` / `idev shell` はコンテナ内コマンドの終了コードをそのまま返すため、
-テストの成否をそのまま扱える。
+`idev exec` and `idev shell` pass the container command's exit code straight
+through, so a test result is usable as it is.
 
 ```bash
-idev exec -- make test        # テストが失敗すれば非0
+idev exec -- make test        # non-zero if the tests fail
 ```
 
-出力は端末以外へ渡しても壊れないため、パイプで加工してよい。
+Output survives being sent somewhere other than a terminal, so it is safe to
+pipe.
 
 ```bash
 idev exec -- go test ./... 2>&1 | tail -20
 ```
 
-## 7.4 状態を機械可読に取れる
+## 7.4 State is machine-readable
 
 ```bash
 idev status --json
@@ -79,50 +83,56 @@ idev status --json
 ```
 
 ```bash
-# 未構築なら構築する
+# build it if it is not built yet
 [ "$(idev status --json | jq -r .exists)" = "true" ] || idev up
 ```
 
-## 7.5 プロジェクトの指示ファイルへ書く例
+## 7.5 What to put in the project's instruction file
 
-`CLAUDE.md` や `AGENTS.md` に以下のように書いておくと、
-エージェントがホスト側でビルドを試みるのを防げる。
+Something like this in `CLAUDE.md` or `AGENTS.md` stops an agent from trying to
+build on the host.
 
 ```markdown
-## 開発環境
+## Development environment
 
-ビルド・テスト・実行はIncusコンテナ内で行う。ホスト側で直接実行しない。
+Build, test and run inside the Incus container. Never directly on the host.
 
-    idev up                    # 環境の構築（初回・設定変更後）
-    idev exec -- make test     # テスト
-    idev exec -- make build    # ビルド
-    idev shell                 # 対話シェル
+    idev up                    # build the environment (first time, and after config changes)
+    idev exec -- make test     # test
+    idev exec -- make build    # build
+    idev shell                 # interactive shell
 
-環境に必要なものを追加する場合は `.incus-dev/dev.yml` の provision を編集し、
-`idev provision` で反映する。ホストへツールを追加しない。
+To add something the environment needs, edit `provision` in
+`.incus-dev/dev.yml` and apply it with `idev provision`. Do not install tools
+on the host.
 
-provisionステップは再実行される前提で、冪等に書くこと。
+Provisioning steps are re-run, so write them to be idempotent.
 ```
 
 ## 7.6 Agent Skill
 
-Claude Code のようにAgent Skillを読み込むツールでは、
-リポジトリの [`skills/incus-devkit/`](../../skills/incus-devkit/) をそのまま使える。
+In tools that load Agent Skills, such as Claude Code, this repository's
+[`skills/incus-devkit/`](../../skills/incus-devkit/) works as it is.
 
 ```bash
-cp -r skills/incus-devkit ~/.claude/skills/          # 全プロジェクトで使う
-cp -r skills/incus-devkit <project>/.claude/skills/  # そのプロジェクトだけ
+cp -r skills/incus-devkit ~/.claude/skills/          # for every project
+cp -r skills/incus-devkit <project>/.claude/skills/  # for one project
 ```
 
-原則・コマンドの対応表・`dev.yml` の書き方・エラーからの切り分けが入っている。
+It covers the principles, a task-to-command table, how to write `dev.yml`, and
+how to work back from an error.
+
+A Japanese version is available as
+[`skills/incus-devkit-ja/`](../../skills/incus-devkit-ja/).
 
 ---
 
-## 7.7 注意
+## 7.7 Things to keep in mind
 
-- `idev up` は既存のinstanceを破壊しない。環境を作り直したい場合のみ
-  `idev rebuild --force` を使う
-- `idev destroy` はコンテナだけを削除し、ホスト側のソースツリーには触れない
-- エージェントに `incus` コマンドを直接使わせる必要はない。
-  必要になった場合、それは `dev.yml` で表現できていないということなので、
-  まず `dev.yml` 側での表現を検討する
+- `idev up` never destroys an existing instance. Use `idev rebuild --force`
+  only when you actually want to start over
+- `idev destroy` deletes the container alone, and does not touch the source
+  tree on the host
+- An agent has no reason to reach for the `incus` command. Needing it is a sign
+  that something is not expressible in `dev.yml` yet — so look at expressing it
+  there first

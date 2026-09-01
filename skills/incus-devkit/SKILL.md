@@ -1,82 +1,90 @@
 ---
 name: incus-devkit
-description: idev コマンドと .incus-dev/dev.yml でIncusのプロジェクト専用開発環境を扱うときに使う。環境の新規作成、ビルド・テストのコンテナ内実行、ツールや依存の追加、idev の失敗の切り分け、既存プロジェクトへの導入が対象。「idev」「.incus-dev」「dev.yml」「Incusで開発環境」に触れる作業で参照する。
+description: Use when working with a per-project Incus development environment through the idev command and .incus-dev/dev.yml. Covers creating an environment, running builds and tests inside the container, adding tools and dependencies, diagnosing idev failures, and adopting it in an existing project. Reach for it whenever the work touches "idev", ".incus-dev", "dev.yml", or an Incus-based development environment.
 ---
 
-# incus-devkit（idev）の使い方
+# Using incus-devkit (idev)
 
-`idev` はプロジェクト単位の開発環境をIncusコンテナとして構築・管理するCLI。
-ホストを汚さずに、リポジトリごとに再現可能な環境を用意するために使う。
+`idev` is a CLI that builds and manages a per-project development environment
+as an Incus container. Use it to get a reproducible environment per repository
+without installing anything on the host.
 
-## 3つの原則
+## Three principles
 
-**1. ビルド・テスト・実行はコンテナ内で行う。**
-ホストへツールを入れない。`apt-get` や `npm i -g` をホストで実行しない。
+**1. Build, test and run inside the container.**
+Do not install tools on the host. No `apt-get`, no `npm i -g` on the host.
 
 ```bash
 idev exec -- make test
 ```
 
-**2. 環境の変更は `.incus-dev/` の中だけで表現する。**
-`incus` コマンドを直接叩いて設定を変えない。手で変えた設定は次の
-`idev up` で戻される（devkitが管理するキーのみ）か、そもそも記録に残らない。
-`incus` を直接使いたくなったら、それは `dev.yml` で表現できていない合図。
+**2. Express every environment change inside `.incus-dev/`.**
+Do not change settings by calling `incus` directly. A setting changed by hand
+is either reverted by the next `idev up` (for the keys devkit manages) or never
+recorded at all. Wanting to reach for `incus` is a sign that something is not
+expressible in `dev.yml` yet.
 
-**3. provisionステップは冪等に書く。**
-`idev provision` は何度でも再実行される前提。`git clone` ではなく
-`test -d x || git clone`、`useradd` ではなく `id -u dev >/dev/null 2>&1 || useradd`。
+**3. Write provisioning steps to be idempotent.**
+`idev provision` is meant to be re-run any number of times. Not `git clone` but
+`test -d x || git clone`; not `useradd` but
+`id -u dev >/dev/null 2>&1 || useradd`.
 
-## やりたいこと → コマンド
+## Task to command
 
-| やりたいこと | コマンド |
+| Task | Command |
 | --- | --- |
-| 環境を用意する（初回・`dev.yml` 変更後） | `idev up` |
-| コンテナ内でコマンドを実行する | `idev exec -- make test` |
-| 対話シェルに入る | `idev shell` |
-| provisionだけ流し直す | `idev provision` |
-| 何が起きるか先に見る | `idev up --dry-run` |
-| 状態を機械可読に取る | `idev status --json` |
-| `dev.yml` の妥当性だけ確認する（Incusに触れない） | `idev validate` |
-| 作り直す | `idev rebuild --force` |
-| 消す（ホストのソースは残る） | `idev destroy --force` |
+| Prepare the environment (first time, after a `dev.yml` change) | `idev up` |
+| Run a command in the container | `idev exec -- make test` |
+| Get an interactive shell | `idev shell` |
+| Re-run provisioning only | `idev provision` |
+| See what would happen first | `idev up --dry-run` |
+| Read the state machine-readably | `idev status --json` |
+| Check `dev.yml` alone (touches no Incus) | `idev validate` |
+| Start over | `idev rebuild --force` |
+| Remove it (host sources stay) | `idev destroy --force` |
 
-`idev exec` と `idev shell -- <cmd>` の違いは擬似端末の有無だけ。
-**スクリプトやCIからは `idev exec` を使う**（端末の有無で挙動が変わらない）。
-どちらもコンテナ内コマンドの終了コードをそのまま返すので、
-`idev exec -- make test || exit 1` がそのまま使える。
+The only difference between `idev exec` and `idev shell -- <cmd>` is the
+pseudo-terminal. **From scripts and CI, use `idev exec`** — its behaviour does
+not change with the presence of a terminal. Both pass the container command's
+exit code straight through, so `idev exec -- make test || exit 1` works as it
+is.
 
-確認を求めるのは破壊操作（`destroy` / `rebuild` / `snapshot restore|delete`）だけで、
-いずれも `--force` で省略できる。他は非対話で動く。
+Only the destructive operations ask for confirmation (`destroy`, `rebuild`,
+`snapshot restore|delete`), and `--force` skips it in every case. Everything
+else runs non-interactively.
 
-## 新しくプロジェクトへ導入する
+## Adopting it in a new project
 
-1. **既存の構築手順を読む。** README、Dockerfile、CI設定、Makefile から
-   「どのOSで」「何を入れて」「どう起動するか」を拾う。
-2. **`.incus-dev/dev.yml` を書く。** `templates/dev.yml` を出発点にする。
-   - image は Dockerfile やCIに合わせる（`images:ubuntu/24.04`、`images:debian/12`、
-     `images:alpine/3.21` など）
-   - provisionは **shellで書く**。Ansibleは、そのプロジェクトが既に
-     Ansibleを使っているか、手順が複雑で冪等性を自力で保つのが辛い場合だけ
-3. `idev validate` → `idev up` の順で確認する。
-4. **プロジェクトの `CLAUDE.md` / `AGENTS.md` へ追記する**（後続のエージェント向け）。
+1. **Read the existing setup instructions.** Pick up "on which OS", "with what
+   installed" and "how it is started" from the README, the Dockerfile, the CI
+   configuration and the Makefile.
+2. **Write `.incus-dev/dev.yml`**, starting from `templates/dev.yml`.
+   - Match the image to the Dockerfile or CI (`images:ubuntu/24.04`,
+     `images:debian/12`, `images:alpine/3.21`, …)
+   - **Write provisioning in shell.** Reach for Ansible only when the project
+     already uses it, or when the steps are complex enough that keeping them
+     idempotent by hand is painful
+3. Check with `idev validate`, then `idev up`.
+4. **Add a note to the project's `CLAUDE.md` / `AGENTS.md`** for the agents
+   that come after you.
 
 ```markdown
-## 開発環境
+## Development environment
 
-ビルド・テスト・実行はIncusコンテナ内で行う。ホストでは実行しない。
+Build, test and run inside the Incus container, never on the host.
 
-    idev up                    # 環境の構築（初回・dev.yml 変更後）
-    idev exec -- make test     # テスト
-    idev shell                 # 対話シェル
+    idev up                    # build the environment (first time, after dev.yml changes)
+    idev exec -- make test     # test
+    idev shell                 # interactive shell
 
-環境に何か足すときは `.incus-dev/dev.yml` の provision を編集して
-`idev provision`。ホストへツールを入れない。
+To add something to the environment, edit `provision` in `.incus-dev/dev.yml`
+and run `idev provision`. Do not install tools on the host.
 ```
 
-## 環境に何かを足す
+## Adding something to the environment
 
-`dev.yml` の `provision` にステップを足して `idev provision`。
-instanceは作り直されないので、作業中の状態は失われない。
+Add a step to `provision` in `dev.yml` and run `idev provision`. The instance
+is not recreated, so work in progress inside it survives.
 
 ```yaml
 provision:
@@ -86,49 +94,53 @@ provision:
       curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
 ```
 
-- `instance.config` や `instance.devices`（CPU・メモリ・追加マウント）を
-  変えた場合は `idev provision` ではなく **`idev up`**
-- 反映に再起動が要る設定（`raw.idmap` / `security.nesting` /
-  `security.privileged`）は警告が出る。再起動してよければ `idev up --restart`
-- 長いprovisionの一部だけ試すときは `idev provision --list` で番号を見て
-  `idev provision --step 3` / `--from 3`
+- After changing `instance.config` or `instance.devices` (CPU, memory, extra
+  mounts), run **`idev up`**, not `idev provision`
+- Settings that need a restart to take effect (`raw.idmap`,
+  `security.nesting`, `security.privileged`) produce a warning. If restarting
+  is fine, use `idev up --restart`
+- To try part of a long provisioning run, get the numbers with
+  `idev provision --list`, then `idev provision --step 3` or `--from 3`
 
-## うまくいかないとき
+## When it does not work
 
-**軽い順に試す。いきなり `rebuild` しない**（コンテナ内の作業結果が消える）。
+**Work from the lightest option up. Do not jump to `rebuild`** — it throws away
+everything done inside the container.
 
 ```bash
-idev validate          # 1. dev.yml の書式・参照パス
-idev status            # 2. instanceの状態、devkit管理下か
-idev up --dry-run      # 3. 何が適用されるのか
-idev provision         # 4. provisionだけやり直す
-idev up                # 5. 設定の再適用も含めてやり直す
-idev up --verbose      # 6. Incusへの操作とコマンドを見る
-idev rebuild --force   # 7. 最後の手段
+idev validate          # 1. dev.yml syntax and referenced paths
+idev status            # 2. instance state; is it managed by devkit?
+idev up --dry-run      # 3. what would be applied
+idev provision         # 4. re-run provisioning only
+idev up                # 5. re-run including re-applying the configuration
+idev up --verbose      # 6. see the Incus operations and the commands
+idev rebuild --force   # 7. last resort
 ```
 
-エラー別の対処は [references/troubleshooting.md](references/troubleshooting.md)。
-**コンテナ内でパッケージ導入が失敗する場合、ほぼホスト側のネットワーク問題**
-（Dockerとの競合）なので、`dev.yml` を書き換える前にそちらを確認する。
+Error-by-error guidance is in
+[references/troubleshooting.md](references/troubleshooting.md).
+**When package installation fails inside the container it is almost always a
+host-side network problem** (a conflict with Docker), so check that before
+editing `dev.yml`.
 
-## やってはいけないこと
+## What not to do
 
-| アンチパターン | 代わりに |
+| Anti-pattern | Instead |
 | --- | --- |
-| ホストで `apt-get install` してから作業する | `dev.yml` の provision に書く |
-| `incus exec` / `incus config set` を直接叩く | `dev.yml` に書いて `idev up` |
-| 失敗したらとりあえず `idev rebuild` | 上の順序で切り分ける |
-| provisionに `git clone`（2回目で失敗する） | `test -d dir \|\| git clone ...` |
-| APIトークンを `dev.yml` に直書き | `secrets:` でホストから注入する |
-| 生成物を `/root` や `/tmp` へ置く | `/workspace`（ホストと共有）へ置く |
-| ホスト側のパスをコンテナ内で使う | `/workspace` 起点で書く |
+| `apt-get install` on the host, then work | Put it in `provision` in `dev.yml` |
+| Call `incus exec` / `incus config set` directly | Write it in `dev.yml` and run `idev up` |
+| Reach for `idev rebuild` on any failure | Work through the order above |
+| `git clone` in provisioning (fails the second time) | `test -d dir \|\| git clone ...` |
+| An API token written into `dev.yml` | Inject it from the host with `secrets:` |
+| Put build output in `/root` or `/tmp` | Put it in `/workspace`, shared with the host |
+| Use host paths inside the container | Write them relative to `/workspace` |
 
-## 参照
+## Reference
 
-| 文書 | 内容 |
+| Document | Contents |
 | --- | --- |
-| [references/dev-yml.md](references/dev-yml.md) | `dev.yml` の全項目と既定値 |
-| [references/troubleshooting.md](references/troubleshooting.md) | エラー文言から原因と対処を引く |
-| [templates/dev.yml](templates/dev.yml) | 注釈つきの雛形 |
+| [references/dev-yml.md](references/dev-yml.md) | Every `dev.yml` field, with defaults |
+| [references/troubleshooting.md](references/troubleshooting.md) | Look up a cause and a fix from the error text |
+| [templates/dev.yml](templates/dev.yml) | An annotated starting point |
 
-`idev <command> --help` が常に正。迷ったらそれを見る。
+`idev <command> --help` is always authoritative. When in doubt, read that.

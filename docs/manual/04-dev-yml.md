@@ -1,57 +1,59 @@
-# 4. `dev.yml` リファレンス
+# 4. `dev.yml` reference
 
-ファイルの位置は `.incus-dev/dev.yml` で固定である。
+The file always lives at `.incus-dev/dev.yml`.
 
-## 4.1 全体像
+*[日本語版 / Japanese](ja/04-dev-yml.md)*
+
+## 4.1 The whole picture
 
 ```yaml
-schema: 1                          # 必須
+schema: 1                          # required
 
 runtime:
-  version: "1.0"                   # 任意。要求するidevの互換バージョン
+  version: "1.0"                   # optional. the idev version this project needs
 
 project:
-  name: my-project                 # 必須。instance名の元になる
-  scope: name                      # 任意。name（既定）| path | branch
+  name: my-project                 # required. the instance name is derived from it
+  scope: name                      # optional. name (default) | path | branch
 
 instance:
-  image: images:ubuntu/24.04       # 必須
-  type: container                  # 任意（既定 container）
-  profiles:                        # 任意（既定 [default]）
+  image: images:ubuntu/24.04       # required
+  type: container                  # optional (default: container)
+  profiles:                        # optional (default: [default])
     - default
-  config:                          # 任意。Incusのinstance configへ素通し
+  config:                          # optional. passed through to the Incus instance config
     limits.cpu: "8"
     limits.memory: 16GiB
-  devices:                         # 任意。Incusのdeviceへ素通し
+  devices:                         # optional. passed through to Incus devices
     gpu0:
       type: gpu
 
-workspace:                         # 任意
+workspace:                         # optional
   source: .
   target: /workspace
   idmap: auto
 
-volumes:                           # 任意。作り直しても残るデータ領域
+volumes:                           # optional. data that survives a rebuild
   cache:
     path: /home/dev/.cache
     size: 10GiB
 
-secrets:                           # 任意。ホストから注入する秘密情報
+secrets:                           # optional. secrets injected from the host
   API_TOKEN:
     env: HOST_TOKEN
 
-shell:                             # 任意。idev shell / idev exec の既定
+shell:                             # optional. defaults for idev shell / idev exec
   user: developer
   command: /bin/bash
   cwd: /workspace
 
-incus:                             # 任意
+incus:                             # optional
   project: development
 
-bootstrap:                         # 任意
+bootstrap:                         # optional
   - run: command -v python3 || apk add python3
 
-provision:                         # 任意。上から順に実行
+provision:                         # optional. run top to bottom
   - name: setup
     run: sh /workspace/.incus-dev/scripts/setup.sh
   - name: provision
@@ -59,7 +61,7 @@ provision:                         # 任意。上から順に実行
       playbook: .incus-dev/ansible/site.yml
 ```
 
-必須は `schema` `project.name` `instance.image` のみ。
+Only `schema`, `project.name` and `instance.image` are required.
 
 ---
 
@@ -69,7 +71,7 @@ provision:                         # 任意。上から順に実行
 schema: 1
 ```
 
-設定フォーマットのバージョン。現在は `1` のみ。
+The version of the configuration format. Currently `1` is the only value.
 
 ---
 
@@ -80,10 +82,10 @@ runtime:
   version: "1.0"
 ```
 
-このプロジェクトが要求する `idev` の互換バージョン。
-満たさない `idev` で実行するとエラーになる。
+The `idev` version this project needs. Running it with an `idev` that does not
+satisfy the constraint is an error.
 
-`MAJOR`、`MAJOR.MINOR`、`MAJOR.MINOR.PATCH` の形式を受け付ける。
+`MAJOR`, `MAJOR.MINOR` and `MAJOR.MINOR.PATCH` are all accepted.
 
 ---
 
@@ -94,30 +96,32 @@ project:
   name: my-project
 ```
 
-instance名 `dev-<name>` の元になる。英数字で始まり、以降は
-英数字・ドット・ハイフン・アンダースコアが使える（55文字まで）。
-instance名としては英数字とハイフンへ正規化される。
+The instance is named `dev-<name>`. The name must start with a letter or digit,
+and may then contain letters, digits, dots, hyphens and underscores (up to 55
+characters). It is normalised to letters, digits and hyphens for the instance
+name.
 
-同じマシンで複数のプロジェクトを扱う場合、名前が衝突しないようにする。
+If you work on several projects on one machine, keep the names distinct.
 
 ### `scope`
 
-同じプロジェクトを複数の場所に clone する、あるいはブランチごとに
-環境を分けたい場合、instance名の区別の仕方を選べる。
+If you clone the same project into several places, or want a separate
+environment per branch, you can choose how instance names are distinguished.
 
 ```yaml
 project:
   name: my-project
-  scope: path        # name（既定） | path | branch
+  scope: path        # name (default) | path | branch
 ```
 
-| 値 | instance名 | 用途 |
+| Value | Instance name | Use |
 | --- | --- | --- |
-| `name`（既定） | `dev-my-project` | 1つの環境を共有する |
-| `path` | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
-| `branch` | `dev-my-project-feature-x` | ブランチごとに分ける（Gitが必要） |
+| `name` (default) | `dev-my-project` | one shared environment |
+| `path` | `dev-my-project-cb958c73` | one per checkout |
+| `branch` | `dev-my-project-feature-x` | one per branch (requires Git) |
 
-既定を変えると既存の環境が別物になるため、明示した場合のみ名前が変わる。
+Changing the default would turn existing environments into different ones, so
+the name only changes when you set this explicitly.
 
 ---
 
@@ -125,7 +129,7 @@ project:
 
 ### `image`
 
-Incusのimage参照。
+An Incus image reference.
 
 ```yaml
 image: images:ubuntu/24.04
@@ -133,29 +137,31 @@ image: images:alpine/3.21
 image: images:debian/12
 ```
 
-利用可能なものは `incus image list images: <keyword>` で確認できる。
+`incus image list images: <keyword>` shows what is available.
 
-idev は特定のOSを前提としない。imageと構成手順の整合はプロジェクトの責任である。
+idev assumes no particular OS. Keeping the image and the provisioning steps
+consistent is the project's responsibility.
 
 ### `type`
 
-`container`（既定）または `virtual-machine`。現時点では `container` のみ検証されている。
+`container` (default) or `virtual-machine`. Only `container` is verified today.
 
 ### `profiles`
 
-**ホストに既に存在するProfileを名前で参照するだけ** のフィールド。
+A field that does nothing but **reference profiles that already exist on the
+host, by name**.
 
 ```yaml
 profiles:
   - default
 ```
 
-- idev はProfileを同梱も作成もしない
-- 指定したProfileが無ければ `idev up` は明示的に失敗する
-- 省略時は `[default]`
+- idev neither ships nor creates profiles
+- If a listed profile is missing, `idev up` fails explicitly
+- Omitted, it defaults to `[default]`
 
-Profileに依存したくない場合は空リストにできるが、
-その場合はroot diskとネットワークも自分で宣言する必要がある。
+You can pass an empty list to depend on no profile at all, but then you have to
+declare the root disk and the network yourself.
 
 ```yaml
 profiles: []
@@ -169,36 +175,39 @@ devices:
     network: incusbr0
 ```
 
-storage pool名やnetwork名はホスト依存になるため、
-可搬性を優先するなら `default` profile を参照する方がよい。
+Storage pool and network names are host-specific, so referring to the `default`
+profile is the more portable choice.
 
 ### `config`
 
-Incusのinstance configへそのまま渡される。idev は内容を解釈しない。
+Passed straight through to the Incus instance config. idev does not interpret
+it.
 
 ```yaml
 config:
   limits.cpu: "8"
   limits.memory: 16GiB
-  security.nesting: "true"        # コンテナ内でDocker等を動かす場合
+  security.nesting: "true"        # to run Docker and the like inside
   environment.TZ: Asia/Tokyo
 ```
 
-数値や真偽値で書いても文字列へ変換される（`limits.cpu: 8` でもよい）。
+Numbers and booleans are accepted and converted to strings, so `limits.cpu: 8`
+is fine too.
 
-`limits.cpu` / `limits.memory` はコンテナでも有効で、コンテナ内から見える
-CPU数（`nproc`）とメモリ量（`/proc/meminfo`）にも反映される。
-`make -j$(nproc)` のような並列度の自動判定を、ホスト全体ではなく
-この環境の割り当てに合わせられる。
+`limits.cpu` and `limits.memory` do take effect in containers, and are
+reflected in what the container sees as its CPU count (`nproc`) and memory
+(`/proc/meminfo`). That lets `make -j$(nproc)` and friends size themselves to
+this environment's allocation rather than to the whole host.
 
-`limits.*` の変更は実行中のコンテナにもそのまま反映されるため、
-再起動は要らない。
+Changes to `limits.*` apply to a running container as they are, so no restart is
+needed.
 
-`user.incus-devkit.*` は idev の管理用に予約されているため使用できない。
+`user.incus-devkit.*` is reserved for idev's own bookkeeping and cannot be
+used.
 
 ### `devices`
 
-Incusのdeviceへそのまま渡される。
+Passed straight through to Incus devices.
 
 ```yaml
 devices:
@@ -207,12 +216,12 @@ devices:
 
   dataset:
     type: disk
-    source: /srv/dataset          # ホスト側の絶対パス
+    source: /srv/dataset          # absolute path on the host
     path: /data
 
   assets:
     type: disk
-    source: ./assets              # 相対パスはproject rootが基準
+    source: ./assets              # relative paths are resolved from the project root
     path: /assets
 
   http:
@@ -221,76 +230,81 @@ devices:
     connect: tcp:127.0.0.1:8080
 ```
 
-`workspace` という名前は予約されている（4.6を参照）。
+The name `workspace` is reserved (see 4.6).
 
-ホストのディレクトリをマウントする `disk` には、workspaceと同じ
-uid/gid対応付けが自動的に適用される（4.6の `idmap` を参照）。
-`shift` を自分で書く必要はない。最適な値はホストに依存するため、
-むしろ書かないほうが可搬性が高い。
+A `disk` that mounts a host directory automatically gets the same uid/gid
+mapping as the workspace (see `idmap` in 4.6). You do not need to write `shift`
+yourself — and since the right value depends on the host, not writing it is the
+more portable choice.
 
 ---
 
 ## 4.6 `workspace`
 
-プロジェクトのworking treeをコンテナへマウントする設定。省略時は既定値が使われる。
+How the project working tree is mounted into the container. Omit it and the
+defaults are used.
 
 ```yaml
 workspace:
-  source: .            # project rootが基準。既定 "."
-  target: /workspace   # コンテナ内のパス。既定 /workspace
-  idmap: auto          # 既定 auto
+  source: .            # resolved from the project root. default "."
+  target: /workspace   # path inside the container. default /workspace
+  idmap: auto          # default auto
 ```
 
-コピーではなくbind mountなので、ホスト側の編集が即座に反映される。
+It is a bind mount, not a copy, so edits on the host are visible immediately.
 
 ### `idmap`
 
-非特権コンテナでホストのディレクトリを共有するためのuid/gid対応付け方式。
+How uids and gids are mapped so an unprivileged container can share a host
+directory.
 
-| 値 | ホスト側の追加設定 | コンテナが作ったファイルのホスト側所有者 |
+| Value | Extra host setup | Host-side owner of container-created files |
 | --- | --- | --- |
-| `auto`（既定） | 不要 | `raw` が使えれば自分、でなければroot |
-| `raw` | 必要 | 自分 |
-| `shift` | 不要 | root |
-| `none` | 不要 | （書き込み不可） |
+| `auto` (default) | none | you, if `raw` works; otherwise root |
+| `raw` | required | you |
+| `shift` | none | root |
+| `none` | none | (not writable) |
 
-`raw` を使うには `/etc/subuid` と `/etc/subgid` に `root:<uid>:1` が必要である
-（[01-installation.md](01-installation.md) 1.5）。
+`raw` requires `root:<uid>:1` in `/etc/subuid` and `/etc/subgid`
+([01-installation.md](01-installation.md), 1.5).
 
-`auto` は `raw` が使えるならそれを、使えなければ `shift` へ退避し、警告を表示する。
-どちらでもworkspaceは読み書きできる。違いは生成物の所有者だけである。
+`auto` uses `raw` when it can, falls back to `shift` when it cannot, and warns.
+Either way the workspace is readable and writable; the only difference is who
+owns what the container creates.
 
-ここで決まった方式は、`instance.devices` でマウントした
-ホストのディレクトリにも同じように適用される。
+Whatever is chosen here is applied the same way to host directories mounted
+through `instance.devices`.
 
-チーム内でホスト設定を揃えられない場合は `auto` のままにしておくとよい。
+If your team cannot standardise host configuration, leaving it at `auto` is the
+right call.
 
 ---
 
 ## 4.7 `bootstrap`
 
-provisionを動かすための最小限の準備。省略できる。
+The minimum preparation needed before provisioning can run. Optional.
 
 ```yaml
 bootstrap:
   - run: command -v python3 >/dev/null 2>&1 || dnf install -y python3
 ```
 
-- 省略時、`provision` に `ansible` ステップがあれば、
-  Debian系を前提とした既定bootstrap（python3の導入）が実行される
-- 記述した場合、既定bootstrapは実行されない
-- `bootstrap: []` で無効化できる
-- `run` のみ使用できる（`ansible` は使えない）
+- Omitted, and with an `ansible` step in `provision`, the default bootstrap
+  runs and installs python3, assuming a Debian-family image
+- Written out, the default bootstrap does not run
+- `bootstrap: []` disables it
+- Only `run` is allowed here (`ansible` is not)
 
-詳細は [05-provisioning.md](05-provisioning.md) を参照。
+See [05-provisioning.md](05-provisioning.md) for details.
 
 ---
 
 ## 4.8 `provision`
 
-コンテナ内部の構成手順。順序付きの配列で、上から順に実行される。
+The steps that configure the inside of the container. An ordered list, run top
+to bottom.
 
-各ステップは `run` か `ansible` のどちらか一方を持つ。
+Each step has either a `run` or an `ansible`, never both.
 
 ```yaml
 provision:
@@ -302,21 +316,20 @@ provision:
       playbook: .incus-dev/ansible/site.yml
 ```
 
-書き方は [05-provisioning.md](05-provisioning.md) を参照。
+See [05-provisioning.md](05-provisioning.md) for how to write them.
 
 ---
 
-## 4.9 パスの解決規則
+## 4.9 How paths are resolved
 
-| 対象 | 基準 |
+| What | Resolved from |
 | --- | --- |
-| `workspace.source` | project root |
-| `devices.*.source`（相対パスの場合） | project root |
-| `ansible.playbook` / `vars` / `inventory` | project root |
-| `run` 内に書くパス | コンテナ内の絶対パス |
+| `workspace.source` | the project root |
+| `devices.*.source` (when relative) | the project root |
+| `ansible.playbook` / `vars` / `inventory` | the project root |
+| Paths written inside `run` | absolute paths inside the container |
 
-`run` ステップからプロジェクトのファイルを参照する場合は、
-workspace越しのパスになる。
+To reach a project file from a `run` step, go through the workspace.
 
 ```yaml
 provision:
@@ -325,46 +338,48 @@ provision:
 
 ---
 
-## 4.10 volumes
+## 4.10 `volumes`
 
-instanceを作り直しても残したいデータを置く。
+Data you want to keep across a recreated instance.
 
 ```yaml
 volumes:
   cache:
-    path: /home/dev/.cache   # コンテナ内のマウント先
-    size: 10GiB              # 任意
-    pool: default            # 任意
+    path: /home/dev/.cache   # mount point inside the container
+    size: 10GiB              # optional
+    pool: default            # optional
 ```
 
-`idev rebuild` しても中身は残る。`idev destroy` でも残るため、
-消したい場合は `idev destroy --volumes` を使う。
+The contents survive `idev rebuild`. They also survive `idev destroy`; use
+`idev destroy --volumes` when you do want them gone.
 
-ビルドキャッシュやデータベースの実体など、
-「環境は作り直したいが消したくないもの」に向く。
+Good for build caches, database files — anything you want to keep while the
+environment around it is thrown away.
 
 ---
 
-## 4.11 secrets
+## 4.11 `secrets`
 
-`dev.yml` はGitにコミットされる前提なので、**値そのものは書かない**。
-ホスト側から注入する。
+`dev.yml` is meant to be committed, so **never write the value itself**. Inject
+it from the host.
 
 ```yaml
 secrets:
   API_TOKEN:
-    env: HOST_TOKEN          # ホストの環境変数から
+    env: HOST_TOKEN          # from a host environment variable
   DEPLOY_KEY:
-    file: ~/.config/key      # ホストのファイルから
+    file: ~/.config/key      # from a host file
   OPTIONAL_ONE:
     env: MAYBE
-    optional: true           # 無くてもよい
+    optional: true           # may be absent
 ```
 
-- `run` ステップには環境変数として渡る
-- `ansible` ステップには `--extra-vars` として渡る（0600の一時ファイル）
-- 取得できないものがあると、**instanceに触れる前に** どれが足りないか表示して止まる
-- ログやエラーの表示では値がマスクされる
+- `run` steps receive them as environment variables
+- `ansible` steps receive them as `--extra-vars` (through a mode 0600 temporary
+  file)
+- If any of them cannot be resolved, idev stops **before touching the
+  instance** and tells you which are missing
+- Values are masked in logs and error messages
 
 ```console
 $ idev up
@@ -372,39 +387,37 @@ $ idev up
   API_TOKEN (environment variable HOST_TOKEN): not set
 ```
 
-ただし **ステップ自身が出力した内容まではマスクできない**。
-`echo $API_TOKEN` のような書き方は避けること。
+What a step prints itself cannot be masked, though. Avoid writing things like
+`echo $API_TOKEN`.
 
 ---
 
 ## 4.12 `shell`
 
-`idev shell` / `idev exec` の既定を指定する。
+Defaults for `idev shell` and `idev exec`.
 
 ```yaml
 shell:
-  user: developer      # 実行ユーザー。省略時はinstanceの既定（root）
-  command: /bin/bash   # 起動するシェル。既定 /bin/sh
-  cwd: /workspace/src  # 作業ディレクトリ。既定は workspace.target
+  user: developer      # the user to run as. defaults to the instance default (root)
+  command: /bin/bash   # the shell to start. default /bin/sh
+  cwd: /workspace/src  # working directory. defaults to workspace.target
 ```
 
-`user` に数値uidを指定した場合はそのままIncusへ渡す。ユーザー名の場合は
-コンテナ内で `su` を使って切り替える（Incusのexecはuidしか受け付けないため）。
-指定したユーザーはコンテナ内に存在している必要があるので、
-provisionで作成しておくこと。
+A numeric uid in `user` is passed to Incus as it is. A user *name* is switched
+to with `su` inside the container, because the Incus exec API only accepts
+uids. The user has to exist in the container, so create it during provisioning.
 
 ---
 
 ## 4.13 `incus`
 
-操作対象のIncus projectを指定する。
+Selects the Incus project to operate in.
 
 ```yaml
 incus:
   project: development
 ```
 
-CLIの `--incus-project` を指定した場合はそちらが優先される。
-どちらも無ければ `default` を使う。
+The `--incus-project` flag wins if given. With neither, `default` is used.
 
-指定したprojectはIncus側に存在している必要がある（`idev` は作成しない）。
+The project has to exist in Incus already — `idev` does not create it.

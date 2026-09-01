@@ -21,16 +21,32 @@ Incusでプロジェクト単位の開発環境を構築・管理するCLIツー
 
 ## ドキュメント
 
-| 文書 | 用途 |
-| --- | --- |
-| `docs/spec/` | 設計仕様。実装判断の基準 |
-| `docs/manual/` | 利用者向けマニュアル。CLIの挙動を変えたら追従させる |
-| `docs/troubleshooting.md` | ホスト環境起因の問題 |
-| `skills/` | AIエージェント向けAgent Skill |
+外部公開しているため、**利用者向け文書は英語と日本語の両方を保つ**。
+英語が既定のパス、日本語が `ja/` または `.ja.md`。
 
-CLIのフラグ・出力・既定値を変更した場合、`docs/manual/03-commands.md` と
-`docs/manual/04-dev-yml.md`、および `skills/incus-devkit/` の該当箇所も更新する。
-スキルは `test/skills_test.go` が雛形の妥当性とコマンド名の実在を検査する。
+| 文書 | 英語 | 日本語 |
+| --- | --- | --- |
+| README | `README.md` | `README.ja.md` |
+| マニュアル | `docs/manual/` | `docs/manual/ja/` |
+| トラブルシューティング | `docs/troubleshooting.md` | `docs/troubleshooting.ja.md` |
+| 構成例 | `examples/README.md` | `examples/README.ja.md` |
+| Agent Skill | `skills/incus-devkit/` | `skills/incus-devkit-ja/` |
+
+`docs/spec/`（設計仕様。実装判断の基準）と `CLAUDE.md` は日本語のみ。
+利用者向け文書ではないため二言語化しない。
+
+CLIのフラグ・出力・既定値を変更した場合、`03-commands.md` と `04-dev-yml.md`、
+および Agent Skill の該当箇所を **英日そろえて** 更新する。
+片方だけ更新して放置しない。
+
+スキルは `test/skills_test.go` が雛形の妥当性・コマンド名の実在・
+frontmatterの `name` がディレクトリ名と一致し重複しないことを検査する。
+
+### 利用者が見るテキストは英語
+
+CLIのusage（Short / Long / フラグ説明）、確認プロンプト、ログ、エラーは英語。
+`internal/cli` の `TestUserFacingTextIsASCII` が非ASCIIの混入を検査する。
+日本語の説明はマニュアルの日本語版が担う。
 
 ## 仕様書
 

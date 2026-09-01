@@ -1,30 +1,32 @@
-# incus-devkit スキル
+# incus-devkit skill
 
-`idev` をAIコーディングエージェントから使うためのAgent Skill。
+An Agent Skill for driving `idev` from an AI coding agent.
 
-## 導入
+*[日本語版 / Japanese](../incus-devkit-ja/README.md)*
 
-エージェントが読める場所へ置く。
+## Installing
+
+Copy it somewhere the agent reads.
 
 ```bash
-# そのユーザーのすべてのプロジェクトで使う
+# for every project of this user
 cp -r skills/incus-devkit ~/.claude/skills/
 
-# 特定のプロジェクトだけで使う
+# for one project only
 cp -r skills/incus-devkit /path/to/project/.claude/skills/
 ```
 
-## 構成
+## Layout
 
 ```text
 incus-devkit/
-├── SKILL.md                      # 原則・コマンド・作業手順
+├── SKILL.md                      # principles, commands, workflows
 ├── references/
-│   ├── dev-yml.md                # dev.yml の全項目
-│   └── troubleshooting.md        # エラー文言から引く
+│   ├── dev-yml.md                # every dev.yml field
+│   └── troubleshooting.md        # look up an error message
 └── templates/
-    └── dev.yml                   # 注釈つきの雛形
+    └── dev.yml                   # an annotated starting point
 ```
 
-内容はリポジトリの `docs/` に基づく。
-CLIの挙動を変えた場合は、マニュアルと合わせてこちらも更新すること。
+The content is based on `docs/` in this repository. When the CLI's behaviour
+changes, update this alongside the manual.

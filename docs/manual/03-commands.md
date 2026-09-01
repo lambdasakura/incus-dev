@@ -1,153 +1,163 @@
-# 3. コマンドリファレンス
+# 3. Command reference
 
-## 3.1 共通事項
+*[日本語版 / Japanese](ja/03-commands.md)*
 
-### プロジェクトの探索
+## 3.1 Common behaviour
 
-`idev` はカレントディレクトリから親方向へ `.incus-dev/dev.yml` を探す。
-サブディレクトリからでも実行できる。
+### Finding the project
+
+`idev` looks for `.incus-dev/dev.yml` in the current directory and then
+upwards, so you can run it from a subdirectory.
 
 ```bash
 cd src/foo/bar
-idev status        # プロジェクトrootが見つかる
+idev status        # finds the project root
 ```
 
-Gitリポジトリである必要はない。
+It does not have to be a Git repository.
 
-### 共通フラグ
+### Global flags
 
-| フラグ | 既定 | 説明 |
+| Flag | Default | Description |
 | --- | --- | --- |
-| `-v`, `--verbose` | | 実行した外部コマンドなど詳細を出力する |
-| `-C`, `--directory <dir>` | カレントディレクトリ | 探索を開始するディレクトリ |
-| `--incus-remote <name>` | `local` | Incus remote（`incus remote switch` の既定には従わない） |
-| `--incus-project <name>` | `dev.yml` の `incus.project`、無ければ `default` | Incus project |
+| `-v`, `--verbose` | | print detail, including the external commands that were run |
+| `-C`, `--directory <dir>` | current directory | directory to start looking from |
+| `--incus-remote <name>` | `local` | Incus remote (it does not follow `incus remote switch`) |
+| `--incus-project <name>` | `incus.project` in `dev.yml`, else `default` | Incus project |
 
-### 終了コード
+### Exit codes
 
-| コード | 意味 |
+| Code | Meaning |
 | --- | --- |
-| `0` | 成功 |
-| 非0 | 失敗 |
+| `0` | Success |
+| non-zero | Failure |
 
-例外として `idev shell -- <command>` は、**コンテナ内コマンドの終了コードをそのまま返す**。
+`idev shell -- <command>` and `idev exec -- <command>` are the exception: they
+**pass the container command's exit code straight through**.
 
 ```bash
 idev shell -- sh -c 'exit 42'; echo $?   # 42
 ```
 
-### instance名
+### Instance names
 
-`dev-<プロジェクト名>` となる。英数字とハイフン以外は正規化される。
+The instance is named `dev-<project name>`. Anything but letters, digits and
+hyphens is normalised away.
 
-同じプロジェクトを複数の場所に clone する場合は、`dev.yml` の
-`project.scope` で区別できる（`path` または `branch`）。
+If you clone the same project into several places, tell them apart with
+`project.scope` in `dev.yml` (`path` or `branch`).
 
 ```text
 project.name: my.project_1   →   instance: dev-my-project-1
 ```
 
-- 63文字を超える場合は切り詰める
-- 正規化した結果が空になる名前（記号のみなど）は、
-  元の名前のハッシュで区別する
+- Names longer than 63 characters are truncated
+- A name that normalises to nothing (all punctuation, say) is distinguished by
+  a hash of the original
 
 ---
 
 ## 3.2 `idev validate`
 
-`dev.yml` を検証する。**Incusへ一切変更を加えない**ため、CIやIncusの無い環境でも実行できる。
+Validates `dev.yml`. It **makes no change to Incus at all**, so it runs in CI
+and on machines without Incus.
 
 ```bash
 idev validate
 ```
 
-検査する内容：
+What it checks:
 
-- YAMLの構文、スキーマ、必須項目、未知のフィールド
-- `runtime.version` の互換性
-- provisionステップの構造（`run` と `ansible` の排他など）
-- 参照先ファイルの存在（playbook、vars、inventory、workspace source）
-- `profiles: []` の場合に root disk device が宣言されているか
-- 予約キー（`user.incus-devkit.*`）を使っていないか
+- YAML syntax, schema, required fields, unknown fields
+- `runtime.version` compatibility
+- The structure of the provisioning steps (`run` and `ansible` are mutually
+  exclusive, and so on)
+- That referenced files exist (playbook, vars, inventory, workspace source)
+- That a root disk device is declared when `profiles: []`
+- That no reserved key (`user.incus-devkit.*`) is used
 
-Profileがホストに実在するかどうかは確認しない（Incusへ問い合わせないため）。
+It does not check whether the profiles exist on the host, because it does not
+talk to Incus.
 
 ---
 
 ## 3.3 `idev up`
 
-instanceを用意し、bootstrapとprovisionを実行する。
+Prepares the instance, then runs bootstrap and provisioning.
 
 ```bash
 idev up
 ```
 
-処理の流れ：
+What happens:
 
-1. `dev.yml` の読み込みと検証
-2. workspaceのidmap方式の決定（ホストの設定を確認）
-3. 参照Profileの存在確認（無ければ失敗）
-4. instanceが無ければ作成、あれば **作り直さずに設定を再適用**
-5. workspaceとdeviceの適用
-6. 起動と、コマンドを実行できるようになるまでの待機
-7. bootstrap → provision の実行
+1. `dev.yml` is loaded and validated
+2. The workspace idmap strategy is chosen (by inspecting the host)
+3. The referenced profiles are checked for existence (failing if any is
+   missing)
+4. The instance is created if absent, or **has its configuration re-applied
+   without being recreated** if present
+5. The workspace and devices are applied
+6. It is started, and waited on until it can run commands
+7. bootstrap, then provisioning, are run
 
-**既にあるinstanceを破壊することはない。** `dev.yml` を変更したあとに
-再実行すれば、リソースやdeviceの変更が反映される。
+**An existing instance is never destroyed.** Edit `dev.yml`, run again, and the
+resource and device changes are applied.
 
-`dev.yml` から設定やdeviceを削除した場合も追従する。ただし
-**`idev` が適用したものだけ** が対象で、`incus config set` などで
-手動追加した設定には触れない。
+Removing a setting or a device from `dev.yml` is also followed. Only what
+**`idev` itself applied** is in scope, though: settings you added by hand with
+`incus config set` are left alone.
 
-| フラグ | 説明 |
+| Flag | Description |
 | --- | --- |
-| `--restart` | 反映に再起動が必要な変更があれば、instanceを再起動する |
-| `--dry-run` | 実行予定の操作を表示するだけで、Incusへ変更を加えない |
+| `--restart` | restart the instance if a change needs it to take effect |
+| `--dry-run` | show the planned operations without changing anything in Incus |
 
 ```bash
 idev up --restart
 ```
 
-反映に再起動が必要な変更（`raw.idmap` / `security.nesting` /
-`security.privileged`）があるとき、instanceを再起動する。
-既定では警告のみを表示する。
+Restarts the instance when a change needs it to take effect (`raw.idmap`,
+`security.nesting`, `security.privileged`). By default it only warns.
 
 ```bash
 idev up --dry-run
 ```
 
-作成・再適用・削除の予定を一覧するだけで、Incusへは一切変更を加えない。
-`dev.yml` を書き換えたあと、何が起きるかを先に確認したいときに使う。
+Lists what would be created, re-applied and removed, and changes nothing in
+Incus. Use it after editing `dev.yml`, to see what is about to happen.
 
-idev が作ったものでないinstanceが同名で存在する場合は、
-何もせずに失敗する（誤って壊さないため）。
+If an instance of the same name exists that `idev` did not create, it fails
+without doing anything, so it cannot destroy something it does not own.
 
 ---
 
 ## 3.4 `idev provision`
 
-instanceを作り直さず、bootstrapとprovisionのみ再実行する。
+Re-runs bootstrap and provisioning without recreating the instance.
 
 ```bash
 idev provision
 ```
 
-主な用途：
+Mainly for:
 
-- provisionステップを書き換えたとき
-- playbookやスクリプトを変更したとき
+- when you have edited the provisioning steps
+- when you have changed a playbook or a script
 
-instanceが存在しない場合は明示的に失敗する。暗黙的に `idev up` へ切り替えない。
+If the instance does not exist, it fails explicitly. It never silently falls
+back to `idev up`.
 
-`instance.config` や `devices` の変更は反映しない（それは `idev up` の役割）。
+It does not apply `instance.config` or `devices` changes — that is what
+`idev up` is for.
 
-### 一部だけ実行する
+### Running part of it
 
-| フラグ | 説明 |
+| Flag | Description |
 | --- | --- |
-| `--list` | ステップの一覧を表示する（Incusへは触れない） |
-| `--step <名前または番号>` | 指定したステップのみ実行する（複数指定可） |
-| `--from <名前または番号>` | 指定したステップ以降を実行する |
+| `--list` | list the steps (does not touch Incus) |
+| `--step <name or number>` | run only the given steps (may be repeated) |
+| `--from <name or number>` | run from the given step onwards |
 
 ```bash
 idev provision --list
@@ -156,67 +166,70 @@ idev provision --step setup-go --step install-tools
 idev provision --from 2
 ```
 
-`--step` を複数指定しても、実行順は **宣言順** である（指定順ではない）。
-失敗時のステップ番号は、一部だけ実行した場合も全体の中での位置で示す。
+Repeating `--step` still runs the steps in **declaration order**, not in the
+order you listed them. Step numbers in failure messages are always positions in
+the whole list, even for a partial run.
 
-`--step` と `--from` は同時に指定できない。
+`--step` and `--from` cannot be combined.
 
 ---
 
 ## 3.5 `idev shell`
 
-コンテナ内でシェル、または指定したコマンドを実行する。
+Runs a shell, or a given command, inside the container.
 
 ```bash
-idev shell                      # 対話シェル（作業ディレクトリは /workspace）
-idev shell -- make test         # コマンドを実行して終了
+idev shell                      # interactive shell, starting in /workspace
+idev shell -- make test         # run a command and exit
 idev shell -- sh -c 'cd /workspace && go build ./...'
 ```
 
-- 標準入出力が端末に接続されている場合のみ擬似端末を割り当てる。
-  パイプやリダイレクト経由でも出力が壊れない
+- A pseudo-terminal is allocated only when stdin and stdout are attached to a
+  terminal, so output is not mangled through a pipe or a redirect
 
 ```bash
 idev shell -- cat /etc/os-release > os.txt
 idev shell -- go test ./... | tee test.log
 ```
 
-- コンテナが停止していれば起動してから実行する
-- 実行ユーザー・シェル・作業ディレクトリは `dev.yml` の `shell` で変えられる
-  （既定はroot、`/bin/sh`、`workspace.target`。[4. dev.yml](04-dev-yml.md) 参照）
+- If the container is stopped, it is started first
+- The user, shell and working directory come from `shell` in `dev.yml`
+  (root, `/bin/sh` and `workspace.target` by default — see
+  [4. dev.yml](04-dev-yml.md))
 
-コマンドの終了コードはそのまま `idev` の終了コードになる。
+The command's exit code becomes `idev`'s exit code.
 
 ---
 
 ## 3.5.1 `idev exec`
 
-コンテナ内でコマンドを実行する。**擬似端末は割り当てない。**
+Runs a command inside the container. **No pseudo-terminal is allocated.**
 
 ```bash
 idev exec -- make test
 idev exec -- go test ./... | tee test.log
 ```
 
-`idev shell` との違いは、端末に接続されていても擬似端末を割り当てない点だけである。
-CIやスクリプトから呼ぶ場合は、環境によって挙動が変わらない `exec` を使う。
+The only difference from `idev shell` is that it never allocates a
+pseudo-terminal, even when attached to one. In CI and in scripts, use `exec`:
+its behaviour does not vary with the environment.
 
-コマンドの指定は必須である（省略した場合は `idev shell` を使うよう促して失敗する）。
+A command is required. Without one it fails, pointing you at `idev shell`.
 
 ---
 
 ## 3.6 `idev status`
 
-対象instanceの状態を表示する。
+Shows the state of the instance.
 
 ```bash
 idev status
 ```
 
-instanceが未作成の場合は `Status: NOT CREATED` となるが、
-コマンド自体は成功する（`0` を返す）。
+If the instance has not been created, `Status: NOT CREATED` is shown and the
+command still succeeds (exit code `0`).
 
-機械可読な出力：
+Machine-readable output:
 
 ```bash
 idev status --json
@@ -242,10 +255,11 @@ idev status --json
 }
 ```
 
-`profiles` / `config` / `devices` / `runtime` は、instanceが存在しない場合は出力されない。
+`profiles`, `config`, `devices` and `runtime` are omitted when the instance
+does not exist.
 
 ```bash
-# 実行中かどうかで分岐する例
+# branch on whether it is running
 [ "$(idev status --json | jq -r .status)" = "Running" ] || idev up
 ```
 
@@ -253,47 +267,46 @@ idev status --json
 
 ## 3.7 `idev destroy`
 
-instanceを削除する。
+Deletes the instance.
 
 ```bash
 idev destroy
-idev destroy --force        # 確認を省略（CI・スクリプト用）
+idev destroy --force        # skip the confirmation, for CI and scripts
 ```
 
-- **ホスト側のソースツリーは削除しない。** workspaceはbind mountであり、
-  削除されるのはコンテナだけである
-- idev が作ったものでないinstanceは削除しない
+- **The source tree on the host is not deleted.** The workspace is a bind
+  mount; only the container goes away
+- An instance `idev` did not create is not deleted
 
----
-
-| フラグ | 説明 |
+| Flag | Description |
 | --- | --- |
-| `-f`, `--force` | 確認せずに実行する |
-| `--volumes` | `dev.yml` の `volumes` で宣言した永続ボリュームも削除する |
+| `-f`, `--force` | skip the confirmation prompt |
+| `--volumes` | also delete the persistent volumes declared in `volumes` |
 
-既定では永続ボリュームを残す。instanceを作り直してもキャッシュを保ちたい、
-という用途で使われるためである。残した場合はその旨を表示する。
+Persistent volumes are kept by default, since the point of them is usually to
+survive a recreated instance and keep a cache warm. When they are kept, it says
+so.
 
 ---
 
 ## 3.8 `idev rebuild`
 
-instanceを破棄して作り直す。
+Destroys the instance and creates it again.
 
 ```bash
 idev rebuild
 idev rebuild --force
 ```
 
-コンテナ内の状態はすべて失われる。`idev up` も削除に追従するが、
-それは `idev` が適用した設定・deviceに限られる。手動で加えた設定ごと
-きれいな状態へ戻したいときに使う。
+Everything inside the container is lost. `idev up` follows removals too, but
+only for the settings and devices `idev` applied; use `rebuild` when you want a
+clean state including anything added by hand.
 
 ---
 
 ## 3.8.1 `idev snapshot`
 
-環境を壊す前に退避しておき、あとで戻せる。
+Save a state before you break something, and go back to it later.
 
 ```bash
 idev snapshot create before-upgrade
@@ -302,15 +315,15 @@ idev snapshot restore before-upgrade
 idev snapshot delete before-upgrade
 ```
 
-名前を省略すると日時（`20260831-142530`）が付く。
-`restore` と `delete` は確認を求める（`--force` で省略）。
+Without a name, the current date and time are used (`20260831-142530`).
+`restore` and `delete` ask for confirmation (`--force` skips it).
 
-**ホスト側のworkspaceには影響しない。** bind mount であり、
-instanceの状態ではないためである。
+**The workspace on the host is unaffected**: it is a bind mount, not part of
+the instance's state.
 
 ---
 
-## 3.9 シェル補完
+## 3.9 Shell completion
 
 ```bash
 idev completion bash > /etc/bash_completion.d/idev

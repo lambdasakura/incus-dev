@@ -1,83 +1,83 @@
-# `.incus-dev/dev.yml` リファレンス
+# `.incus-dev/dev.yml` reference
 
-プロジェクトのルート（`.incus-dev/` を置いたディレクトリ）が
-すべての相対パスの基準になる。`idev` は上位ディレクトリを辿って
-`.incus-dev/dev.yml` を探すので、リポジトリ内のどこからでも実行できる。
+The project root — the directory holding `.incus-dev/` — is what every relative
+path is resolved from. `idev` walks up the directory tree looking for
+`.incus-dev/dev.yml`, so you can run it from anywhere in the repository.
 
-## 全体像
+## The whole picture
 
 ```yaml
-schema: 1                      # 必須。現在は 1 のみ
+schema: 1                      # required. currently 1 is the only value
 
 runtime:
-  version: "1.0"               # 任意。devkitの想定バージョン
+  version: "1.0"               # optional. the devkit version this project expects
 
 project:
-  name: my-project             # 必須。instance名 dev-<name> の元
-  scope: name                  # name（既定） | path | branch
+  name: my-project             # required. the instance is named dev-<name>
+  scope: name                  # name (default) | path | branch
 
 instance:
-  image: images:ubuntu/24.04   # 必須
-  type: container              # container（既定） | virtual-machine（未検証）
-  profiles: [default]          # 既定は [default]。[] はProfileを使わない
-  config:                      # Incusのinstance configをそのまま渡す
+  image: images:ubuntu/24.04   # required
+  type: container              # container (default) | virtual-machine (unverified)
+  profiles: [default]          # default [default]. [] means no profile at all
+  config:                      # passed straight to the Incus instance config
     limits.cpu: "8"
     limits.memory: 16GiB
-  devices:                     # Incusのdeviceをそのまま渡す
+  devices:                     # passed straight to Incus devices
     data:
       type: disk
-      source: ./assets         # プロジェクトルート基準
+      source: ./assets         # from the project root
       path: /data
 
 workspace:
-  source: .                    # 既定はプロジェクトルート
-  target: /workspace           # 既定 /workspace
-  idmap: auto                  # auto（既定） | raw | shift | none
+  source: .                    # defaults to the project root
+  target: /workspace           # default /workspace
+  idmap: auto                  # auto (default) | raw | shift | none
 
-shell:                         # idev shell / idev exec の既定
+shell:                         # defaults for idev shell / idev exec
   user: developer
-  command: /bin/bash           # 既定 /bin/sh
-  cwd: /workspace/src          # 既定は workspace.target
+  command: /bin/bash           # default /bin/sh
+  cwd: /workspace/src          # defaults to workspace.target
 
 incus:
-  project: development         # Incus project。CLIの --incus-project が優先
+  project: development         # Incus project. --incus-project on the CLI wins
 
-volumes:                       # 作り直しても残るデータ
+volumes:                       # data that survives a rebuild
   cache:
-    path: /home/dev/.cache     # 必須
+    path: /home/dev/.cache     # required
     size: 10GiB
     pool: default
 
-secrets:                       # ホストから注入する。値は書かない
+secrets:                       # injected from the host. never write the value
   API_TOKEN:
     env: HOST_TOKEN
   DEPLOY_KEY:
     file: ~/.config/key
     optional: true
 
-bootstrap:                     # provisionの前段。省略時は既定が動く
+bootstrap:                     # runs before provision. a default runs if omitted
   - run: command -v python3 >/dev/null 2>&1 || dnf install -y python3
 
-provision:                     # 本体
+provision:                     # the main body
   - name: base
     run: |
       apt-get update
       apt-get install -y --no-install-recommends git make
 ```
 
-## ステップ
+## Steps
 
-`bootstrap` と `provision` の要素は同じ形。`run` / `ansible` / `galaxy` の
-**いずれか1つ**を持つ。
+Elements of `bootstrap` and `provision` have the same shape. Each holds
+**exactly one** of `run`, `ansible` or `galaxy`.
 
 ```yaml
-- name: setup            # 任意。ログとエラーに出る。付けておくと追いやすい
-  run: |                 # コンテナ内で実行するスクリプト
+- name: setup            # optional. appears in logs and errors; worth setting
+  run: |                 # the script to run inside the container
     make deps
-  shell: /bin/bash       # 既定 /bin/sh
-  cwd: /workspace        # 実行時の作業ディレクトリ
-  user: developer        # 数値uidはIncusへ、名前は su で切り替える
-  env:                   # 追加の環境変数。値は表示時に隠される
+  shell: /bin/bash       # default /bin/sh
+  cwd: /workspace        # working directory
+  user: developer        # a numeric uid goes to Incus; a name is switched to with su
+  env:                   # extra environment variables. values are masked when displayed
     CGO_ENABLED: "0"
 ```
 
@@ -86,7 +86,7 @@ provision:                     # 本体
   ansible:
     playbook: .incus-dev/ansible/site.yml
     vars: .incus-dev/ansible/vars.yml
-    inventory: .incus-dev/ansible/inventory.ini   # 省略時は自動生成
+    inventory: .incus-dev/ansible/inventory.ini   # generated automatically if omitted
     tags: [setup]
     skip_tags: [slow]
     extra_args: ["--diff"]
@@ -99,60 +99,65 @@ provision:                     # 本体
     extra_args: ["--force"]
 ```
 
-ansibleステップはホスト側の `ansible-playbook` を使い、
-`community.general.incus` connection pluginでコンテナへ入る（SSHは使わない）。
-inventory上のホスト名は `dev` なので、playbookは `hosts: dev` と書く。
+An `ansible` step uses the host's `ansible-playbook` and enters the container
+through the `community.general.incus` connection plugin — SSH is not involved.
+The host is named `dev` in the inventory, so write `hosts: dev` in the
+playbook.
 
-## run ステップへ渡る環境変数
+## Environment variables passed to `run` steps
 
 ```text
-DEVKIT_PROJECT_NAME       プロジェクト名
-DEVKIT_INSTANCE           instance名
-DEVKIT_WORKSPACE          コンテナ内のworkspaceパス
-DEVKIT_WORKSPACE_SOURCE   ホスト側のプロジェクトルート
+DEVKIT_PROJECT_NAME       project name
+DEVKIT_INSTANCE           instance name
+DEVKIT_WORKSPACE          workspace path inside the container
+DEVKIT_WORKSPACE_SOURCE   project root on the host
 DEVKIT_INCUS_REMOTE       Incus remote
 DEVKIT_INCUS_PROJECT      Incus project
 ```
 
-`env:` で同名を指定すると上書きされる。`secrets:` の値も環境変数として渡る。
+Setting the same name in `env:` overrides it. Values from `secrets:` arrive as
+environment variables too.
 
-## bootstrap の既定動作
+## What the default bootstrap does
 
-`bootstrap` を省略し、かつ `provision` に ansible ステップがある場合のみ、
-Debian系を前提にpython3を導入する既定bootstrapが動く。
-Debian系以外のimageでは失敗するので、その場合は `bootstrap` を明示する。
+Only when `bootstrap` is omitted *and* `provision` contains an `ansible` step
+does the default bootstrap run, installing python3 on the assumption of a
+Debian-family image. On anything else it fails, so declare `bootstrap`
+explicitly in that case.
 
-`bootstrap: []` と書けば何も実行しない。
+Writing `bootstrap: []` runs nothing.
 
-## workspace.idmap
+## `workspace.idmap`
 
-ホストのディレクトリをコンテナへ共有するときのuid/gid対応付け。
+How uids and gids are mapped when sharing a host directory into the container.
 
-| 値 | ホスト側の追加設定 | コンテナが作ったファイルのホスト側所有者 |
+| Value | Extra host setup | Host-side owner of container-created files |
 | --- | --- | --- |
-| `auto`（既定） | 不要 | `raw` が使えれば実行ユーザー、でなければroot |
-| `raw` | `/etc/subuid`・`/etc/subgid` に `root:<uid>:1` | 実行ユーザー |
-| `shift` | 不要 | root |
-| `none` | 不要 | （書き込み不可） |
+| `auto` (default) | none | the invoking user if `raw` works, otherwise root |
+| `raw` | `root:<uid>:1` in `/etc/subuid` and `/etc/subgid` | the invoking user |
+| `shift` | none | root |
+| `none` | none | (not writable) |
 
-`instance.devices` で追加したdiskにも同じ対応付けが適用される。
+The same mapping is applied to disks added through `instance.devices`.
 
-## project.scope
+## `project.scope`
 
-同じリポジトリを複数の場所にcloneする、あるいはブランチごとに
-環境を分けたいときだけ変える。既定を変えると既存の環境が別物になる。
+Change this only when you clone the same repository into several places, or
+want a separate environment per branch. Changing the default turns existing
+environments into different ones.
 
-| 値 | instance名 |
+| Value | Instance name |
 | --- | --- |
-| `name`（既定） | `dev-my-project` |
+| `name` (default) | `dev-my-project` |
 | `path` | `dev-my-project-cb958c73` |
 | `branch` | `dev-my-project-feature-x` |
 
-## 書くときの注意
+## Things to watch when writing it
 
-- `instance.config` の値は数値・真偽値で書いてもよい（文字列へ変換される）
-- `user.incus-devkit.*` は devkit が管理に使うので書かない
-- `-` で始まるキー、`=` を含むキーは使えない
-- `profiles: []` にする場合、root diskとネットワークも自分で宣言する
-- 相対パス（`workspace.source`、device の `source`、playbook など）は
-  すべてプロジェクトルート基準
+- Values in `instance.config` may be written as numbers or booleans; they are
+  converted to strings
+- `user.incus-devkit.*` is used by devkit for bookkeeping — do not write it
+- Keys starting with `-`, and keys containing `=`, are not allowed
+- With `profiles: []`, declare the root disk and the network yourself
+- Relative paths (`workspace.source`, a device's `source`, playbooks, …) are
+  all resolved from the project root

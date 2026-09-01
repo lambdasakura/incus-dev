@@ -1,6 +1,9 @@
 # incus-devkit
 
-Incusを利用して、プロジェクト単位の開発環境を再現可能な形で構築・管理するCLIツール `idev`。
+`idev` — a CLI that builds and manages reproducible, per-project development
+environments on [Incus](https://linuxcontainers.org/incus/).
+
+*[日本語版 / Japanese](README.ja.md)*
 
 ```bash
 git clone <repository>
@@ -10,23 +13,23 @@ idev up
 idev shell
 ```
 
-## 設計方針
+## What it does
 
-`idev` は以下に特化する。
+`idev` does four things, and nothing else.
 
-- Incus instanceのライフサイクル管理
-- workspace（プロジェクトのworking tree）のマウント
-- コンテナのbootstrap
-- `.incus-dev/` に宣言された手順の実行
+- Manages the lifecycle of an Incus instance
+- Mounts your workspace (the project's working tree) into it
+- Bootstraps the container
+- Runs the steps declared in `.incus-dev/`
 
-**`idev` は環境固有の内容を持たない。**
-Ansible Role・Incus Profile・言語ランタイムの導入手順は同梱しない。
-環境を再現するために必要なものは、すべてプロジェクトの `.incus-dev/` に置く。
+**`idev` ships nothing environment-specific.** No Ansible roles, no Incus
+profiles, no language-runtime installers. Everything needed to reproduce an
+environment lives in that project's own `.incus-dev/`.
 
-同梱すると、使う側にとって不要なものまで入り込み、
-「この環境が何でできているか」が2箇所に分かれてしまうためである。
+Bundling those would drag in things most users do not need, and split the
+answer to "what is this environment made of?" across two repositories.
 
-## 使い方
+## Usage
 
 ```yaml
 # .incus-dev/dev.yml
@@ -51,97 +54,110 @@ provision:
 ```
 
 ```bash
-idev validate      # dev.ymlを検証する（Incusへは変更を加えない）
-idev up            # instanceを用意し、bootstrapとprovisionを実行する
-idev status        # 状態を表示する（--json でmachine-readable）
-idev shell         # コンテナ内でshellを開く
-idev exec -- make test   # コンテナ内でコマンドを実行する（端末は割り当てない）
-idev provision     # instanceを作り直さずprovisionのみ再実行する
-idev snapshot create before-upgrade   # 退避しておく（restore で戻せる）
-idev rebuild       # 破棄して作り直す
-idev destroy       # instanceを削除する（ホスト側のソースは削除しない）
+idev validate      # check dev.yml; changes nothing in Incus
+idev up            # create the instance, then bootstrap and provision
+idev status        # show the state (--json for machine-readable output)
+idev shell         # open a shell in the container
+idev exec -- make test   # run a command; no terminal is allocated
+idev provision     # re-run provisioning without recreating the instance
+idev snapshot create before-upgrade   # save a state you can restore later
+idev rebuild       # destroy and recreate
+idev destroy       # delete the instance; sources on the host are untouched
 ```
 
-コンテナ内コマンドの終了コードはそのまま返る（`idev exec -- make test || exit 1`）。
-スクリプトやCIからは、端末の有無で挙動が変わらない `idev exec` を使う。
+The exit code of a command run inside the container is passed straight through
+(`idev exec -- make test || exit 1`). In scripts and CI, use `idev exec`: its
+behaviour does not change with the presence of a terminal.
 
-詳しい使い方は **[マニュアル](docs/manual/README.md)** を参照。
-構成例は [examples/](examples/) にもある。
+See the **[manual](docs/manual/README.md)** for details, and
+[examples/](examples/) for worked configurations.
 
-## 前提
+## Requirements
 
-| 対象 | 必要なもの |
+| Where | What you need |
 | --- | --- |
-| ホスト | Incus、`idev` バイナリ |
-| ホスト（ansibleステップを使う場合） | `ansible-playbook`、`community.general` collection |
-| コンテナ | なし（SSH Serverは不要） |
+| Host | Incus, and the `idev` binary |
+| Host, for `ansible` steps | `ansible-playbook` and the `community.general` collection |
+| Container | Nothing — no SSH server required |
 
-ホスト側の追加設定は不要。既定（`workspace.idmap: auto`）では、
-利用可能ならホストの実行ユーザーをコンテナのrootへ対応付け（`raw.idmap`）、
-利用できなければidmapped mount（`shift`）へ退避する。
+No extra host configuration is needed. By default (`workspace.idmap: auto`),
+`idev` maps the host user running it onto root in the container (`raw.idmap`)
+when that is available, and falls back to an idmapped mount (`shift`) when it
+is not.
 
-コンテナ内で作られたファイルをホスト側でも自分の所有にしたい場合は、
-`/etc/subuid`・`/etc/subgid` へ以下を追加する（incusの再起動は不要）。
-（一般的なIncusセットアップ手順に含まれる `root:1000000:1000000000` とは
-別に必要になる。）
+To also own container-created files as yourself on the host, add the following
+to `/etc/subuid` and `/etc/subgid` (no Incus restart needed). This is needed in
+addition to the `root:1000000:1000000000` line that a typical Incus setup
+already has.
 
 ```text
 root:<uid>:1
 root:<gid>:1
 ```
 
-## ビルド
+## Building
 
 ```bash
 make build     # ./bin/idev
-make install   # $GOBIN へインストール
+make install   # into $GOBIN
 ```
 
-## 開発
+## Development
 
 ```bash
-make check              # lint + test（Incus不要）
-make test-integration   # Incus実機に対する統合テスト
+make check              # lint + test (no Incus required)
+make test-integration   # integration tests against a real Incus
 ```
 
-`make lint` は golangci-lint を使い、無ければ gofmt / go vet で代替する
-（`make tools` で導入できる）。
+`make lint` uses golangci-lint, falling back to gofmt and go vet when it is not
+installed (`make tools` installs it).
 
-変更を加える場合は、開発方針を [CLAUDE.md](CLAUDE.md) に、
-設計の判断基準を [docs/spec/](docs/spec/README.md) にまとめてある。
+If you are changing `idev` itself, [CLAUDE.md](CLAUDE.md) describes how the
+project is developed and [docs/spec/](docs/spec/README.md) records the design
+decisions behind it. Both are written in Japanese.
 
-## ドキュメント
+## Documentation
 
 | | |
 | --- | --- |
-| [マニュアル](docs/manual/README.md) | 使い方。導入、チュートリアル、リファレンス、構成例 |
-| [トラブルシューティング](docs/troubleshooting.md) | ホスト環境に起因する問題への対処 |
-| [skills/incus-devkit](skills/incus-devkit/) | AIエージェント向けAgent Skill |
-| [設計仕様](docs/spec/README.md) | 内部設計。変更を加えるときの判断基準 |
+| [Manual](docs/manual/README.md) | Installation, tutorial, reference, recipes |
+| [Troubleshooting](docs/troubleshooting.md) | Problems caused by the host environment |
+| [skills/](skills/) | Agent Skills for AI coding tools |
+| [Design specification](docs/spec/README.md) | Internal design (Japanese only) |
 
-## 困ったときは
+Japanese versions: [README.ja.md](README.ja.md),
+[docs/manual/ja/](docs/manual/ja/README.md),
+[docs/troubleshooting.ja.md](docs/troubleshooting.ja.md).
 
-ホスト環境に起因する典型的な問題（Dockerとのネットワーク競合、workspaceの
-所有者、Profile不足など）は [docs/troubleshooting.md](docs/troubleshooting.md) を参照。
+## When something breaks
 
-## 実装状況
+The common host-side problems — Docker fighting Incus over the network,
+workspace ownership, a missing profile — are covered in
+[docs/troubleshooting.md](docs/troubleshooting.md).
 
-以下は実装済みで、Incus実機に対する統合テストで動作を確認している。
+## Status
 
-| 機能 | 状態 |
+Everything below is implemented, and verified by integration tests against a
+real Incus daemon.
+
+| Feature | State |
 | --- | --- |
-| `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` / `destroy` / `snapshot` | 実装済み |
-| run / ansible / galaxy ステップ、bootstrap（既定・上書き・無効化） | 実装済み |
-| `provision --step` / `--from` / `--list`（部分実行） | 実装済み |
-| `up --dry-run` / `up --restart` | 実装済み |
-| `status --json` | 実装済み |
-| instance config / devices の素通し、削除追従 | 実装済み |
-| workspace mount と idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
-| `volumes`（永続ボリューム） | 実装済み |
-| `secrets`（ホスト環境変数・ファイルからの注入） | 実装済み |
-| `shell`（user / command / cwd）、`incus.project` | 実装済み |
-| Incus API（Go client library）での操作 | 実装済み（`incus` コマンドを必要としない） |
-| `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
-| `--incus-remote` | フラグは通るが未検証（workspaceの共有方式が未定） |
-| `instance.type: virtual-machine` | 未検証（workspaceの共有方式がコンテナ前提） |
-| `validate --check-host` | 未実装 |
+| `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` / `destroy` / `snapshot` | Done |
+| `run` / `ansible` / `galaxy` steps; bootstrap (default, overridden, disabled) | Done |
+| `provision --step` / `--from` / `--list` (partial runs) | Done |
+| `up --dry-run` / `up --restart` | Done |
+| `status --json` | Done |
+| Pass-through of instance config and devices, including removals | Done |
+| Workspace mount and idmap (`auto` / `raw` / `shift` / `none`) | Done |
+| `volumes` (persistent volumes) | Done |
+| `secrets` (injected from host environment variables and files) | Done |
+| `shell` (user / command / cwd), `incus.project` | Done |
+| Incus operations via the Go client library | Done — the `incus` command is not required |
+| `project.scope` (multiple checkouts / per-branch instances) | Done |
+| `--incus-remote` | Flag is wired up but unverified; how to share the workspace is undecided |
+| `instance.type: virtual-machine` | Unverified; workspace sharing assumes a container |
+| `validate --check-host` | Not implemented |
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -1,107 +1,114 @@
-# エラーから引く
+# Looking up an error
 
-`idev` が出したエラー文言で探す。ホスト環境が原因のものは
-リポジトリの [docs/troubleshooting.md](../../../docs/troubleshooting.md) に詳しい。
+Search by the error text `idev` printed. Problems caused by the host
+environment are covered in more depth in the repository's
+[docs/troubleshooting.md](../../../docs/troubleshooting.md).
 
-## 設定・使い方
+## Configuration and usage
 
-### `instance <名前> does not exist; run 'idev up' first`
+### `instance <name> does not exist; run 'idev up' first`
 
-`provision` / `shell` / `exec` / `status` を、環境を作る前に呼んでいる。
-`idev up` を先に実行する。暗黙に作りにいくことはない（意図しない構築を避けるため）。
+You called `provision` / `shell` / `exec` / `status` before the environment
+existed. Run `idev up` first. It never creates one implicitly, so that nothing
+gets built by accident.
 
-### `instance <名前> exists but is not managed by devkit for project "<name>"`
+### `instance <name> exists but is not managed by devkit for project "<name>"`
 
-同名のinstanceが手動で作られている。devkitは印（`user.incus-devkit.project`）の
-無いinstanceを破壊しない。既存を消すか、`project.name` を変えて名前をずらす。
+An instance of the same name was created by hand. devkit does not destroy an
+instance without its mark (`user.incus-devkit.project`). Either delete the
+existing one, or change `project.name` so the names no longer collide.
 
-### `incus profile(s) not found on this host: <名前>`
+### `incus profile(s) not found on this host: <name>`
 
-`instance.profiles` はホストに **既にあるProfileの名前参照** であって、
-devkitはProfileを作らない。対処は次のいずれか。
+`instance.profiles` is a **reference by name to profiles that already exist on
+the host**; devkit does not create them. Either:
 
-- ホスト側でProfileを作る
-- `instance.profiles` から外し、必要な設定を `instance.config` /
-  `instance.devices` へ直接書く（可搬性はこちらが高い）
+- create the profile on the host, or
+- drop it from `instance.profiles` and write what you need directly into
+  `instance.config` / `instance.devices` — the more portable option
 
 ### `cannot resolve secret(s): ...`
 
-`secrets:` が参照するホストの環境変数・ファイルが無い。
-**instanceへ触れる前に止まる**ので、環境は壊れていない。
-値を用意するか、無くてよいなら `optional: true` を付ける。
+A host environment variable or file referenced by `secrets:` is missing. It
+**stops before touching the instance**, so nothing is broken. Provide the
+value, or add `optional: true` if it is genuinely optional.
 
-### `configuration is invalid` / スキーマのエラー
+### `configuration is invalid` / schema errors
 
-`idev validate` の出力に `dev.yml` 内のパスが出る。よくある原因:
+The output of `idev validate` names the path inside `dev.yml`. Common causes:
 
-- `instance.config` の値が数値（`limits.cpu: 8`）→ 文字列にする（`"8"`）
-- 参照先のファイルが無い（playbook、vars、device の source）
-- ステップが `run` / `ansible` / `galaxy` のどれも持たない、または複数持つ
+- A referenced file does not exist (playbook, vars, a device's source)
+- A step has none of `run` / `ansible` / `galaxy`, or more than one
+- A reserved key (`user.incus-devkit.*`) was used
 
-## 実行時
+## At run time
 
-### provisionでパッケージ導入が失敗する（`temporary error`、名前解決はできるのに外へ出られない）
+### Package installation fails during provisioning (`temporary error`; DNS resolves but nothing gets out)
 
-**ほぼホスト側のネットワーク問題**。`dev.yml` を書き換えても直らない。
-ホストにDockerが入っていると、DockerのFORWARDポリシー（DROP）が
-Incusのブリッジを巻き添えにする。
+**Almost always a host-side network problem.** Editing `dev.yml` will not fix
+it. With Docker installed on the host, Docker's FORWARD policy (DROP) catches
+the Incus bridge in the crossfire.
 
 ```bash
 sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
 sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ```
 
-2行とも要る（1行目が送信、2行目が戻り）。再起動で消えるので永続化が要る。
-詳細は docs/troubleshooting.md の 1。
+Both lines are needed (the first for outbound, the second for the return
+path). They are lost on reboot, so make them persistent. See section 1 of
+docs/troubleshooting.md.
 
-### `instance <名前> did not become ready within <時間>`
+### `instance <name> did not become ready within <duration>`
 
-起動はしたが、コンテナ内でコマンドを実行できる状態にならない。
-末尾の終了コードやエラーが原因を示す。imageが壊れている、
-`instance.config` の指定でinit が起動できていない、などを疑う。
+It started, but never reached the point of being able to run commands. The
+trailing exit code or error points at the cause. Suspect a broken image, or an
+`instance.config` setting that stops init from starting.
 
-### `network address not assigned` の警告のあとステップが失敗する
+### A step fails after a `network address not assigned` warning
 
-IPv4が付く前にprovisionが始まっている。devkitはIPv4を待つので通常は出ない。
-出る場合はネットワーク構成側（上のDocker競合を含む）を疑う。
+Provisioning started before an IPv4 address was assigned. devkit waits for
+IPv4, so this is unusual; when it appears, suspect the network configuration
+(including the Docker conflict above).
 
-### `<ステップ名>: exited with code N`
+### `<step name>: exited with code N`
 
-コンテナ内のスクリプトが失敗した。エラーにはスクリプトの先頭行が出る。
-再現と切り分けはこう:
+A script inside the container failed. The error shows the first line of the
+script. To reproduce and narrow it down:
 
 ```bash
-idev provision --list          # ステップ番号を確認
-idev exec -- sh -c '<失敗したコマンド>'   # 手で叩いてみる
-idev provision --step 3        # そのステップだけ流し直す
+idev provision --list          # find the step number
+idev exec -- sh -c '<the failing command>'   # try it by hand
+idev provision --step 3        # re-run just that step
 ```
 
-## workspace / 権限
+## Workspace and permissions
 
 ### `workspace idmap (raw.idmap) is not permitted on this host`
 
-`workspace.idmap: raw` を明示したが、ホストが許可していない。
-エラーが追加すべき行を示す（`/etc/subuid`・`/etc/subgid` の `root:<uid>:1`）。
-追加後、Incusの再起動は不要。ホスト設定を変えたくなければ
-`workspace.idmap: shift` にする（コンテナが作ったファイルはホスト側でroot所有）。
+You asked for `workspace.idmap: raw`, and the host does not permit it. The
+error names the line to add (`root:<uid>:1` in `/etc/subuid` and
+`/etc/subgid`). No Incus restart is needed afterwards. If you would rather not
+change host configuration, use `workspace.idmap: shift` — files the container
+creates are then owned by root on the host.
 
-### コンテナ内で `/workspace` へ書けない、生成物がroot所有になる
+### Cannot write to `/workspace`, or output is owned by root
 
-`workspace.idmap` の選択の問題。既定の `auto` は `raw` が使えなければ
-`shift` へ退避する。`shift` ではホスト側の所有者がrootになる。
+A `workspace.idmap` question. The default `auto` falls back to `shift` when
+`raw` is unavailable, and under `shift` the host-side owner is root.
 
-### 変更が反映されない
+### A change is not taking effect
 
-- `provision` を変えた → `idev provision`
-- `instance.config` / `devices` / `volumes` を変えた → **`idev up`**
-- 反映に再起動が要る設定 → `idev up --restart`
+- Changed `provision` → `idev provision`
+- Changed `instance.config` / `devices` / `volumes` → **`idev up`**
+- Changed a setting that needs a restart → `idev up --restart`
 
-## Incusへ接続できない
+## Cannot reach Incus
 
 ```text
 connect to incus remote "local": The incus daemon doesn't appear to be started
 ```
 
-`idev` は `incus` コマンドと同じ設定（`~/.config/incus/config.yml`）を読む。
-`incus info` が通るかをまず確認する。`--incus-remote` の既定は `local` で、
-`incus remote switch` の既定には従わない。
+`idev` reads the same configuration as the `incus` command
+(`~/.config/incus/config.yml`). Check whether `incus info` works first. The
+default for `--incus-remote` is `local`, and it does not follow the default set
+by `incus remote switch`.
