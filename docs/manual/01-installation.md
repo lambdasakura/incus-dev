@@ -43,8 +43,28 @@ If it cannot, it says so
 
 ## 1.3 Installing idev
 
+### From a release (recommended)
+
+Every release ships archives for Linux, macOS and Windows, on amd64 and arm64,
+plus a `checksums.txt`. Download the one for your platform, check it, and put
+the binary on your `PATH`.
+
 ```bash
-git clone <incus-devkit-repository>
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+sudo install -m 0755 idev /usr/local/bin/idev
+```
+
+On Windows, unpack the `.zip` and put `idev.exe` in a directory on `PATH`.
+
+The Incus daemon runs on Linux, but `idev` talks to it over the API, so a macOS
+or Windows machine can drive a remote Incus. `idev shell` there does not follow
+window-size changes, because Windows has no SIGWINCH.
+
+### From source
+
+```bash
+git clone https://github.com/lambdasakura/incus-devkit.git
 cd incus-devkit
 
 make build          # produces ./bin/idev
@@ -56,6 +76,15 @@ With a Go toolchain, this works too.
 ```bash
 make install        # into $GOBIN
 ```
+
+Or without a checkout at all:
+
+```bash
+go install github.com/lambdasakura/incus-devkit/cmd/idev@latest
+```
+
+A binary built this way reports `dev` for `idev --version`, because the version
+is stamped in at release time.
 
 Check:
 

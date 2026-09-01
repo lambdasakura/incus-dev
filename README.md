@@ -5,6 +5,8 @@ environments on [Incus](https://linuxcontainers.org/incus/).
 
 *[日本語版 / Japanese](README.ja.md)*
 
+[![CI](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml)
+
 ```bash
 git clone <repository>
 cd <repository>
@@ -94,6 +96,21 @@ already has.
 root:<uid>:1
 root:<gid>:1
 ```
+
+## Installing
+
+Prebuilt binaries for Linux, macOS and Windows (amd64 and arm64) are attached
+to each [release](../../releases). Download the archive for your platform,
+verify it against `checksums.txt`, and put `idev` on your `PATH`.
+
+```bash
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+sudo install -m 0755 idev /usr/local/bin/idev
+```
+
+`idev` is an API client, so it also runs on macOS and Windows against a remote
+Incus. The Incus daemon itself runs on Linux.
 
 ## Building
 

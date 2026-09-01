@@ -4,6 +4,8 @@ Incusを利用して、プロジェクト単位の開発環境を再現可能な
 
 *[English version](README.md)*
 
+[![CI](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml)
+
 ```bash
 git clone <repository>
 cd <repository>
@@ -91,6 +93,22 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 root:<uid>:1
 root:<gid>:1
 ```
+
+## 導入
+
+Linux / macOS / Windows（amd64・arm64）のビルド済みバイナリを
+各[リリース](../../releases)に添付している。
+自分のプラットフォーム向けのアーカイブを取得し、`checksums.txt` で検証して
+`idev` を `PATH` の通った場所へ置く。
+
+```bash
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+sudo install -m 0755 idev /usr/local/bin/idev
+```
+
+`idev` はAPIクライアントであるため、remoteのIncusに対してなら
+macOS / Windows からも使える。Incus daemon自体はLinux上で動く。
 
 ## ビルド
 
