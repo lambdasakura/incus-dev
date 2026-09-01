@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
 // idmapPlan is a resolved uid/gid mapping strategy.

@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/cli"
+	"github.com/lambdasakura/incus-devkit/internal/cli"
 )
 
 // version is stamped in at build time with -ldflags.

@@ -17,7 +17,7 @@ import (
 	"golang.org/x/text/message"
 	"sigs.k8s.io/yaml"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/schemas"
+	"github.com/lambdasakura/incus-devkit/schemas"
 )
 
 // Options controls how Parse behaves.
@@ -137,7 +137,7 @@ var devSchema = sync.OnceValue(func() *jsonschema.Schema {
 
 // compileSchema compiles a JSON Schema.
 func compileSchema(raw []byte) (*jsonschema.Schema, error) {
-	const url = "https://gitlab.light-of-moe.com/sakura/incus-devkit/schemas/dev-v1.schema.json"
+	const url = "https://github.com/lambdasakura/incus-devkit/schemas/dev-v1.schema.json"
 
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {

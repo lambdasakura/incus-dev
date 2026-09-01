@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
 // The samples under examples/ are always valid (spec 08-testing.md 8.4).

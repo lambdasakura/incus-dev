@@ -11,12 +11,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus/incustest"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
 )
 
 func testEnv() provision.Env {

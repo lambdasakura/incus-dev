@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
 // skillDirs lists the skills under skills/.

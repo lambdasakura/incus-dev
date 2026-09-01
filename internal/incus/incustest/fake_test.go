@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus/incustest"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
 )
 
 var errInjected = errors.New("injected")

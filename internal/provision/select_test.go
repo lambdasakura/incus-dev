@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
 )
 
 func selectSteps(t *testing.T, yaml string, sel provision.Selection) []int {

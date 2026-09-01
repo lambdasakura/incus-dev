@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.light-of-moe.com/sakura/incus-devkit/schemas/dev-v1.schema.json",
+  "$id": "https://github.com/lambdasakura/incus-devkit/schemas/dev-v1.schema.json",
   "title": "incus-devkit development environment definition (schema 1)",
   "type": "object",
   "additionalProperties": false,

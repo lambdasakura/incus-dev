@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
 )
 
 // Fake is an incus.Client implementation that needs no Incus daemon.

@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
 )
 
 // Plan prints what idev up would do, without doing it (spec 04-cli.md 4.8).

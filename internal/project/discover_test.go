@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/project"
+	"github.com/lambdasakura/incus-devkit/internal/project"
 )
 
 // mkProject creates .incus-dev/dev.yml under root.

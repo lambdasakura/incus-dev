@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
 func parse(t *testing.T, yaml string) *config.Config {

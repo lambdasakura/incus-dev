@@ -12,11 +12,11 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/project"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/provision"
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/project"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
 )
 
 // globalFlags are the flags every command shares.

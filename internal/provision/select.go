@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
 // Selection narrows down which steps to run.
