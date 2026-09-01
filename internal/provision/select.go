@@ -9,23 +9,24 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 )
 
-// Selection は実行するステップの絞り込み。
+// Selection narrows down which steps to run.
 //
-// ステップ数が増えると全体の再実行が重くなるため、
-// 反復中は一部だけを流せるようにする（仕様 04-cli.md 4.2）。
+// Re-running everything gets expensive as the number of steps grows, so while
+// iterating you can run only part of it (spec 04-cli.md 4.2).
 type Selection struct {
-	// Only は実行するステップ。名前または番号（1始まり）で指定する。
+	// Only names the steps to run, by name or by 1-based number.
 	Only []string
-	// From は実行を開始するステップ。以降すべてを実行する。
+	// From names the step to start at; everything after it runs too.
 	From string
 }
 
-// IsZero は絞り込みが指定されていないかを返す。
+// IsZero reports whether no narrowing was asked for.
 func (s Selection) IsZero() bool {
 	return len(s.Only) == 0 && s.From == ""
 }
 
-// Select は実行するステップの位置を返す。指定が無ければすべてを返す。
+// Select returns the positions of the steps to run, or all of them when
+// nothing was asked for.
 func Select(steps []config.Step, sel Selection) ([]int, error) {
 	if len(sel.Only) > 0 && sel.From != "" {
 		return nil, fmt.Errorf("only and from cannot be used together")
@@ -56,15 +57,15 @@ func Select(steps []config.Step, sel Selection) ([]int, error) {
 		out = append(out, matched...)
 	}
 
-	// 指定順ではなく宣言順で実行する。ステップは前から順に
-	// 積み上げる前提で書かれているため。
+	// Run in declaration order, not in the order given: steps are written on
+	// the assumption that they build on the ones before them.
 	out = dedup(out)
 	slices.Sort(out)
 
 	return out, nil
 }
 
-// match は名前または番号に一致するステップの位置を返す。
+// match returns the positions of the steps matching a name or a number.
 func match(steps []config.Step, ref string) ([]int, error) {
 	if n, err := strconv.Atoi(ref); err == nil {
 		if n < 1 || n > len(steps) {
@@ -85,7 +86,7 @@ func match(steps []config.Step, ref string) ([]int, error) {
 	return out, nil
 }
 
-// available は選べるステップを列挙した案内を返す。
+// available lists the steps that can be chosen.
 func available(steps []config.Step) string {
 	if len(steps) == 0 {
 		return "; this project declares no provision steps"

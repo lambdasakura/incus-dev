@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// waitReady はinstanceがprovisioningを受けられる状態になるまで待つ。
+// waitReady waits until the instance can be provisioned.
 //
-// コマンドを実行できるようになった時点では、まだネットワークアドレスが
-// 割り当てられていないことがある。パッケージの導入を伴うステップが
-// 初回から失敗しないよう、アドレスの割り当ても待つ。
+// By the time commands can run, a network address may still not have been
+// assigned, so it waits for that too — otherwise a step that installs a
+// package fails on the very first run.
 //
-// CLI実装とAPI実装で共通の処理であるため、Client を受け取る形にしている。
+// It takes a Client so that it works against any implementation.
 func waitReady(ctx context.Context, c Client, name string, opt WaitOptions) error {
 	if opt.Timeout <= 0 {
 		opt.Timeout = 60 * time.Second
@@ -33,7 +33,7 @@ func waitReady(ctx context.Context, c Client, name string, opt WaitOptions) erro
 	return waitNetwork(ctx, c, name, opt)
 }
 
-// waitExec はコンテナ内でコマンドを実行できるようになるまで待つ。
+// waitExec waits until commands can run inside the container.
 func waitExec(ctx context.Context, c Client, name string, opt WaitOptions) error {
 	deadline := time.Now().Add(opt.Timeout)
 	for {
@@ -43,8 +43,8 @@ func waitExec(ctx context.Context, c Client, name string, opt WaitOptions) error
 		}
 
 		if time.Now().After(deadline) {
-			// 最後の試行が何で失敗したかを示す。これが無いと
-			// 「起動しない」以上のことが分からず、対処のしようがない。
+			// Say why the last attempt failed. Without it there is nothing to go
+			// on beyond "it does not start", and no way to act on that.
 			if err != nil {
 				return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, err)
 			}
@@ -59,16 +59,18 @@ func waitExec(ctx context.Context, c Client, name string, opt WaitOptions) error
 	}
 }
 
-// waitNetwork は外部と通信できる状態になるまで待つ。
+// waitNetwork waits until traffic can reach the outside.
 //
-// Incusの既定のブリッジではIPv6(ULA)が先に付き、IPv4のDHCPが完了して
-// デフォルトルートが入るまでは外へ出られない。パッケージ導入を伴う
-// ステップが初回から失敗しないよう、IPv4の割り当てまで待つ。
+// On the default Incus bridge an IPv6 (ULA) address arrives first, and nothing
+// gets out until IPv4 DHCP completes and a default route appears. It waits for
+// the IPv4 address so that a step installing a package does not fail on the
+// first run.
 //
-// IPv6のみの環境で無駄に待たないよう、IPv6が付いた後は IPv4Grace までしか
-// 待たない。NICを持たないinstanceでは待たない。アドレスが1つも
-// 付かないまま時間切れになった場合は ErrNetworkNotReady を返す
-// （静的設定などもありうるため、致命的な失敗とするかは呼び出し側が判断する）。
+// So an IPv6-only host is not held up, it waits only IPv4Grace longer once
+// IPv6 has arrived. An instance with no NIC is not waited on at all. When it
+// times out with no address whatsoever, it returns ErrNetworkNotReady —
+// whether that is fatal is the caller's decision, since static addressing is
+// possible.
 func waitNetwork(ctx context.Context, c Client, name string, opt WaitOptions) error {
 	limit := time.Now().Add(opt.NetworkTimeout)
 	var graceLimit time.Time
@@ -84,7 +86,7 @@ func waitNetwork(ctx context.Context, c Client, name string, opt WaitOptions) er
 			return nil
 
 		case inst.HasGlobalAddress():
-			// IPv6だけ付いた状態。IPv4を待つが、無期限には待たない。
+			// IPv6 only so far. Wait for IPv4, but not forever.
 			if graceLimit.IsZero() {
 				graceLimit = time.Now().Add(opt.IPv4Grace)
 			}
@@ -97,7 +99,7 @@ func waitNetwork(ctx context.Context, c Client, name string, opt WaitOptions) er
 				ErrNetworkNotReady, name, opt.NetworkTimeout)
 		}
 
-		// どの経路でも NetworkTimeout を超えたら待たない。
+		// Whichever path we took, stop once NetworkTimeout has passed.
 		if time.Now().After(limit) {
 			return nil
 		}

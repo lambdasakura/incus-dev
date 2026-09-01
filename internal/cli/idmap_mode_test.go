@@ -24,15 +24,15 @@ func TestResolveIDMap(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name:        "auto: 許可されていればraw",
+			name:        "auto: raw when it is permitted",
 			yaml:        planBase,
 			check:       permitted,
 			wantManaged: true,
 			wantMode:    config.IDMapRaw,
 		},
 		{
-			// ホストへ手を入れなくても動くことを優先する
-			name:        "auto: 許可されていなければshiftへ退避",
+			// Working without the host being touched takes priority.
+			name:        "auto: falls back to shift when it is not permitted",
 			yaml:        planBase,
 			check:       denied,
 			wantManaged: true,
@@ -40,49 +40,49 @@ func TestResolveIDMap(t *testing.T) {
 			wantWarn:    true,
 		},
 		{
-			name:    "raw: 許可されていなければ失敗",
+			name:    "raw: fails when it is not permitted",
 			yaml:    planBase + "workspace:\n  idmap: raw\n",
 			check:   denied,
 			wantErr: true,
 		},
 		{
-			name:        "raw: 許可されていればraw",
+			name:        "raw: raw when it is permitted",
 			yaml:        planBase + "workspace:\n  idmap: raw\n",
 			check:       permitted,
 			wantManaged: true,
 			wantMode:    config.IDMapRaw,
 		},
 		{
-			name:        "shift: 検査しない",
+			name:        "shift: nothing is checked",
 			yaml:        planBase + "workspace:\n  idmap: shift\n",
 			check:       denied,
 			wantManaged: true,
 			wantMode:    config.IDMapShift,
 		},
 		{
-			name:        "none: 検査しない",
+			name:        "none: nothing is checked",
 			yaml:        planBase + "workspace:\n  idmap: none\n",
 			check:       denied,
 			wantManaged: true,
 			wantMode:    config.IDMapNone,
 		},
 		{
-			name:        "利用者がraw.idmapを明示していれば介入しない",
+			name:        "stays out of the way when the user set raw.idmap",
 			yaml:        planBase + "  config:\n    raw.idmap: \"both 1234 0\"\n",
 			check:       denied,
 			wantManaged: false,
 		},
 		{
-			// 両方書かれた場合、workspace.idmap は効かないので伝える
-			name:        "raw.idmapとworkspace.idmapの併記を警告する",
+			// With both written, workspace.idmap has no effect, so say so.
+			name:        "warns when raw.idmap and workspace.idmap are both set",
 			yaml:        planBase + "  config:\n    raw.idmap: \"both 1234 0\"\nworkspace:\n  idmap: shift\n",
 			check:       denied,
 			wantManaged: false,
 			wantWarn:    true,
 		},
 		{
-			// raw.idmap も disk の shift もコンテナ固有の仕組み
-			name:        "コンテナ以外では介入しない",
+			// Both raw.idmap and a disk's shift are container-only mechanisms.
+			name:        "stays out of the way outside a container",
 			yaml:        planBase + "  type: virtual-machine\n",
 			check:       denied,
 			wantManaged: false,
@@ -118,7 +118,7 @@ func TestResolveIDMap(t *testing.T) {
 	}
 }
 
-// 退避した場合の警告は、理由と最適な設定方法を示すこと
+// The fallback warning gives the reason and the better configuration.
 func TestFallbackWarningIsActionable(t *testing.T) {
 	plan, err := resolveIDMap(mustParse(t, planBase), 1000, 1001, denied)
 	if err != nil {
@@ -127,12 +127,12 @@ func TestFallbackWarningIsActionable(t *testing.T) {
 
 	for _, want := range []string{"shift", "root:1000:1", "root:1001:1", "/etc/subuid", "/etc/subgid"} {
 		if !strings.Contains(plan.Warning, want) {
-			t.Errorf("warning = %q, %q を含むこと", plan.Warning, want)
+			t.Errorf("warning = %q, want it to contain %q", plan.Warning, want)
 		}
 	}
 }
 
-// uidとgidが異なるホストでも、それぞれを正しく写像すること
+// On a host where the uid and gid differ, each is mapped correctly.
 func TestRawIDMapUsesBothIDs(t *testing.T) {
 	plan := idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1001}
 
@@ -161,7 +161,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 			t.Errorf("raw.idmap = %q", got)
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
-			t.Errorf("shift = %q, rawではshiftを明示的に無効化すること", got)
+			t.Errorf("shift = %q, want raw to disable shift explicitly", got)
 		}
 	})
 
@@ -169,7 +169,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		plan := idmapPlan{Mode: config.IDMapShift, Managed: true}
 
 		if got, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
-			t.Errorf("raw.idmap = %q, shiftでは設定しないこと", got)
+			t.Errorf("raw.idmap = %q, want it unset under shift", got)
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "true" {
 			t.Errorf("shift = %q, want true", got)
@@ -180,27 +180,27 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		plan := idmapPlan{Mode: config.IDMapNone, Managed: true}
 
 		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
-			t.Error("noneではraw.idmapを設定しないこと")
+			t.Error("want raw.idmap unset under none")
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
-			t.Errorf("shift = %q, noneではshiftを明示的に無効化すること", got)
+			t.Errorf("shift = %q, want none to disable shift explicitly", got)
 		}
 	})
 
-	// 利用者が管理している場合、devkitはconfigにもdeviceにも触れない
-	t.Run("利用者管理", func(t *testing.T) {
+	// When the user manages it, devkit touches neither the config nor the devices.
+	t.Run("managed by the user", func(t *testing.T) {
 		plan := idmapPlan{Managed: false}
 
 		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
-			t.Error("raw.idmapを設定しないこと")
+			t.Error("want raw.idmap unset")
 		}
 		if got, ok := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; ok {
-			t.Errorf("shift = %q, 設定しないこと", got)
+			t.Errorf("shift = %q, want it unset", got)
 		}
 	})
 }
 
-// idmap方式を切り替えたとき、devkitが設定した古いキーを残さない
+// Switching idmap strategies leaves no key devkit set behind.
 func TestStaleIDMapKeys(t *testing.T) {
 	withRaw := map[string]string{idmapConfigKey: "uid 1000 0"}
 
@@ -210,11 +210,11 @@ func TestStaleIDMapKeys(t *testing.T) {
 		plan    idmapPlan
 		want    []string
 	}{
-		{"shiftへ切り替え", withRaw, idmapPlan{Mode: config.IDMapShift, Managed: true}, []string{idmapConfigKey}},
-		{"noneへ切り替え", withRaw, idmapPlan{Mode: config.IDMapNone, Managed: true}, []string{idmapConfigKey}},
-		{"rawのまま", withRaw, idmapPlan{Mode: config.IDMapRaw, Managed: true}, nil},
-		{"元々設定が無い", map[string]string{}, idmapPlan{Mode: config.IDMapShift, Managed: true}, nil},
-		{"利用者が管理している", withRaw, idmapPlan{Managed: false}, nil},
+		{"switch to shift", withRaw, idmapPlan{Mode: config.IDMapShift, Managed: true}, []string{idmapConfigKey}},
+		{"switch to none", withRaw, idmapPlan{Mode: config.IDMapNone, Managed: true}, []string{idmapConfigKey}},
+		{"still raw", withRaw, idmapPlan{Mode: config.IDMapRaw, Managed: true}, nil},
+		{"nothing was set to begin with", map[string]string{}, idmapPlan{Mode: config.IDMapShift, Managed: true}, nil},
+		{"managed by the user", withRaw, idmapPlan{Managed: false}, nil},
 	}
 
 	for _, tt := range tests {
@@ -233,8 +233,8 @@ func TestStaleIDMapKeys(t *testing.T) {
 	}
 }
 
-// ホストのディレクトリをマウントする追加deviceにも、解決した方式を伝播させる。
-// そうしないと、workspaceだけ書けて追加マウントは書けない状態になる。
+// The resolved strategy reaches extra devices that mount a host directory too.
+// Without that, the workspace is writable and the extra mounts are not.
 func TestDesiredDevicesPropagatesShiftToHostMounts(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   devices:
@@ -263,7 +263,7 @@ func TestDesiredDevicesPropagatesShiftToHostMounts(t *testing.T) {
 	}
 }
 
-// プロジェクトが shift を明示している場合は尊重する
+// A shift the project set explicitly wins.
 func TestDesiredDevicesRespectsExplicitShift(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   devices:
@@ -278,12 +278,12 @@ func TestDesiredDevicesRespectsExplicitShift(t *testing.T) {
 		plan := idmapPlan{Mode: mode, Managed: true}
 
 		if got := desiredDevices(cfg, plan, "dev-example-project")["extdata"]["shift"]; got != "true" {
-			t.Errorf("mode=%s: shift = %q, 明示指定を上書きしないこと", mode, got)
+			t.Errorf("mode=%s: shift = %q, want the explicit setting left alone", mode, got)
 		}
 	}
 }
 
-// ホストのパスを指さないdeviceには shift を付けない
+// A device that points at no host path gets no shift.
 func TestDesiredDevicesLeavesNonHostMountsAlone(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   devices:
@@ -306,11 +306,11 @@ func TestDesiredDevicesLeavesNonHostMountsAlone(t *testing.T) {
 
 	for _, name := range []string{"root", "volume", "eth0", "gpu0"} {
 		if got, ok := devices[name]["shift"]; ok {
-			t.Errorf("%s の shift = %q, ホストのパスを指すdisk以外には付けないこと", name, got)
+			t.Errorf("shift on %s = %q, want it only on a disk that points at a host path", name, got)
 		}
 	}
-	// storage volume の source はパスとして解決しない
+	// A storage volume's source is not resolved as a path.
 	if got := devices["volume"]["source"]; got != "myvolume" {
-		t.Errorf("volume の source = %q, ボリューム名を書き換えないこと", got)
+		t.Errorf("source of volume = %q, want the volume name left alone", got)
 	}
 }

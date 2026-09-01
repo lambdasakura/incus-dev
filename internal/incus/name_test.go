@@ -29,7 +29,8 @@ func TestInstanceName(t *testing.T) {
 	}
 }
 
-// Incusのinstance名は63文字までなので切り詰める（仕様 05-incus.md 5.1）
+// Incus instance names top out at 63 characters, so they are truncated
+// (spec 05-incus.md 5.1).
 func TestInstanceNameLength(t *testing.T) {
 	got := incus.InstanceName(strings.Repeat("abcdefghij", 10))
 
@@ -37,21 +38,21 @@ func TestInstanceNameLength(t *testing.T) {
 		t.Errorf("len(%q) = %d, want <= 63", got, len(got))
 	}
 	if !strings.HasPrefix(got, "dev-") {
-		t.Errorf("InstanceName() = %q, dev- で始まること", got)
+		t.Errorf("InstanceName() = %q, want it to start with dev-", got)
 	}
 	if strings.HasSuffix(got, "-") {
-		t.Errorf("InstanceName() = %q, - で終わらないこと", got)
+		t.Errorf("InstanceName() = %q, want it not to end with -", got)
 	}
 }
 
-// 生成される名前は常にIncusのinstance名制約を満たすこと
+// The generated name always satisfies what Incus accepts.
 func TestInstanceNameDistinguishesNonAlphanumericNames(t *testing.T) {
-	// 英数字を含まない名前が同じinstance名に潰れないこと
+	// Names with no letters or digits must not collapse into one instance name.
 	a := incus.InstanceName("..")
 	b := incus.InstanceName("---")
 
 	if a == b {
-		t.Errorf("InstanceName(..) と InstanceName(---) がどちらも %q になっている", a)
+		t.Errorf("InstanceName(..) and InstanceName(---) both gave %q", a)
 	}
 	for _, got := range []string{a, b} {
 		if !strings.HasPrefix(got, incus.InstanceNamePrefix) {
@@ -62,7 +63,7 @@ func TestInstanceNameDistinguishesNonAlphanumericNames(t *testing.T) {
 
 func TestInstanceNameAlwaysValid(t *testing.T) {
 	inputs := []string{
-		"a", "UPPER", "my.project_1", "..", "---", "日本語プロジェクト",
+		"a", "UPPER", "my.project_1", "..", "---", "日本語プロジェクト", // a non-ASCII name
 		"with space", "sym!@#$%^&*()", "9leading-digit",
 		strings.Repeat("x", 200), "trailing-", "-leading",
 	}
@@ -73,16 +74,16 @@ func TestInstanceNameAlwaysValid(t *testing.T) {
 			got := incus.InstanceName(in)
 
 			if !valid.MatchString(got) {
-				t.Errorf("InstanceName(%q) = %q, 英数字とハイフンのみであること", in, got)
+				t.Errorf("InstanceName(%q) = %q, want only letters, digits and hyphens", in, got)
 			}
 			if len(got) > 63 {
-				t.Errorf("InstanceName(%q) の長さ = %d, want <= 63", in, len(got))
+				t.Errorf("len(InstanceName(%q)) = %d, want <= 63", in, len(got))
 			}
 			if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
-				t.Errorf("InstanceName(%q) = %q, ハイフンで始まらず終わらないこと", in, got)
+				t.Errorf("InstanceName(%q) = %q, want no leading or trailing hyphen", in, got)
 			}
 			if !strings.HasPrefix(got, incus.InstanceNamePrefix) {
-				t.Errorf("InstanceName(%q) = %q, %q で始まること", in, got, incus.InstanceNamePrefix)
+				t.Errorf("InstanceName(%q) = %q, want it to start with %q", in, got, incus.InstanceNamePrefix)
 			}
 		})
 	}

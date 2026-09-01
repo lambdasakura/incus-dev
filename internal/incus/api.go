@@ -14,9 +14,9 @@ import (
 	"github.com/lxc/incus/v6/shared/api"
 )
 
-// server は devkit が使用するIncus APIだけを並べた窓口。
+// server lists just the Incus API calls devkit uses.
 //
-// incus.InstanceServer がそのまま満たす。テストではfakeへ差し替える。
+// incus.InstanceServer satisfies it as it is. Tests replace it with a fake.
 type server interface {
 	GetInstanceFull(name string) (*api.InstanceFull, string, error)
 	CreateInstanceFromImage(source incusclient.ImageServer, image api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error)
@@ -36,35 +36,36 @@ type server interface {
 	DeleteInstanceSnapshot(name, snapshot string) (incusclient.Operation, error)
 }
 
-// imageResolver は image 参照（例 images:ubuntu/24.04）を解決する。
+// imageResolver resolves an image reference such as images:ubuntu/24.04.
 //
-// aliasはinstance種別ごとに別のimageを指すため、種別も渡す。
+// The instance type comes along because an alias points at a different image
+// for each type.
 type imageResolver interface {
 	Resolve(ctx context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error)
 }
 
-// API はIncusのHTTP APIを呼ぶ Client 実装。
+// API is the Client implementation that calls the Incus HTTP API.
 type API struct {
 	Server server
 	Images imageResolver
-	// Console は端末を伴う実行で操作するホスト側の端末。
-	// nilならプロセスの標準入出力を使う。
+	// Console is the host terminal used when running with one. nil means the
+	// process's own standard streams.
 	Console Console
-	// Logger は操作の記録先。nilなら記録しない。
+	// Logger is where operations are recorded. nil records nothing.
 	Logger *slog.Logger
 }
 
-// log は行った操作を記録する（--verbose で見える）。
+// log records what was done, visible under --verbose.
 //
-// 値はSecretを含みうるため、操作名と対象だけを出す。
-// configやenvの値は決して渡さない。
+// Values may be secrets, so only the operation and its target are printed.
+// Never pass config or env values in.
 func (a *API) log(op string, args ...any) {
 	if a.Logger != nil {
 		a.Logger.Debug("incus "+op, args...)
 	}
 }
 
-// console は端末を伴う実行で使う端末を返す。
+// console returns the terminal to use when running with one.
 func (a *API) console() Console {
 	if a.Console != nil {
 		return a.Console
@@ -74,7 +75,8 @@ func (a *API) console() Console {
 
 var _ Client = (*API)(nil)
 
-// Instance はinstanceの状態を取得する。存在しない場合は ErrInstanceNotFound を返す。
+// Instance fetches an instance's state, returning ErrInstanceNotFound when it
+// does not exist.
 func (a *API) Instance(_ context.Context, name string) (*Instance, error) {
 	full, _, err := a.Server.GetInstanceFull(name)
 	if err != nil {
@@ -86,7 +88,7 @@ func (a *API) Instance(_ context.Context, name string) (*Instance, error) {
 	return convertInstance(full), nil
 }
 
-// convertInstance はAPIの表現をdevkitの表現へ変換する。
+// convertInstance turns the API's representation into devkit's.
 func convertInstance(full *api.InstanceFull) *Instance {
 	inst := &Instance{
 		Name:            full.Name,
@@ -131,7 +133,7 @@ func toAPIDevices(devices map[string]Device) map[string]map[string]string {
 	return out
 }
 
-// CreateInstance はinstanceを作成する（起動はしない）。
+// CreateInstance creates an instance without starting it.
 func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	source, image, err := a.Images.Resolve(ctx, spec.Image, spec.Type)
 	if err != nil {
@@ -157,15 +159,16 @@ func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	if err != nil {
 		return fmt.Errorf("create instance %s: %w", spec.Name, err)
 	}
-	// RemoteOperation は context を受け取らない。imageの取得は数分かかる
-	// ことがあるため、中断できるよう自前で待つ。
+	// RemoteOperation takes no context, and fetching an image can take
+	// minutes, so wait for it ourselves and stay interruptible.
 	if err := waitOp(ctx, op); err != nil {
 		return fmt.Errorf("create instance %s: %w", spec.Name, err)
 	}
 	return nil
 }
 
-// waitOp は転送を伴う操作の完了を待つ。中断された場合は取り消す。
+// waitOp waits for an operation involving a transfer, cancelling it if
+// interrupted.
 func waitOp(ctx context.Context, op incusclient.RemoteOperation) error {
 	done := make(chan error, 1)
 	go func() { done <- op.Wait() }()
@@ -179,16 +182,16 @@ func waitOp(ctx context.Context, op incusclient.RemoteOperation) error {
 	}
 }
 
-// StartInstance はinstanceを起動する。
+// StartInstance starts an instance.
 func (a *API) StartInstance(ctx context.Context, name string) error {
 	return a.changeState(ctx, name, "start", false)
 }
 
-// StopInstance はinstanceを停止する。
+// StopInstance stops an instance.
 //
-// 利用者の作業中プロセスを不用意に殺さないよう、まず正常停止を試みる。
-// 応答しない場合に備えて待ち時間には上限を設け、超えたら強制停止する
-// （仕様 05-incus.md 5.4.5）。
+// It tries a graceful stop first, so it does not casually kill whatever the
+// user was running. In case nothing responds there is an upper bound on the
+// wait, after which it forces the stop (spec 05-incus.md 5.4.5).
 func (a *API) StopInstance(ctx context.Context, name string) error {
 	inst, err := a.Instance(ctx, name)
 	if err != nil {
@@ -204,10 +207,10 @@ func (a *API) StopInstance(ctx context.Context, name string) error {
 	return a.forceStop(ctx, name)
 }
 
-// stopTimeout は正常停止を待つ上限（秒）。
+// stopTimeout is how many seconds a graceful stop is given.
 const stopTimeout = 30
 
-// forceStop は応答しないinstanceを強制停止する。
+// forceStop kills an instance that is not responding.
 func (a *API) forceStop(ctx context.Context, name string) error {
 	return a.changeState(ctx, name, "stop", true)
 }
@@ -230,14 +233,14 @@ func (a *API) changeState(ctx context.Context, name, action string, force bool) 
 	return nil
 }
 
-// DeleteInstance はinstanceを削除する。稼働中であれば停止してから削除する。
+// DeleteInstance deletes an instance, stopping it first when it is running.
 func (a *API) DeleteInstance(ctx context.Context, name string) error {
 	inst, err := a.Instance(ctx, name)
 	if err != nil {
 		return err
 	}
-	// これから消すinstanceなので、正常停止を待たずに落としてよい。
-	// Frozen や Starting のような中間状態も対象にする。
+	// It is about to be deleted, so there is no reason to wait for a graceful
+	// stop. Intermediate states such as Frozen and Starting count too.
 	if !inst.IsStopped() {
 		if err := a.forceStop(ctx, name); err != nil {
 			return err
@@ -256,8 +259,8 @@ func (a *API) DeleteInstance(ctx context.Context, name string) error {
 	return nil
 }
 
-// ApplyConfig は指定されたconfigキーを設定する。
-// 宣言されていないキーには触れない（仕様 05-incus.md 5.4.4）。
+// ApplyConfig sets the given config keys, leaving keys that were not declared
+// alone (spec 05-incus.md 5.4.4).
 func (a *API) ApplyConfig(ctx context.Context, name string, config map[string]string) error {
 	if len(config) == 0 {
 		return nil
@@ -269,7 +272,7 @@ func (a *API) ApplyConfig(ctx context.Context, name string, config map[string]st
 	})
 }
 
-// UnsetConfig は指定されたconfigキーを削除する。
+// UnsetConfig removes the given config keys.
 func (a *API) UnsetConfig(ctx context.Context, name string, keys []string) error {
 	if len(keys) == 0 {
 		return nil
@@ -283,8 +286,8 @@ func (a *API) UnsetConfig(ctx context.Context, name string, keys []string) error
 	})
 }
 
-// ApplyDevices は宣言されたdeviceを設定する。
-// 既存deviceは差分のみ更新し、型が変わった場合は作り直す。
+// ApplyDevices sets the declared devices, updating only what differs on an
+// existing device and recreating it when its type changed.
 func (a *API) ApplyDevices(ctx context.Context, name string, devices map[string]Device) error {
 	if len(devices) == 0 {
 		return nil
@@ -306,7 +309,7 @@ func (a *API) ApplyDevices(ctx context.Context, name string, devices map[string]
 	})
 }
 
-// RemoveDevices は指定されたdeviceを削除する。
+// RemoveDevices removes the given devices.
 func (a *API) RemoveDevices(ctx context.Context, name string, devices []string) error {
 	if len(devices) == 0 {
 		return nil
@@ -320,7 +323,8 @@ func (a *API) RemoveDevices(ctx context.Context, name string, devices []string) 
 	})
 }
 
-// updateInstance は現在の状態を取得し、変更を加えて書き戻す。
+// updateInstance fetches the current state, applies a change and writes it
+// back.
 func (a *API) updateInstance(ctx context.Context, name string, change func(*api.InstancePut)) error {
 	full, etag, err := a.Server.GetInstanceFull(name)
 	if err != nil {
@@ -346,7 +350,8 @@ func (a *API) updateInstance(ctx context.Context, name string, change func(*api.
 	return nil
 }
 
-// ProfileExists はProfileの存在を返す。devkitはProfileを作成しない（REQ-007）。
+// ProfileExists reports whether a profile exists. devkit never creates one
+// (REQ-007).
 func (a *API) ProfileExists(_ context.Context, name string) (bool, error) {
 	names, err := a.Server.GetProfileNames()
 	if err != nil {
@@ -355,7 +360,7 @@ func (a *API) ProfileExists(_ context.Context, name string) (bool, error) {
 	return slices.Contains(names, name), nil
 }
 
-// VolumeExists はstorage volumeの存在を返す。
+// VolumeExists reports whether a storage volume exists.
 func (a *API) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	_, _, err := a.Server.GetStoragePoolVolume(pool, storageVolumeType, name)
 	switch {
@@ -368,10 +373,10 @@ func (a *API) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	}
 }
 
-// storageVolumeType はdevkitが扱うstorage volumeの種別。
+// storageVolumeType is the kind of storage volume devkit deals in.
 const storageVolumeType = "custom"
 
-// CreateVolume はstorage volumeを作成する。
+// CreateVolume creates a storage volume.
 func (a *API) CreateVolume(_ context.Context, pool, name string, config map[string]string) error {
 	req := api.StorageVolumesPost{Name: name, Type: storageVolumeType}
 	req.Config = config
@@ -384,7 +389,7 @@ func (a *API) CreateVolume(_ context.Context, pool, name string, config map[stri
 	return nil
 }
 
-// DeleteVolume はstorage volumeを削除する。
+// DeleteVolume deletes a storage volume.
 func (a *API) DeleteVolume(_ context.Context, pool, name string) error {
 	a.log("delete volume", "pool", pool, "name", name)
 
@@ -394,7 +399,7 @@ func (a *API) DeleteVolume(_ context.Context, pool, name string) error {
 	return nil
 }
 
-// CreateSnapshot はinstanceのスナップショットを作成する。
+// CreateSnapshot takes a snapshot of an instance.
 func (a *API) CreateSnapshot(ctx context.Context, instance, snapshot string) error {
 	a.log("create snapshot", "instance", instance, "snapshot", snapshot)
 
@@ -408,7 +413,7 @@ func (a *API) CreateSnapshot(ctx context.Context, instance, snapshot string) err
 	return nil
 }
 
-// Snapshots はinstanceのスナップショット一覧を返す。
+// Snapshots lists an instance's snapshots.
 func (a *API) Snapshots(_ context.Context, instance string) ([]Snapshot, error) {
 	snapshots, err := a.Server.GetInstanceSnapshots(instance)
 	if err != nil {
@@ -422,7 +427,7 @@ func (a *API) Snapshots(_ context.Context, instance string) ([]Snapshot, error) 
 	return out, nil
 }
 
-// snapshotName は "instance/snapshot" 形式からスナップショット名だけを取り出す。
+// snapshotName pulls the snapshot name out of the "instance/snapshot" form.
 func snapshotName(name string) string {
 	if _, snap, ok := strings.Cut(name, "/"); ok {
 		return snap
@@ -430,11 +435,11 @@ func snapshotName(name string) string {
 	return name
 }
 
-// RestoreSnapshot はinstanceをスナップショットの状態へ戻す。
+// RestoreSnapshot rolls an instance back to a snapshot.
 //
-// 現在の設定を送り返すと、取得から書き戻しまでの間に加えられた変更を
-// 巻き戻してしまう。Incusは Restore 指定時に他のフィールドを見ないため、
-// 復元先だけを送る。
+// Sending the current configuration back would undo any change made between
+// reading it and writing it. Incus ignores the other fields when Restore is
+// set, so send nothing but the target.
 func (a *API) RestoreSnapshot(ctx context.Context, instance, snapshot string) error {
 	a.log("restore snapshot", "instance", instance, "snapshot", snapshot)
 
@@ -448,7 +453,7 @@ func (a *API) RestoreSnapshot(ctx context.Context, instance, snapshot string) er
 	return nil
 }
 
-// DeleteSnapshot はスナップショットを削除する。
+// DeleteSnapshot deletes a snapshot.
 func (a *API) DeleteSnapshot(ctx context.Context, instance, snapshot string) error {
 	a.log("delete snapshot", "instance", instance, "snapshot", snapshot)
 
@@ -462,7 +467,7 @@ func (a *API) DeleteSnapshot(ctx context.Context, instance, snapshot string) err
 	return nil
 }
 
-// Exec はコンテナ内でコマンドを実行し、終了コードを返す。
+// Exec runs a command inside the container and returns its exit code.
 func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error) {
 	req, err := newExecRequest(argv, opt)
 	if err != nil {
@@ -477,14 +482,16 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 		DataDone: dataDone,
 	}
 
-	// 中断されたときにコンテナ内のプロセスへ伝えるため、制御経路は常に開く。
+	// Always open the control channel, so an interruption can reach the
+	// process in the container.
 	done := make(chan struct{})
 	defer close(done)
 	ctrl := control{ctx: ctx, done: done}
 
 	if opt.TTY {
-		// 端末を割り当てる場合、キー入力をそのままコンテナへ渡すため
-		// ホスト側の端末をraw modeにする。復元しないとシェルが壊れる。
+		// With a terminal allocated, put the host terminal into raw mode so
+		// keystrokes reach the container untouched. Failing to restore it
+		// leaves the user's shell broken.
 		console := a.console()
 
 		restore, err := console.MakeRaw()
@@ -494,7 +501,7 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 		defer restore()
 
 		req.Interactive = true
-		// 取得できない場合は指定せず、Incus側の既定に任せる。
+		// When it cannot be read, send nothing and let Incus use its default.
 		if width, height, err := console.Size(); err == nil {
 			req.Width, req.Height = width, height
 		}
@@ -507,8 +514,8 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	}
 	args.Control = controlHandler(ctrl)
 
-	// argvにはスクリプト本文が入りうるため、実行するプログラムだけを示す。
-	// 失敗した内容はステップ側のエラーが伝える。
+	// argv can hold a whole script, so name only the program being run. The
+	// step's own error carries what failed.
 	a.log("exec", "name", name, "program", program(argv))
 
 	op, err := a.Server.ExecInstance(name, req, args)
@@ -519,8 +526,8 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 		return 0, fmt.Errorf("exec in %s: %w", name, err)
 	}
 
-	// 出力の中継が終わるのを待つ。websocketが半開のまま残ると
-	// 永久に閉じないため、中断できるようにしておく。
+	// Wait for the output to finish streaming. A half-open websocket would
+	// never close, so stay interruptible.
 	select {
 	case <-dataDone:
 	case <-ctx.Done():
@@ -530,12 +537,12 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	return exitCodeOf(op.Get()), nil
 }
 
-// newExecRequest はIncusへ送るexec要求を組み立てる。実行はしない。
+// newExecRequest builds the exec request to send to Incus. It runs nothing.
 func newExecRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error) {
 	env := map[string]string{}
 	if opt.TTY && opt.Term != "" {
-		// Incusは既定でTERMを設定しない。端末向けのプログラムが
-		// 動かなくなるため、ホストの値を引き継ぐ。
+		// Incus does not set TERM by default, which breaks terminal-oriented
+		// programs, so carry the host's value across.
 		env["TERM"] = opt.Term
 	}
 	maps.Copy(env, opt.PublicEnv)
@@ -550,8 +557,8 @@ func newExecRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error
 	if opt.User != "" {
 		uid, err := strconv.ParseUint(opt.User, 10, 32)
 		if err != nil {
-			// IncusのexecはUIDのみを受け付ける。
-			// ユーザー名の解決は呼び出し側の責務であり、黙って無視しない。
+			// The Incus exec API only accepts a uid. Resolving a user name is
+			// the caller's job, and is not silently ignored here.
 			return req, fmt.Errorf("exec user must be a numeric uid, got %q", opt.User)
 		}
 		req.User = uint32(uid)
@@ -559,7 +566,7 @@ func newExecRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error
 	return req, nil
 }
 
-// exitCodeOf は完了したexec操作から終了コードを取り出す。
+// exitCodeOf pulls the exit code out of a finished exec operation.
 func exitCodeOf(op api.Operation) int {
 	value, ok := op.Metadata["return"]
 	if !ok {
@@ -575,12 +582,12 @@ func exitCodeOf(op api.Operation) int {
 	}
 }
 
-// WaitReady はinstanceがprovisioningを受けられる状態になるまで待つ。
+// WaitReady waits until the instance can be provisioned.
 func (a *API) WaitReady(ctx context.Context, name string, opt WaitOptions) error {
 	return waitReady(ctx, a, name, opt)
 }
 
-// program は実行するプログラム名を返す。
+// program returns the name of the program being run.
 func program(argv []string) string {
 	if len(argv) == 0 {
 		return ""
@@ -588,7 +595,7 @@ func program(argv []string) string {
 	return argv[0]
 }
 
-// sortedKeys はマップのキーを昇順で返す。ログの出力順を安定させる。
+// sortedKeys returns a map's keys in ascending order, so log output is stable.
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }

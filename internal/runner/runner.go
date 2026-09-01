@@ -1,7 +1,6 @@
-// Package runner は外部コマンド実行を集約する。
+// Package runner is where running external commands is concentrated.
 //
-// 他のパッケージは os/exec を直接使用してはならない
-// （仕様 07-implementation.md 7.2）。
+// No other package may use os/exec directly (spec 07-implementation.md 7.2).
 package runner
 
 import (
@@ -17,32 +16,34 @@ import (
 	"syscall"
 )
 
-// Command は実行する外部コマンド。
+// Command is an external command to run.
 type Command struct {
-	// Label は失敗時に表示する操作名（例: "provision step 2/3"）。
+	// Label names the operation, shown on failure (e.g. "provision step 2/3").
 	Label string
 	Name  string
 	Args  []string
-	// Dir は作業ディレクトリ。空ならカレントディレクトリ。
+	// Dir is the working directory. Empty means the current directory.
 	Dir string
-	// Env は追加する環境変数（KEY=VALUE）。プロセスの環境に追記される。
+	// Env holds extra environment variables (KEY=VALUE), appended to the
+	// process environment.
 	Env []string
 
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// Interactive が真の場合、プロセスの標準入出力を直接引き継ぐ（TTY用途）。
+	// Interactive hands the process's own standard streams straight through,
+	// for terminal use.
 	Interactive bool
 
-	// Redact は String() で値を隠す Args のindex。
-	// Secretを含みうる引数（環境変数や利用者が指定した設定値）に指定する。
-	// 実行される引数そのものは変わらない。
+	// Redact lists indexes into Args whose values String() hides. Use it for
+	// arguments that may carry a secret, such as environment variables and
+	// user-supplied settings. The arguments actually executed are unchanged.
 	Redact []int
 }
 
-// redacted は表示用に値を隠した引数を返す。
-// KEY=VALUE 形式は KEY=*** とし、それ以外は全体を隠す。
+// redacted returns an argument with its value hidden, for display.
+// KEY=VALUE becomes KEY=***; anything else is hidden whole.
 func (c Command) redacted(i int, arg string) string {
 	for _, r := range c.Redact {
 		if r != i {
@@ -56,11 +57,12 @@ func (c Command) redacted(i int, arg string) string {
 	return arg
 }
 
-// String はログ・エラー表示用のコマンド文字列を返す。
+// String returns the command as a string, for logs and errors.
 //
-// 環境変数（Env）は含めず、Redact で指定された引数の値は隠す。
-// Secretを無条件に出力しないための表示専用の表現であり、
-// 実行される引数はこれとは独立している（仕様 04-cli.md 4.10）。
+// It omits the environment (Env) and hides the values of the arguments named
+// by Redact. This is a display-only rendering that exists so secrets are
+// never printed unconditionally; the arguments actually executed are
+// independent of it (spec 04-cli.md 4.10).
 func (c Command) String() string {
 	parts := make([]string, 0, len(c.Args)+1)
 	parts = append(parts, c.Name)
@@ -76,10 +78,11 @@ func (c Command) String() string {
 	return strings.Join(parts, " ")
 }
 
-// Collapse は複数行の文字列を1行へ畳む。
+// Collapse folds a multi-line string onto one line.
 //
-// provisionのスクリプトのような長い内容がそのままエラーへ流れ込むと、
-// 肝心の失敗理由が埋もれてしまうため、先頭行だけを示す。
+// Long content such as a provisioning script would bury the actual reason for
+// the failure if it flowed into the error as it is, so only the first line is
+// shown.
 func Collapse(arg string) string {
 	first, rest, found := strings.Cut(arg, "\n")
 	if !found {
@@ -90,19 +93,19 @@ func Collapse(arg string) string {
 	return fmt.Sprintf("%s … (+%d lines)", first, lines)
 }
 
-// Result は実行結果。
+// Result is the outcome of a run.
 type Result struct {
 	ExitCode int
 	Stdout   []byte
 	Stderr   []byte
 }
 
-// Runner は外部コマンドを実行する。テストではfakeへ差し替える。
+// Runner runs external commands. Tests replace it with a fake.
 type Runner interface {
 	Run(ctx context.Context, c Command) (Result, error)
 }
 
-// ExitError はコマンドが異常終了したことを示す。
+// ExitError reports that a command terminated abnormally.
 type ExitError struct {
 	Label    string
 	Cmd      string
@@ -122,10 +125,10 @@ func (e *ExitError) Error() string {
 	return sb.String()
 }
 
-// exitCode はプロセスの終了コードを返す。
+// exitCode returns the process exit code.
 //
-// シグナルで終了した場合 os は -1 を返すが、そのまま os.Exit へ渡すと
-// 255 になってしまうため、シェルの慣例に合わせて 128+シグナル番号とする。
+// os reports -1 for a process killed by a signal, which would turn into 255 if
+// passed straight to os.Exit, so follow the shell convention of 128+signal.
 func exitCode(state *os.ProcessState) int {
 	if state == nil {
 		return -1
@@ -139,18 +142,18 @@ func exitCode(state *os.ProcessState) int {
 	return 1
 }
 
-// Exec は os/exec による実装。
+// Exec is the os/exec-backed implementation.
 type Exec struct {
 	Logger *slog.Logger
 }
 
-// New は既定のRunnerを返す。
+// New returns the default Runner.
 func New() *Exec { return &Exec{} }
 
-// NewWithLogger はログ出力付きのRunnerを返す。
+// NewWithLogger returns a Runner that logs what it runs.
 func NewWithLogger(l *slog.Logger) *Exec { return &Exec{Logger: l} }
 
-// Run はコマンドを実行する。
+// Run executes the command.
 func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Dir = c.Dir
@@ -158,8 +161,9 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 		cmd.Env = append(os.Environ(), c.Env...)
 	}
 
-	// 中継先が指定されている場合はそちらへ直接流す。
-	// 出力量が読めないステップもあるため、不要な蓄積はしない。
+	// Stream straight to the caller's writers when it gave us any. Some steps
+	// produce an unpredictable amount of output, so do not accumulate it
+	// needlessly.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin = c.Stdin
 
@@ -193,7 +197,7 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 			Cmd:      c.String(),
 			ExitCode: res.ExitCode,
 		}
-		// 呼び出し側へ中継済みの場合、同じ内容を二重に見せない。
+		// Do not show the same content twice when it was already streamed.
 		if c.Stderr == nil {
 			e.Stderr = string(res.Stderr)
 		}

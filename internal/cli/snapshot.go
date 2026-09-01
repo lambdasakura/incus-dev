@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// snapshotTimeFormat は名前を省略した場合のスナップショット名。
+// snapshotTimeFormat names a snapshot when no name was given.
 const snapshotTimeFormat = "20060102-150405"
 
-// CreateSnapshot はinstanceのスナップショットを作成する。
-// 名前を省略した場合は日時から自動で付ける。
+// CreateSnapshot takes a snapshot of the instance, naming it after the current
+// time when no name was given.
 func (a *App) CreateSnapshot(ctx context.Context, name string) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
@@ -27,7 +27,7 @@ func (a *App) CreateSnapshot(ctx context.Context, name string) error {
 	return nil
 }
 
-// ListSnapshots はスナップショット一覧を表示する。
+// ListSnapshots prints the snapshots.
 func (a *App) ListSnapshots(ctx context.Context) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
@@ -54,9 +54,9 @@ func (a *App) ListSnapshots(ctx context.Context) error {
 	return nil
 }
 
-// RestoreSnapshot はinstanceをスナップショットの状態へ戻す。
+// RestoreSnapshot rolls the instance back to a snapshot.
 //
-// instance内の現在の状態は失われる。ホスト側のworkspaceには影響しない。
+// Its current state is lost. The workspace on the host is unaffected.
 func (a *App) RestoreSnapshot(ctx context.Context, name string) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
@@ -71,7 +71,7 @@ func (a *App) RestoreSnapshot(ctx context.Context, name string) error {
 	return nil
 }
 
-// DeleteSnapshot はスナップショットを削除する。
+// DeleteSnapshot deletes a snapshot.
 func (a *App) DeleteSnapshot(ctx context.Context, name string) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err

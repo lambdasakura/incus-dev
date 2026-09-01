@@ -13,7 +13,7 @@ import (
 func TestWriteYAMLAndJSON(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("YAMLを書き出す", func(t *testing.T) {
+	t.Run("writes YAML", func(t *testing.T) {
 		path := filepath.Join(dir, "out.yml")
 		if err := writeYAML(path, map[string]any{"key": "value"}); err != nil {
 			t.Fatalf("writeYAML() error = %v", err)
@@ -35,7 +35,7 @@ func TestWriteYAMLAndJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("JSONを書き出す", func(t *testing.T) {
+	t.Run("writes JSON", func(t *testing.T) {
 		path := filepath.Join(dir, "out.json")
 		if err := writeJSON(path, map[string]any{"key": "value"}); err != nil {
 			t.Fatalf("writeJSON() error = %v", err)
@@ -49,7 +49,7 @@ func TestWriteYAMLAndJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("変換できない値", func(t *testing.T) {
+	t.Run("a value that cannot be converted", func(t *testing.T) {
 		if err := writeYAML(filepath.Join(dir, "bad.yml"), make(chan int)); err == nil {
 			t.Error("writeYAML() = nil error, want error")
 		}
@@ -58,7 +58,7 @@ func TestWriteYAMLAndJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("書き込めないパス", func(t *testing.T) {
+	t.Run("a path that cannot be written", func(t *testing.T) {
 		bad := filepath.Join(dir, "no-such-dir", "out.yml")
 		if err := writeYAML(bad, map[string]any{}); err == nil {
 			t.Error("writeYAML() = nil error, want error")
@@ -71,7 +71,7 @@ func TestWriteYAMLAndJSON(t *testing.T) {
 
 func TestResolvePath(t *testing.T) {
 	if got := resolve("/root", "/abs/path"); got != "/abs/path" {
-		t.Errorf("resolve() = %q, 絶対パスはそのまま返すこと", got)
+		t.Errorf("resolve() = %q, want an absolute path returned as it is", got)
 	}
 	if got := resolve("/root", "rel"); got != "/root/rel" {
 		t.Errorf("resolve() = %q", got)
@@ -87,7 +87,7 @@ func TestOrDefault(t *testing.T) {
 	}
 }
 
-// 一時ディレクトリを作れない場合はエラーになる
+// Being unable to create the temporary directory is an error.
 func TestExecAnsibleFailsWhenTempDirUnavailable(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "no-such-dir"))
 

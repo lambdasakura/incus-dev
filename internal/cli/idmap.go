@@ -9,20 +9,20 @@ import (
 	"strings"
 )
 
-// subuid/subgid の既定の位置。
+// Where subuid and subgid live by default.
 const (
 	subUIDPath = "/etc/subuid"
 	subGIDPath = "/etc/subgid"
 )
 
-// subIDRange は /etc/subuid, /etc/subgid の1エントリ。
+// subIDRange is one entry from /etc/subuid or /etc/subgid.
 type subIDRange struct {
 	Owner string
 	Start int64
 	Count int64
 }
 
-// parseSubIDs は subuid/subgid 形式（owner:start:count）を読み取る。
+// parseSubIDs reads the subuid/subgid format, owner:start:count.
 func parseSubIDs(r io.Reader) []subIDRange {
 	var out []subIDRange
 
@@ -49,7 +49,7 @@ func parseSubIDs(r io.Reader) []subIDRange {
 	return out
 }
 
-// allowsID は owner に id の使用が許可されているかを返す。
+// allowsID reports whether owner is permitted to use id.
 func allowsID(ranges []subIDRange, owner string, id int64) bool {
 	for _, r := range ranges {
 		if r.Owner != owner {
@@ -62,21 +62,21 @@ func allowsID(ranges []subIDRange, owner string, id int64) bool {
 	return false
 }
 
-// checkSubIDAllowed は raw.idmap による uid/gid の対応付けが
-// ホスト側で許可されているかを確認する。
+// checkSubIDAllowed verifies that the host permits mapping a uid and gid
+// through raw.idmap.
 //
-// 非特権コンテナでホストのuidを対応付けるには、incus daemon を動かす
-// root に対して当該IDの使用が許可されている必要がある。
-// 設定ファイルを読めない場合は判定できないため通す。
+// Mapping a host uid into an unprivileged container requires that root — which
+// runs the incus daemon — be permitted to use that ID. When the configuration
+// files cannot be read there is nothing to judge by, so it passes.
 func checkSubIDAllowed(uidPath, gidPath string, uid, gid int) error {
 	uidRanges, err := readSubIDs(uidPath)
 	if err != nil {
-		//nolint:nilerr // 設定ファイルを読めない環境では判定できないため通す
+		//nolint:nilerr // nothing to judge by when the file cannot be read, so pass
 		return nil
 	}
 	gidRanges, err := readSubIDs(gidPath)
 	if err != nil {
-		//nolint:nilerr // 同上
+		//nolint:nilerr // as above
 		return nil
 	}
 
@@ -101,7 +101,7 @@ func checkSubIDAllowed(uidPath, gidPath string, uid, gid int) error {
 }
 
 func readSubIDs(path string) ([]subIDRange, error) {
-	f, err := os.Open(path) //nolint:gosec // 読み取り先は固定の /etc/subuid, /etc/subgid
+	f, err := os.Open(path) //nolint:gosec // the paths are the fixed /etc/subuid and /etc/subgid
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func readSubIDs(path string) ([]subIDRange, error) {
 	return parseSubIDs(f), nil
 }
 
-// defaultIDMapCheck は既定のidmap事前検査。
+// defaultIDMapCheck is the default up-front idmap check.
 func defaultIDMapCheck(uid, gid int) error {
 	return checkSubIDAllowed(subUIDPath, subGIDPath, uid, gid)
 }

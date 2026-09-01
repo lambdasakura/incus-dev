@@ -16,7 +16,7 @@ import (
 	"github.com/lxc/incus/v6/shared/api"
 )
 
-// fakeConsole はホスト端末のfake。
+// fakeConsole is a fake of the host terminal.
 type fakeConsole struct {
 	width, height int
 	sizeErr       error
@@ -51,7 +51,7 @@ func (c *fakeConsole) Resized() (<-chan struct{}, func()) {
 	return c.resized, func() { c.stopped = true }
 }
 
-// 端末を伴う実行では、raw modeへ切り替えたうえでinteractiveなexecを要求する
+// Running with a terminal switches to raw mode and asks for an interactive exec.
 func TestAPIExecInteractive(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -69,26 +69,27 @@ func TestAPIExecInteractive(t *testing.T) {
 
 	req := f.lastExec
 	if !req.Interactive {
-		t.Error("Interactive = false, 端末を伴う実行として要求すること")
+		t.Error("Interactive = false, want it requested as a run with a terminal")
 	}
 	if req.Width != 80 || req.Height != 24 {
 		t.Errorf("size = %dx%d, want 80x24", req.Width, req.Height)
 	}
 	if !console.raw {
-		t.Error("raw modeへ切り替えていない")
+		t.Error("never switched to raw mode")
 	}
 	if !console.restored {
-		t.Error("端末を復元していない")
+		t.Error("never restored the terminal")
 	}
 	if !console.stopped {
-		t.Error("ウィンドウサイズ変更の購読を終えていない")
+		t.Error("never ended the window-size subscription")
 	}
 	if f.lastExecArgs.Control == nil {
-		t.Error("ウィンドウサイズ変更を送るハンドラが設定されていない")
+		t.Error("no handler was set to send window-size changes")
 	}
 }
 
-// 端末を復元しないまま抜けるとシェルが壊れるため、失敗しても必ず戻す
+// Leaving without restoring the terminal breaks the user's shell, so it is
+// restored even on failure.
 func TestAPIExecInteractiveRestoresOnError(t *testing.T) {
 	f := newFakeServer()
 	f.err["ExecInstance"] = errAPI
@@ -100,11 +101,11 @@ func TestAPIExecInteractiveRestoresOnError(t *testing.T) {
 		t.Fatalf("error = %v, want %v", err, errAPI)
 	}
 	if !console.restored {
-		t.Error("失敗時も端末を復元すること")
+		t.Error("want the terminal restored on failure too")
 	}
 }
 
-// raw modeへ切り替えられない場合は実行しない
+// It does not run when raw mode cannot be entered.
 func TestAPIExecInteractiveRawModeError(t *testing.T) {
 	f := newFakeServer()
 	console := newFakeConsole()
@@ -116,11 +117,11 @@ func TestAPIExecInteractiveRawModeError(t *testing.T) {
 		t.Fatalf("error = %v, want %v", err, errAPI)
 	}
 	if len(f.calls) != 0 {
-		t.Errorf("calls = %v, 端末を用意できないまま実行しないこと", f.calls)
+		t.Errorf("calls = %v, want nothing run without a usable terminal", f.calls)
 	}
 }
 
-// 端末サイズが分からない場合はIncus側の既定に任せる
+// When the terminal size is unknown, Incus's default is left to decide.
 func TestAPIExecInteractiveWithoutSize(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -133,11 +134,11 @@ func TestAPIExecInteractiveWithoutSize(t *testing.T) {
 		t.Fatalf("Exec() error = %v", err)
 	}
 	if f.lastExec.Width != 0 || f.lastExec.Height != 0 {
-		t.Errorf("size = %dx%d, 取得できない場合は指定しないこと", f.lastExec.Width, f.lastExec.Height)
+		t.Errorf("size = %dx%d, want nothing sent when it cannot be read", f.lastExec.Width, f.lastExec.Height)
 	}
 }
 
-// 端末を使わない実行では端末に触れない
+// A run without a terminal does not touch the terminal.
 func TestAPIExecDoesNotTouchConsole(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -149,15 +150,16 @@ func TestAPIExecDoesNotTouchConsole(t *testing.T) {
 		t.Fatalf("Exec() error = %v", err)
 	}
 	if console.raw {
-		t.Error("端末を伴わない実行でraw modeにしている")
+		t.Error("entered raw mode for a run without a terminal")
 	}
-	// 中断を伝えるため、端末を伴わない実行でも制御経路は開く
+	// The control channel opens even without a terminal, so an interruption can
+	// get through.
 	if f.lastExecArgs.Control == nil {
-		t.Error("制御ハンドラが設定されていない")
+		t.Error("no control handler was set")
 	}
 }
 
-// ウィンドウサイズの変更をIncusへ伝える
+// Window-size changes reach Incus.
 func TestControlSendsResize(t *testing.T) {
 	console := newFakeConsole()
 	resized := make(chan struct{}, 1)
@@ -168,7 +170,7 @@ func TestControlSendsResize(t *testing.T) {
 	send := func(v any) error {
 		sent = append(sent, v)
 		console.width, console.height = 100, 40
-		close(done) // 次のループで抜ける
+		close(done) // the next iteration exits
 		return nil
 	}
 
@@ -179,12 +181,12 @@ func TestControlSendsResize(t *testing.T) {
 		Args:    map[string]string{"width": "80", "height": "24"},
 	}}
 	if diff := cmp.Diff(want, sent); diff != "" {
-		t.Errorf("送信内容 mismatch (-want +got):\n%s", diff)
+		t.Errorf("sent mismatch (-want +got):\n%s", diff)
 	}
 }
 
-// 中断されたら、コンテナ内のプロセスへ終了を伝える。
-// 伝えないとパッケージ導入などが走り続け、次の実行と衝突する。
+// An interruption tells the process in the container to stop. Left alone, a
+// package installation keeps running and collides with the next run.
 func TestControlForwardsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -197,22 +199,22 @@ func TestControlForwardsCancellation(t *testing.T) {
 
 	want := []any{api.InstanceExecControl{Command: "signal", Signal: int(syscall.SIGTERM)}}
 	if diff := cmp.Diff(want, sent); diff != "" {
-		t.Errorf("送信内容 mismatch (-want +got):\n%s", diff)
+		t.Errorf("sent mismatch (-want +got):\n%s", diff)
 	}
 }
 
-// 実行が終わったらハンドラも終える
+// The handler ends when the run does.
 func TestControlStopsWhenExecFinishes(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
 
 	control{ctx: context.Background(), done: done}.handle(func(any) error {
-		t.Error("実行後に送信している")
+		t.Error("sent something after the run finished")
 		return nil
 	})
 }
 
-// 購読が終わってもハンドラは中断の監視を続ける
+// The handler keeps watching for an interruption after the subscription ends.
 func TestControlSurvivesClosedResize(t *testing.T) {
 	resized := make(chan struct{})
 	close(resized)
@@ -228,11 +230,11 @@ func TestControlSurvivesClosedResize(t *testing.T) {
 		})
 
 	if calls != 1 {
-		t.Errorf("送信回数 = %d, 中断だけを送ること", calls)
+		t.Errorf("sends = %d, want the interruption alone", calls)
 	}
 }
 
-// 送信できなくなったら黙って終える（execそのものは継続する）
+// It exits quietly once sending stops working; the exec itself carries on.
 func TestControlStopsOnSendError(t *testing.T) {
 	console := newFakeConsole()
 	resized := make(chan struct{}, 2)
@@ -247,11 +249,11 @@ func TestControlStopsOnSendError(t *testing.T) {
 		})
 
 	if calls != 1 {
-		t.Errorf("送信回数 = %d, 失敗したら繰り返さないこと", calls)
+		t.Errorf("sends = %d, want no retry after a failure", calls)
 	}
 }
 
-// サイズを取得できなければ送らない
+// Nothing is sent when the size cannot be read.
 func TestControlWithoutSize(t *testing.T) {
 	console := newFakeConsole()
 	console.sizeErr = errAPI
@@ -260,12 +262,12 @@ func TestControlWithoutSize(t *testing.T) {
 
 	control{ctx: context.Background(), done: make(chan struct{}), console: console, resized: resized}.handle(
 		func(any) error {
-			t.Error("サイズが分からないのに送信している")
+			t.Error("sent something despite not knowing the size")
 			return nil
 		})
 }
 
-// 端末でない入出力ではraw modeにできない
+// Raw mode is not possible on streams that are not a terminal.
 func TestOSConsoleRequiresTerminal(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -276,14 +278,14 @@ func TestOSConsoleRequiresTerminal(t *testing.T) {
 	console := &osConsole{In: r, Out: w}
 
 	if _, err := console.MakeRaw(); err == nil {
-		t.Error("パイプをraw modeにできてはいけない")
+		t.Error("a pipe must not be switchable to raw mode")
 	}
 	if _, _, err := console.Size(); err == nil {
-		t.Error("パイプの端末サイズは取得できない")
+		t.Error("a pipe has no terminal size to read")
 	}
 }
 
-// SIGWINCH を受け取ってウィンドウサイズ変更を通知する
+// SIGWINCH is turned into a window-size notification.
 func TestOSConsoleResized(t *testing.T) {
 	console := &osConsole{In: os.Stdin, Out: os.Stdout}
 
@@ -295,23 +297,23 @@ func TestOSConsoleResized(t *testing.T) {
 	select {
 	case <-resized:
 	case <-time.After(2 * time.Second):
-		t.Fatal("SIGWINCH が通知されない")
+		t.Fatal("SIGWINCH was never notified")
 	}
 
 	stop()
 
-	// 購読を終えるとチャネルが閉じ、送信側のループが終わること
+	// Ending the subscription closes the channel and ends the sending loop.
 	select {
 	case _, ok := <-resized:
 		if ok {
-			t.Error("停止後に通知が届いている")
+			t.Error("a notification arrived after stopping")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("停止してもチャネルが閉じない")
+		t.Fatal("the channel never closed after stopping")
 	}
 }
 
-// 制御用websocketへサイズを送り、終了時にcloseを送る
+// It sends the size over the control websocket, and a close at the end.
 func TestControlHandler(t *testing.T) {
 	type received struct {
 		control api.InstanceExecControl
@@ -349,7 +351,7 @@ func TestControlHandler(t *testing.T) {
 	resized := make(chan struct{}, 1)
 	resized <- struct{}{}
 
-	// 1件届いたらexecが終わった扱いにして、ハンドラを終えさせる
+	// Once one arrives, treat the exec as finished so the handler exits.
 	done := make(chan struct{})
 	first := make(chan received, 1)
 	go func() {
@@ -366,14 +368,14 @@ func TestControlHandler(t *testing.T) {
 		Args:    map[string]string{"width": "80", "height": "24"},
 	}
 	if diff := cmp.Diff(want, (<-first).control); diff != "" {
-		t.Errorf("送信内容 mismatch (-want +got):\n%s", diff)
+		t.Errorf("sent mismatch (-want +got):\n%s", diff)
 	}
 	if last := <-got; !last.closed {
-		t.Error("終了時にcloseを送っていない")
+		t.Error("no close was sent at the end")
 	}
 }
 
-// 端末を割り当てる場合、TERM を渡さないと vim / less などが動かない
+// With a terminal allocated, vim and less need TERM to be passed.
 func TestAPIExecInteractivePassesTerm(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -391,8 +393,8 @@ func TestAPIExecInteractivePassesTerm(t *testing.T) {
 	}
 }
 
-// 端末を伴わない実行では TERM を渡さない
-// （進捗バーなど、端末向けの出力を誘発しないため）
+// A run without a terminal does not get TERM, so nothing is tempted into
+// terminal-oriented output such as a progress bar.
 func TestAPIExecWithoutTTYOmitsTerm(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -404,11 +406,11 @@ func TestAPIExecWithoutTTYOmitsTerm(t *testing.T) {
 		t.Fatalf("Exec() error = %v", err)
 	}
 	if _, ok := f.lastExec.Environment["TERM"]; ok {
-		t.Errorf("environment = %v, TERM を渡さないこと", f.lastExec.Environment)
+		t.Errorf("environment = %v, want TERM not passed", f.lastExec.Environment)
 	}
 }
 
-// プロジェクトが TERM を指定した場合はそちらを尊重する
+// A TERM the project set wins.
 func TestAPIExecTermCanBeOverridden(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -423,6 +425,6 @@ func TestAPIExecTermCanBeOverridden(t *testing.T) {
 		t.Fatalf("Exec() error = %v", err)
 	}
 	if got := f.lastExec.Environment["TERM"]; got != "dumb" {
-		t.Errorf("TERM = %q, 明示指定を優先すること", got)
+		t.Errorf("TERM = %q, want the explicit setting to win", got)
 	}
 }

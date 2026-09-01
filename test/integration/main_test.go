@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration はIncus実機に対する統合テストを提供する。
+// Package integration holds the integration tests that run against a real Incus.
 //
 //	go test -tags integration ./test/integration/...
 package integration_test
@@ -16,13 +16,14 @@ import (
 )
 
 var (
-	// idevBin はテスト対象のバイナリパス。
+	// idevBin is the path of the binary under test.
 	idevBin string
-	// testImage は軽量な検証用イメージ。
+	// testImage is a lightweight image to test against.
 	testImage = envOr("IDEV_TEST_IMAGE", "images:alpine/3.21")
-	// ansibleImage は python3 を含むイメージ（ansibleステップの検証用）。
+	// ansibleImage includes python3, for testing the ansible steps.
 	ansibleImage = envOr("IDEV_TEST_ANSIBLE_IMAGE", "images:ubuntu/noble")
-	// bootstrapImage は python3 を含まないDebian系イメージ（既定bootstrapの検証用）。
+	// bootstrapImage is a Debian-family image without python3, for testing the
+	// default bootstrap.
 	bootstrapImage = envOr("IDEV_TEST_BOOTSTRAP_IMAGE", "images:debian/12")
 )
 
@@ -33,11 +34,11 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// skipReason はIncusが利用できない理由。空なら利用可能。
+// skipReason says why Incus is unavailable. Empty means it is available.
 var skipReason string
 
-// requireIncus はIncusが利用できない場合にテストをスキップする。
-// 実行されなかったことが結果から分かるよう、passではなくskipにする。
+// requireIncus skips the test when Incus is unavailable. It skips rather than
+// passes, so the result shows the test never ran.
 func requireIncus(t *testing.T) {
 	t.Helper()
 
@@ -48,9 +49,9 @@ func requireIncus(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	if _, err := exec.LookPath("incus"); err != nil {
-		skipReason = "incus コマンドが見つかりません"
+		skipReason = "the incus command was not found"
 	} else if out, err := exec.Command("incus", "info").CombinedOutput(); err != nil {
-		skipReason = fmt.Sprintf("Incus daemonへ接続できません: %v\n%s", err, out)
+		skipReason = fmt.Sprintf("cannot reach the Incus daemon: %v\n%s", err, out)
 	}
 	if skipReason != "" {
 		os.Exit(m.Run())
@@ -65,14 +66,14 @@ func TestMain(m *testing.M) {
 	idevBin = filepath.Join(dir, "idev")
 	build := exec.Command("go", "build", "-o", idevBin, "../../cmd/idev")
 	if out, err := build.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "ビルドに失敗しました: %v\n%s", err, out)
+		fmt.Fprintf(os.Stderr, "the build failed: %v\n%s", err, out)
 		os.Exit(1)
 	}
 
 	os.Exit(m.Run())
 }
 
-// fixture はテスト用のプロジェクトディレクトリ。
+// fixture is a project directory for a test.
 type fixture struct {
 	t        *testing.T
 	root     string
@@ -80,8 +81,8 @@ type fixture struct {
 	instance string
 }
 
-// newFixture は一意なプロジェクト名を持つ .incus-dev/dev.yml を作る。
-// devYAML 中の {{IMAGE}} と {{PROJECT}} は置換される。
+// newFixture creates a .incus-dev/dev.yml with a unique project name.
+// {{IMAGE}} and {{PROJECT}} in devYAML are substituted.
 func newFixture(t *testing.T, devYAML string) *fixture {
 	t.Helper()
 
@@ -107,19 +108,19 @@ func (f *fixture) cleanup() {
 	_ = exec.Command("incus", "delete", "--force", f.instance).Run()
 }
 
-// run は idev を実行し、結合された出力を返す。
+// run executes idev and returns its combined output.
 func (f *fixture) run(args ...string) (string, error) {
 	f.t.Helper()
 
 	cmd := exec.Command(idevBin, args...)
 	cmd.Dir = f.root
-	cmd.Env = os.Environ() // t.Setenv で設定した値を引き継ぐ
+	cmd.Env = os.Environ() // carry across whatever t.Setenv set
 
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// mustRun は idev の実行が成功することを要求する。
+// mustRun requires the idev run to succeed.
 func (f *fixture) mustRun(args ...string) string {
 	f.t.Helper()
 
@@ -130,7 +131,7 @@ func (f *fixture) mustRun(args ...string) string {
 	return out
 }
 
-// mustFail は idev の実行が失敗することを要求する。
+// mustFail requires the idev run to fail.
 func (f *fixture) mustFail(args ...string) string {
 	f.t.Helper()
 
@@ -141,7 +142,7 @@ func (f *fixture) mustFail(args ...string) string {
 	return out
 }
 
-// incusOut は incus コマンドの標準出力を返す。
+// incusOut returns the standard output of the incus command.
 func incusOut(t *testing.T, args ...string) string {
 	t.Helper()
 
@@ -167,11 +168,11 @@ func requireCommand(t *testing.T, name string) {
 	t.Helper()
 
 	if _, err := exec.LookPath(name); err != nil {
-		t.Skipf("%s が見つからないためスキップします", name)
+		t.Skipf("skipping: %s was not found", name)
 	}
 }
 
-// runIncus は incus コマンドを実行し、出力とエラーを返す。
+// runIncus executes the incus command and returns its output and error.
 func runIncus(args ...string) (string, error) {
 	out, err := exec.Command("incus", args...).CombinedOutput()
 	return string(out), err

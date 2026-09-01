@@ -19,7 +19,7 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
-// globalFlags は全コマンド共通のフラグ。
+// globalFlags are the flags every command shares.
 type globalFlags struct {
 	verbose      bool
 	directory    string
@@ -27,16 +27,16 @@ type globalFlags struct {
 	incusProject string
 }
 
-// defaultIncusProject は指定が無い場合に使うIncus project。
+// defaultIncusProject is the Incus project used when none was named.
 const defaultIncusProject = "default"
 
-// errAborted は確認を拒否したことを示す。
+// errAborted reports that the confirmation was declined.
 var errAborted = errors.New("aborted")
 
-// appFactory はコマンドが使う App を生成する。テストでは差し替える。
+// appFactory builds the App a command uses. Tests replace it.
 type appFactory func(*globalFlags) (*App, error)
 
-// NewRootCommand は idev のルートコマンドを構成する。
+// NewRootCommand builds the root command of idev.
 func NewRootCommand(version string) *cobra.Command {
 	return newRootCommand(version, newApp)
 }
@@ -76,9 +76,9 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	return root
 }
 
-// resolveTarget は操作対象のIncusを決める。
+// resolveTarget decides which Incus to operate on.
 //
-// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
+// The CLI wins for the Incus project, then dev.yml, then "default".
 func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 	project := g.incusProject
 	if project == "" {
@@ -90,7 +90,7 @@ func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 	return incus.Target{Remote: g.incusRemote, Project: project}
 }
 
-// newApp はproject探索と設定読み込みを行い、Appを構成する。
+// newApp discovers the project, loads the configuration and builds the App.
 func newApp(g *globalFlags) (*App, error) {
 	start := g.directory
 	if start == "" {
@@ -119,7 +119,7 @@ func newApp(g *globalFlags) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	// --verbose でIncusへの操作を追えるようにする。
+	// So --verbose can follow what is done to Incus.
 	client.Logger = log
 
 	return NewAppFor(AppOptions{
@@ -138,10 +138,10 @@ func newApp(g *globalFlags) (*App, error) {
 	})
 }
 
-// isTerminal はファイルが端末に接続されているかを返す。
+// isTerminal reports whether a file is attached to a terminal.
 //
-// 端末でない場合に擬似端末を割り当てると出力へCRが混入するため、
-// idev shell の判断に使う。
+// Allocating a pseudo-terminal when it is not puts carriage returns into the
+// output, so idev shell decides by this.
 func isTerminal(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
@@ -226,7 +226,8 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			return app.Shell(cmd.Context(), args)
 		},
 	}
-	// idev shell -- bash -lc "..." の -lc を idev のフラグと解釈させない。
+	// Keep idev from reading the -lc of idev shell -- bash -lc "..." as its own
+	// flag.
 	c.Flags().SetInterspersed(false)
 
 	return c
@@ -244,7 +245,7 @@ func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			return app.Exec(cmd.Context(), args)
 		},
 	}
-	// idev exec -- ls -l の -l を idev のフラグと解釈させない。
+	// Keep idev from reading the -l of idev exec -- ls -l as its own flag.
 	c.Flags().SetInterspersed(false)
 
 	return c
@@ -412,11 +413,12 @@ func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	}
 }
 
-// confirm は破壊操作の確認を求める。
+// confirm asks for confirmation before a destructive operation.
 func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	_, _ = fmt.Fprintf(out, "%s [y/N]: ", prompt)
 
-	// EOF でも、読み取れた内容があれば回答として扱う（末尾改行なしの入力）。
+	// Even at EOF, whatever was read counts as the answer, so input without a
+	// trailing newline works.
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && line == "" {
 		return false
@@ -430,17 +432,18 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	}
 }
 
-// Execute はルートコマンドを実行する。
+// Execute runs the root command.
 func Execute(ctx context.Context, version string, args []string) error {
 	root := NewRootCommand(version)
 	root.SetArgs(args)
 	return root.ExecuteContext(ctx)
 }
 
-// Report はエラーを出力し、プロセスの終了コードを返す。
+// Report prints the error and returns the process exit code.
 //
-// コンテナ内コマンドが異常終了しただけの場合は、その終了コードを返し、
-// devkit自身のエラーとしては表示しない（出力は既に中継済みであるため）。
+// A command inside the container that merely exited non-zero has its exit code
+// returned without being shown as devkit's own error: its output was already
+// streamed.
 func Report(w io.Writer, err error) int {
 	if err == nil {
 		return 0

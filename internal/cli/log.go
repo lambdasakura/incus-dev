@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// handler は "[idev] メッセージ" 形式で出力する slog.Handler。
+// handler is a slog.Handler that prints "[idev] message".
 type handler struct {
 	w     io.Writer
 	level slog.Level

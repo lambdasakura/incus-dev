@@ -1,4 +1,5 @@
-// Package cli はコマンド定義と、Incus操作・ステップ実行のオーケストレーションを担当する。
+// Package cli defines the commands and orchestrates the Incus operations and
+// step execution behind them.
 package cli
 
 import (
@@ -20,45 +21,47 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
-// AppOptions は App の構成。
+// AppOptions configures an App.
 type AppOptions struct {
 	Config *config.Config
 	Client incus.Client
 	Runner runner.Runner
-	// In は shell へ渡す標準入力。
+	// In is the standard input handed to the shell.
 	In io.Reader
-	// Out は結果の出力先（status など）。
+	// Out is where results go, such as the output of status.
 	Out io.Writer
-	// ErrOut はログとステップ出力の出力先。
+	// ErrOut is where logs and step output go.
 	ErrOut  io.Writer
 	Verbose bool
-	// Interactive は標準入出力が端末に接続されているか。
-	// idev shell で擬似端末を割り当てるかの判断に使う。
+	// Interactive reports whether the standard streams are attached to a
+	// terminal. idev shell decides whether to allocate a pseudo-terminal by it.
 	Interactive bool
-	// Term はホスト端末の種類（TERM）。擬似端末を割り当てる際にコンテナへ渡す。
+	// Term is the host terminal type (TERM), passed to the container whenever a
+	// pseudo-terminal is allocated.
 	Term string
 
 	Remote       string
 	IncusProject string
 
-	// CheckIDMap は workspace.idmap: auto の事前検査。nilの場合は既定の検査を使う。
+	// CheckIDMap is the up-front check for workspace.idmap: auto. nil uses the
+	// default check.
 	CheckIDMap func(uid, gid int) error
-	// Host はworkspaceの対応付けに使うホスト側のID。
-	// nilの場合は実行ユーザーのものを使う。
+	// Host holds the host-side IDs used to map the workspace. nil uses the
+	// invoking user's.
 	Host *HostIDs
-	// Branch は project.scope: branch のときに現在のブランチ名を返す。
+	// Branch returns the current branch name, for project.scope: branch.
 	Branch branchFunc
-	// LookupEnv は秘密情報をホストの環境変数から取り込む際に使う。
-	// nilの場合は os.LookupEnv。
+	// LookupEnv reads secrets from host environment variables. nil uses
+	// os.LookupEnv.
 	LookupEnv func(string) (string, bool)
 }
 
-// HostIDs はホスト側のuid/gid。
+// HostIDs are the host-side uid and gid.
 type HostIDs struct {
 	UID, GID int
 }
 
-// App はコマンドの実処理を保持する。
+// App holds what the commands actually do.
 type App struct {
 	cfg         *config.Config
 	client      incus.Client
@@ -79,20 +82,22 @@ type App struct {
 	lookupEnv  func(string) (string, bool)
 }
 
-// NewApp は App を構成する。
+// NewApp builds an App.
 //
-// instance名の決定に失敗する場合（project.scope: branch でGitが使えないなど）は
-// NewAppFor を使う。
+// Use NewAppFor where deriving the instance name can fail, such as
+// project.scope: branch without a usable Git.
 func NewApp(opt AppOptions) *App {
 	app, err := NewAppFor(opt)
 	if err != nil {
-		// 既定のscopeでは失敗しない。テストや既定構成のための簡便な入口。
+		// The default scope cannot fail. This is the convenient entry point for
+		// tests and default configurations.
 		panic(err)
 	}
 	return app
 }
 
-// NewAppFor は App を構成する。instance名の決定に失敗した場合はエラーを返す。
+// NewAppFor builds an App, returning an error when the instance name cannot be
+// derived.
 func NewAppFor(opt AppOptions) (*App, error) {
 	out := opt.Out
 	if out == nil {
@@ -149,7 +154,7 @@ func NewAppFor(opt AppOptions) (*App, error) {
 	}, nil
 }
 
-// InstanceName は対象instance名を返す。
+// InstanceName returns the instance being operated on.
 func (a *App) InstanceName() string { return a.instance }
 
 func (a *App) env() (provision.Env, error) {
@@ -171,18 +176,19 @@ func (a *App) env() (provision.Env, error) {
 	}, nil
 }
 
-// UpOptions は idev up の挙動。
+// UpOptions controls how idev up behaves.
 type UpOptions struct {
-	// Restart が真の場合、反映に再起動が必要な変更があれば再起動する。
+	// Restart restarts the instance when a change needs it to take effect.
 	Restart bool
 }
 
-// Up はinstanceを用意し、bootstrapとprovisionを実行する（仕様 04-cli.md 4.1）。
+// Up prepares the instance, then runs bootstrap and provisioning
+// (spec 04-cli.md 4.1).
 func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
-	// instanceを作る前に、ホスト側の前提をすべて確認する。
-	// 途中で失敗して中途半端なinstanceが残ることを避ける。
+	// Check every host-side prerequisite before creating anything, so a
+	// failure part way through does not leave a half-built instance.
 	plan, err := a.idmapPlan()
 	if err != nil {
 		return err
@@ -218,7 +224,7 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, plan)); err != nil {
 			return err
 		}
-		// deviceは作成時に設定済みなので、再適用は不要。
+		// The devices were set at creation time, so there is nothing to re-apply.
 		created = true
 	default:
 		return err
@@ -247,12 +253,11 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	return nil
 }
 
-// Provision はinstanceを作り直さず、bootstrapとprovisionのみ再実行する
-// （仕様 04-cli.md 4.2）。
-//
-// sel が指定されていれば、provisionの一部だけを実行する。
+// Provision re-runs bootstrap and provisioning without recreating the instance
+// (spec 04-cli.md 4.2), or only the part of provisioning sel names.
 func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
-	// 解決できない指定や、揃っていない前提は、instanceに触れる前に弾く。
+	// Reject a selection that cannot be resolved, and unmet prerequisites,
+	// before touching the instance.
 	if _, err := provision.Select(a.cfg.Provision, sel); err != nil {
 		return err
 	}
@@ -270,8 +275,8 @@ func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
 	return a.runProvisioning(ctx, env, sel)
 }
 
-// ListSteps はprovisionステップの一覧を表示する。
-// --step / --from で指定できる名前を確認するために使う。
+// ListSteps prints the provisioning steps, so you can see the names --step and
+// --from accept.
 func (a *App) ListSteps() error {
 	if len(a.cfg.Provision) == 0 {
 		_, err := fmt.Fprintln(a.out, "no provision steps declared")
@@ -287,7 +292,7 @@ func (a *App) ListSteps() error {
 	return nil
 }
 
-// stepKind はステップの種別を返す。
+// stepKind returns a step's kind.
 func stepKind(step config.Step) string {
 	switch {
 	case step.Ansible != nil:
@@ -299,16 +304,17 @@ func stepKind(step config.Step) string {
 	}
 }
 
-// DestroyOptions は idev destroy の挙動。
+// DestroyOptions controls how idev destroy behaves.
 type DestroyOptions struct {
-	// Volumes が真の場合、永続ボリュームも削除する。
+	// Volumes also deletes the persistent volumes.
 	Volumes bool
 }
 
-// Destroy はinstanceを削除する。ホスト側のソースには触れない。
+// Destroy deletes the instance, leaving the sources on the host alone.
 //
-// 永続ボリュームは既定で残す。instanceを作り直しても残すためのものであり、
-// 削除するかは利用者が明示的に決める（仕様 04-cli.md 4.5）。
+// Persistent volumes are kept by default: the point of them is to survive a
+// recreated instance, so deleting them is the user's explicit call
+// (spec 04-cli.md 4.5).
 func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
@@ -331,7 +337,7 @@ func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
 	return nil
 }
 
-// ensureVolumes は宣言された永続ボリュームを用意する。
+// ensureVolumes creates the declared persistent volumes.
 func (a *App) ensureVolumes(ctx context.Context) error {
 	for _, key := range slices.Sorted(maps.Keys(a.cfg.Volumes)) {
 		vol := a.cfg.Volumes[key]
@@ -358,7 +364,7 @@ func (a *App) ensureVolumes(ctx context.Context) error {
 	return nil
 }
 
-// deleteVolumes は宣言された永続ボリュームを削除する。
+// deleteVolumes deletes the declared persistent volumes.
 func (a *App) deleteVolumes(ctx context.Context) error {
 	for _, key := range slices.Sorted(maps.Keys(a.cfg.Volumes)) {
 		vol := a.cfg.Volumes[key]
@@ -380,12 +386,13 @@ func (a *App) deleteVolumes(ctx context.Context) error {
 	return nil
 }
 
-// Rebuild はinstanceを破棄して作り直す。
+// Rebuild destroys the instance and creates it again.
 func (a *App) Rebuild(ctx context.Context) error {
 	_, err := a.client.Instance(ctx, a.instance)
 	switch {
 	case err == nil:
-		// rebuildでは永続ボリュームを残す。作り直しても残すためのものなので。
+		// rebuild keeps the persistent volumes, since surviving a rebuild is
+		// exactly what they are for.
 		if err := a.Destroy(ctx, DestroyOptions{}); err != nil {
 			return err
 		}
@@ -395,14 +402,14 @@ func (a *App) Rebuild(ctx context.Context) error {
 	return a.Up(ctx, UpOptions{})
 }
 
-// Shell はコンテナ内でinteractive shell（または指定コマンド）を実行する。
+// Shell runs an interactive shell, or a given command, inside the container.
 func (a *App) Shell(ctx context.Context, argv []string) error {
 	return a.execInContainer(ctx, argv, a.interactive)
 }
 
-// Exec はコンテナ内でコマンドを実行する。端末は割り当てない。
+// Exec runs a command inside the container without allocating a terminal.
 //
-// スクリプトやCIから使うことを想定し、shellと違って対話にならない。
+// It is meant for scripts and CI, and unlike shell it is never interactive.
 func (a *App) Exec(ctx context.Context, argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("exec requires a command; use 'idev shell' for an interactive shell")
@@ -410,7 +417,7 @@ func (a *App) Exec(ctx context.Context, argv []string) error {
 	return a.execInContainer(ctx, argv, false)
 }
 
-// execInContainer はコンテナ内でコマンドを実行する。
+// execInContainer runs a command inside the container.
 func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) error {
 	if _, err := a.managedInstance(ctx); err != nil {
 		return err
@@ -428,8 +435,8 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 	opt := incus.ExecOptions{
 		Cwd:  sh.Cwd,
 		User: user,
-		// 端末に接続されていない場合に擬似端末を割り当てると、
-		// 出力へCRが混入しパイプやリダイレクトが壊れる。
+		// Allocating a pseudo-terminal when nothing is attached to one puts
+		// carriage returns into the output and breaks pipes and redirects.
 		TTY:    tty,
 		Term:   a.term,
 		Stdin:  a.in,
@@ -439,8 +446,8 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 
 	code, err := a.client.Exec(ctx, a.instance, argv, opt)
 	if err != nil {
-		// コマンドが異常終了しただけの場合は、その終了コードを伝播させる。
-		// devkit自身のエラーとしては扱わない。
+		// A command that merely exited non-zero has its exit code propagated;
+		// it is not devkit's own error.
 		var exitErr *runner.ExitError
 		if errors.As(err, &exitErr) {
 			return &ExitCodeError{Code: exitErr.ExitCode}
@@ -453,10 +460,11 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 	return nil
 }
 
-// asUser は指定ユーザーで実行するためのargvと、Incusへ渡すユーザー指定を返す。
+// asUser returns the argv that runs as the given user, and the user to pass to
+// Incus.
 //
-// Incusのexecはuidしか受け付けないため、ユーザー名の場合は
-// コンテナ内で su を使って切り替える（run ステップと同じ扱い）。
+// The Incus exec API only accepts a uid, so a user name is switched to with su
+// inside the container, exactly as a run step does it.
 func asUser(argv []string, sh config.Shell) (out []string, user string) {
 	if sh.User == "" {
 		return argv, ""
@@ -468,7 +476,7 @@ func asUser(argv []string, sh config.Shell) (out []string, user string) {
 	return []string{"su", "-s", sh.Command, sh.User, "-c", strings.Join(argv, " ")}, ""
 }
 
-// statusReport は status の出力内容。
+// statusReport is what status prints.
 type statusReport struct {
 	Project      string            `json:"project"`
 	Instance     string            `json:"instance"`
@@ -487,7 +495,7 @@ type statusReport struct {
 	IncusProject string            `json:"incus_project"`
 }
 
-// Status は対象instanceの状態を表示する。
+// Status prints the state of the instance.
 func (a *App) Status(ctx context.Context, asJSON bool) error {
 	ws := a.cfg.WorkspaceOrDefault()
 	report := statusReport{
@@ -561,20 +569,20 @@ func (a *App) printStatus(r statusReport) error {
 	return nil
 }
 
-// Validate は設定が妥当であることを表示する。読み込み時点で検証済み。
+// Validate reports that the configuration is valid. Loading already checked it.
 func (a *App) Validate() error {
 	_, err := fmt.Fprintf(a.out, "configuration is valid\nProject:    %s\nInstance:   %s\nProvision:  %d step(s)\n",
 		a.cfg.Project.Name, a.instance, len(a.cfg.Provision))
 	return err
 }
 
-// reapplyInstance は既存instanceへ宣言内容を再適用する。
+// reapplyInstance re-applies what was declared to an existing instance.
 func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan, opt UpOptions) error {
 	desired := desiredConfig(a.cfg, plan)
-	// 適用前の状態を控える。適用後は差分が分からなくなるため。
+	// Keep the state from before applying; afterwards the difference is gone.
 	before := maps.Clone(inst.Config)
 
-	// 宣言から消えた、devkit適用済みのキーとdeviceを取り消す。
+	// Undo the devkit-applied keys and devices that the declaration dropped.
 	stale := staleConfigKeys(inst.Config, desired, plan)
 	if len(stale) > 0 {
 		a.log.Info("Removing config no longer declared: " + strings.Join(stale, ", "))
@@ -595,10 +603,11 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 	return a.settleRestart(ctx, inst.IsRunning(), before, desired, stale, opt)
 }
 
-// settleRestart は再起動が必要な変更に対処する（仕様 05-incus.md 5.4.5）。
+// settleRestart deals with changes that need a restart (spec 05-incus.md
+// 5.4.5).
 //
-// 既定では警告に留める。利用者の作業中プロセスを予期せず止めないため、
-// 再起動は明示的に指示された場合のみ行う。
+// By default it only warns. Restarting happens only when asked for explicitly,
+// so nothing the user was running is stopped unexpectedly.
 func (a *App) settleRestart(ctx context.Context, running bool, before, desired map[string]string, unset []string, opt UpOptions) error {
 	changed := restartRequiredChanges(running, before, desired, unset)
 	if len(changed) == 0 {
@@ -619,16 +628,17 @@ func (a *App) settleRestart(ctx context.Context, running bool, before, desired m
 	return a.client.StartInstance(ctx, a.instance)
 }
 
-// restartRequiredKeys は変更に再起動を要するconfigキー。
+// restartRequiredKeys are the config keys whose changes need a restart.
 //
-// limits.* は含めない。コンテナでは増減とも実行中に反映されるためである
-// （実機で確認済み。VMは対象外なので考慮しない）。
+// limits.* is not among them: in a container both increases and decreases take
+// effect while it runs (verified on real hardware; VMs are out of scope).
 var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
 
-// restartRequiredChanges は反映に再起動が必要な変更を返す。
+// restartRequiredChanges returns the changes that need a restart to take
+// effect.
 //
-// devkitが実際に変更・取り消したキーのみを対象とする。
-// 触れていないキーを含めると、何もしていないのに警告が出続けてしまう。
+// Only keys devkit actually changed or unset count. Including untouched keys
+// would warn on every run even when nothing happened.
 func restartRequiredChanges(running bool, before, desired map[string]string, unset []string) []string {
 	if !running {
 		return nil
@@ -650,12 +660,12 @@ func restartRequiredChanges(running bool, before, desired map[string]string, uns
 	return slices.Compact(changed)
 }
 
-// idmapPlan は適用するidmap方針を解決する。
+// idmapPlan resolves the idmap strategy to apply.
 func (a *App) idmapPlan() (idmapPlan, error) {
 	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap)
 }
 
-// checkProfiles は指定Profileの存在を確認する。devkitはProfileを作成しない。
+// checkProfiles verifies the named profiles exist. devkit never creates one.
 func (a *App) checkProfiles(ctx context.Context) error {
 	var missing []string
 	for _, name := range a.cfg.ProfileNames() {
@@ -675,7 +685,7 @@ func (a *App) checkProfiles(ctx context.Context) error {
 		strings.Join(missing, ", "))
 }
 
-// managedInstance は対象instanceを取得し、devkit管理下であることを確認する。
+// managedInstance fetches the instance and confirms devkit manages it.
 func (a *App) managedInstance(ctx context.Context) (*incus.Instance, error) {
 	inst, err := a.client.Instance(ctx, a.instance)
 	if errors.Is(err, incus.ErrInstanceNotFound) {
@@ -696,7 +706,7 @@ func (a *App) unmanagedError(inst *incus.Instance) error {
 		inst.Name, a.cfg.Project.Name)
 }
 
-// ensureRunning はinstanceを起動し、コマンドを実行できるまで待つ。
+// ensureRunning starts the instance and waits until commands can run.
 func (a *App) ensureRunning(ctx context.Context) error {
 	inst, err := a.client.Instance(ctx, a.instance)
 	if err != nil {
@@ -710,18 +720,19 @@ func (a *App) ensureRunning(ctx context.Context) error {
 	}
 	err = a.client.WaitReady(ctx, a.instance, incus.WaitOptions{})
 	if errors.Is(err, incus.ErrNetworkNotReady) {
-		// アドレスが現れない構成もありうるため、ここでは止めない。
-		// ネットワークを使うステップが失敗したときの手がかりとして残す。
+		// Some configurations never show an address, so do not stop here.
+		// Leave it as a clue for when a step that needs the network fails.
 		a.log.Warn(err.Error() + "; steps that need network access may fail")
 		return nil
 	}
 	return err
 }
 
-// runProvisioning はbootstrapとprovisionを順に実行する（仕様 06-provisioning.md 6.1）。
+// runProvisioning runs bootstrap and then provisioning (spec 06-provisioning.md
+// 6.1).
 //
-// bootstrapは一部実行のときも省略しない。provisionerを動かすための
-// 準備であり、軽量かつ冪等であることを前提としているため。
+// bootstrap is not skipped for a partial run: it is what makes the provisioner
+// work at all, and it is assumed to be cheap and idempotent.
 func (a *App) runProvisioning(ctx context.Context, env provision.Env, sel provision.Selection) error {
 	if err := a.exec.Bootstrap(ctx, a.cfg, env); err != nil {
 		return err
@@ -729,12 +740,12 @@ func (a *App) runProvisioning(ctx context.Context, env provision.Env, sel provis
 	return a.exec.Provision(ctx, a.cfg, env, sel)
 }
 
-// ExitCodeError は終了コードをそのまま伝播させたい場合に使う。
+// ExitCodeError propagates an exit code as it is.
 type ExitCodeError struct{ Code int }
 
 func (e *ExitCodeError) Error() string { return fmt.Sprintf("exited with code %d", e.Code) }
 
-// deviceSummary は device を「名前(型)」の一覧にする。
+// deviceSummary renders devices as a list of "name(type)".
 func deviceSummary(devices map[string]incus.Device) []string {
 	out := make([]string, 0, len(devices))
 	for _, name := range slices.Sorted(maps.Keys(devices)) {
@@ -743,7 +754,7 @@ func deviceSummary(devices map[string]incus.Device) []string {
 	return out
 }
 
-// incusTarget は操作対象のremoteとprojectを示す。
+// incusTarget names the remote and project being operated on.
 func incusTarget(remote, project string) string {
 	if remote == "" && project == "" {
 		return ""
@@ -758,7 +769,7 @@ func orDefault(v, fallback string) string {
 	return v
 }
 
-// limitsOf は表示対象のconfigキーを抽出する。
+// limitsOf picks out the config keys worth displaying.
 func limitsOf(instanceConfig map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range instanceConfig {

@@ -1,18 +1,18 @@
-// Package config は .incus-dev/dev.yml の読み込みとvalidationを担当する。
+// Package config loads and validates .incus-dev/dev.yml.
 //
-// このパッケージはIncus操作もステップ実行も行わない（仕様 07-implementation.md 7.1）。
+// It neither talks to Incus nor runs steps (spec 07-implementation.md 7.1).
 package config
 
 import "path/filepath"
 
-// SchemaVersion はこのCLIが解釈できる dev.yml のschema version。
+// SchemaVersion is the dev.yml schema version this CLI understands.
 const SchemaVersion = 1
 
-// RuntimeVersion はこのCLIが提供するruntimeの互換バージョン。
-// dev.yml の runtime.version との互換判定に使用する（仕様 03-configuration.md 3.4）。
+// RuntimeVersion is the runtime compatibility version this CLI provides.
+// It is checked against runtime.version in dev.yml (spec 03-configuration.md 3.4).
 const RuntimeVersion = "1.0"
 
-// 既定値（仕様 03-configuration.md 3.6.3 / 3.7）
+// Defaults (spec 03-configuration.md 3.6.3 and 3.7).
 const (
 	DefaultWorkspaceSource = "."
 	DefaultWorkspaceTarget = "/workspace"
@@ -22,75 +22,78 @@ const (
 	DefaultStoragePool     = "default"
 )
 
-// ReservedConfigPrefix はdevkitが管理用に予約するinstance configの名前空間。
+// ReservedConfigPrefix is the instance-config namespace devkit reserves for
+// its own bookkeeping.
 const ReservedConfigPrefix = "user.incus-devkit."
 
-// WorkspaceDeviceName はworkspace用のdisk deviceに使う予約名。
+// WorkspaceDeviceName is the reserved name of the workspace disk device.
 const WorkspaceDeviceName = "workspace"
 
-// IDMapMode はworkspaceのuid/gid対応付け方式。
+// IDMapMode is how uids and gids are mapped for the workspace.
 type IDMapMode string
 
 const (
-	// IDMapAuto は環境に応じて raw / shift を選ぶ（既定）。
+	// IDMapAuto picks raw or shift depending on the host (the default).
 	IDMapAuto IDMapMode = "auto"
-	// IDMapRaw は raw.idmap でホストのuid/gidをコンテナのrootへ対応付ける。
-	// ホスト側で root:<uid>:1 の許可が必要。
+	// IDMapRaw maps the host uid/gid onto root in the container with
+	// raw.idmap. The host must permit it with root:<uid>:1.
 	IDMapRaw IDMapMode = "raw"
-	// IDMapShift は disk device の shift でidmapped mountを使う。
-	// 追加のホスト設定を要さないが、コンテナが作ったファイルはホスト側でrootの所有となる。
+	// IDMapShift uses an idmapped mount, through the disk device's shift.
+	// It needs no extra host setup, but files the container creates are owned
+	// by root on the host.
 	IDMapShift IDMapMode = "shift"
-	// IDMapNone は何も設定しない。
+	// IDMapNone sets nothing up.
 	IDMapNone IDMapMode = "none"
 )
 
-// Config は dev.yml 全体を表す。
+// Config is the whole of dev.yml.
 type Config struct {
 	Schema    int        `json:"schema"`
 	Runtime   *Runtime   `json:"runtime,omitempty"`
 	Project   Project    `json:"project"`
 	Instance  Instance   `json:"instance"`
 	Workspace *Workspace `json:"workspace,omitempty"`
-	// Bootstrap は省略(nil)と明示的な空リストを区別する（仕様 3.8）。
+	// Bootstrap distinguishes omitted (nil) from an explicit empty list
+	// (spec 3.8).
 	Bootstrap *[]Step `json:"bootstrap,omitempty"`
 	Provision []Step  `json:"provision,omitempty"`
 	Shell     *Shell  `json:"shell,omitempty"`
 	Incus     *Incus  `json:"incus,omitempty"`
-	// Volumes はinstanceを作り直しても残るデータ領域。
+	// Volumes hold data that survives a recreated instance.
 	Volumes map[string]Volume `json:"volumes,omitempty"`
-	// Secrets はホスト側から注入する秘密情報。
+	// Secrets are values injected from the host.
 	Secrets map[string]Secret `json:"secrets,omitempty"`
 
-	// Root はプロジェクトrootの絶対パス。Load時に設定される。
+	// Root is the absolute path of the project root, set by Load.
 	Root string `json:"-"`
 }
 
-// Runtime は要求するruntime互換バージョン。
+// Runtime is the runtime compatibility version the project requires.
 type Runtime struct {
 	Version string `json:"version"`
 }
 
-// Scope はinstance名の区別の仕方。
+// Scope is how instance names are distinguished.
 type Scope string
 
 const (
-	// ScopeName はプロジェクト名のみを使う（既定）。
+	// ScopeName uses the project name alone (the default).
 	ScopeName Scope = "name"
-	// ScopePath はチェックアウト先のパスで区別する。
+	// ScopePath distinguishes by the path of the checkout.
 	ScopePath Scope = "path"
-	// ScopeBranch は現在のGitブランチで区別する。
+	// ScopeBranch distinguishes by the current Git branch.
 	ScopeBranch Scope = "branch"
 )
 
-// Project はプロジェクト情報。
+// Project describes the project.
 type Project struct {
 	Name string `json:"name"`
-	// Scope は同一マシンで複数のチェックアウトを扱う際の区別の仕方。
-	// 既定は name（従来どおりプロジェクト名のみ）。
+	// Scope is how several checkouts on one machine are told apart.
+	// The default is name: the project name alone, as before.
 	Scope Scope `json:"scope,omitempty"`
 }
 
-// ScopeOrDefault は区別の仕方を返す。
+// ScopeOrDefault returns how names are distinguished.
 func (p Project) ScopeOrDefault() Scope {
 	if p.Scope == "" {
 		return ScopeName
@@ -98,17 +101,19 @@ func (p Project) ScopeOrDefault() Scope {
 	return p.Scope
 }
 
-// Instance はIncus instanceの宣言。config / devices はIncusへの素通しである。
+// Instance declares the Incus instance. config and devices pass straight
+// through to Incus.
 type Instance struct {
 	Image string `json:"image"`
 	Type  string `json:"type,omitempty"`
-	// Profiles は省略(nil)と明示的な空リストを区別する（仕様 3.6.3）。
+	// Profiles distinguishes omitted (nil) from an explicit empty list
+	// (spec 3.6.3).
 	Profiles *[]string            `json:"profiles,omitempty"`
 	Config   StringMap            `json:"config,omitempty"`
 	Devices  map[string]StringMap `json:"devices,omitempty"`
 }
 
-// TypeOrDefault はinstance種別を返す（既定 container）。
+// TypeOrDefault returns the instance type, defaulting to container.
 func (i Instance) TypeOrDefault() string {
 	if i.Type == "" {
 		return DefaultInstanceType
@@ -116,20 +121,20 @@ func (i Instance) TypeOrDefault() string {
 	return i.Type
 }
 
-// Volume は永続ボリューム（仕様 03-configuration.md 3.16）。
+// Volume is a persistent volume (spec 03-configuration.md 3.16).
 //
-// instanceを作り直しても残るため、ビルドキャッシュや
-// データベースの実体などを置く。
+// It survives a recreated instance, so it suits build caches and database
+// files.
 type Volume struct {
-	// Path はコンテナ内のマウント先。
+	// Path is the mount point inside the container.
 	Path string `json:"path"`
-	// Pool はIncusのstorage pool。既定は default。
+	// Pool is the Incus storage pool, defaulting to "default".
 	Pool string `json:"pool,omitempty"`
-	// Size は容量。省略時はpoolの既定に従う。
+	// Size is the capacity. Omitted, the pool's default applies.
 	Size string `json:"size,omitempty"`
 }
 
-// PoolOrDefault はstorage poolを返す。
+// PoolOrDefault returns the storage pool.
 func (v Volume) PoolOrDefault() string {
 	if v.Pool == "" {
 		return DefaultStoragePool
@@ -137,20 +142,20 @@ func (v Volume) PoolOrDefault() string {
 	return v.Pool
 }
 
-// Secret はホスト側から注入する値（仕様 03-configuration.md 3.12）。
+// Secret is a value injected from the host (spec 03-configuration.md 3.12).
 //
-// dev.yml はGitへcommitされる前提のため、値そのものは書かない。
-// ホストの環境変数かファイルから取り込む。
+// dev.yml is meant to be committed, so the value itself is never written in
+// it; it comes from a host environment variable or file.
 type Secret struct {
-	// Env はホスト側の環境変数名。
+	// Env is the name of a host environment variable.
 	Env string `json:"env,omitempty"`
-	// File はホスト側のファイルパス。内容を値とする（前後の空白は除く）。
+	// File is a path on the host. Its contents, trimmed, become the value.
 	File string `json:"file,omitempty"`
-	// Optional が真の場合、取得できなくてもエラーにしない。
+	// Optional stops a missing value from being an error.
 	Optional bool `json:"optional,omitempty"`
 }
 
-// Source は取得元の説明を返す。
+// Source describes where the value comes from.
 func (s Secret) Source() string {
 	if s.Env != "" {
 		return "environment variable " + s.Env
@@ -158,23 +163,24 @@ func (s Secret) Source() string {
 	return "file " + s.File
 }
 
-// Shell は idev shell / idev exec の既定。
+// Shell holds the defaults for idev shell and idev exec.
 type Shell struct {
-	// User は実行ユーザー。空ならinstanceの既定（root）。
+	// User is the user to run as. Empty means the instance default (root).
 	User string `json:"user,omitempty"`
-	// Command は起動するシェル。
+	// Command is the shell to start.
 	Command string `json:"command,omitempty"`
-	// Cwd は作業ディレクトリ。空なら workspace.target。
+	// Cwd is the working directory. Empty means workspace.target.
 	Cwd string `json:"cwd,omitempty"`
 }
 
-// Incus はIncus側の操作対象。
+// Incus selects what to operate on in Incus.
 type Incus struct {
-	// Project はIncus project名。空ならCLIの指定（既定 default）。
+	// Project is the Incus project name. Empty means whatever the CLI says,
+	// which defaults to "default".
 	Project string `json:"project,omitempty"`
 }
 
-// ShellOrDefault は既定値を補ったshell設定を返す。
+// ShellOrDefault returns the shell settings with defaults filled in.
 func (c *Config) ShellOrDefault() Shell {
 	sh := Shell{Command: DefaultShell, Cwd: c.WorkspaceOrDefault().Target}
 	if c.Shell == nil {
@@ -192,7 +198,8 @@ func (c *Config) ShellOrDefault() Shell {
 	return sh
 }
 
-// IncusProject は dev.yml で指定されたIncus projectを返す。未指定なら空。
+// IncusProject returns the Incus project named in dev.yml, or the empty
+// string when it names none.
 func (c *Config) IncusProject() string {
 	if c.Incus == nil {
 		return ""
@@ -200,14 +207,14 @@ func (c *Config) IncusProject() string {
 	return c.Incus.Project
 }
 
-// Workspace はworking treeのマウント宣言。
+// Workspace declares how the working tree is mounted.
 type Workspace struct {
 	Source string    `json:"source,omitempty"`
 	Target string    `json:"target,omitempty"`
 	IDMap  IDMapMode `json:"idmap,omitempty"`
 }
 
-// WorkspaceOrDefault は既定値を補ったworkspace宣言を返す。
+// WorkspaceOrDefault returns the workspace declaration with defaults filled in.
 func (c *Config) WorkspaceOrDefault() Workspace {
 	ws := Workspace{
 		Source: DefaultWorkspaceSource,
@@ -229,12 +236,12 @@ func (c *Config) WorkspaceOrDefault() Workspace {
 	return ws
 }
 
-// WorkspaceSourcePath はworkspace sourceの絶対パスを返す。
+// WorkspaceSourcePath returns the absolute path of the workspace source.
 func (c *Config) WorkspaceSourcePath() string {
 	return c.ResolvePath(c.WorkspaceOrDefault().Source)
 }
 
-// ResolvePath はproject rootを基準に相対パスを解決する（仕様 3.11）。
+// ResolvePath resolves a relative path from the project root (spec 3.11).
 func (c *Config) ResolvePath(p string) string {
 	if p == "" {
 		return c.Root
@@ -245,8 +252,8 @@ func (c *Config) ResolvePath(p string) string {
 	return filepath.Join(c.Root, p)
 }
 
-// ProfileNames は適用するProfile名を返す。
-// 省略時は default、明示的な空リストの場合は空を返す（仕様 3.6.3）。
+// ProfileNames returns the profiles to apply: "default" when omitted, and
+// nothing at all for an explicit empty list (spec 3.6.3).
 func (c *Config) ProfileNames() []string {
 	if c.Instance.Profiles == nil {
 		return []string{DefaultProfile}
@@ -256,8 +263,9 @@ func (c *Config) ProfileNames() []string {
 	return names
 }
 
-// HasAnsibleStep は provision に ansible ステップが含まれるかを返す。
-// 既定bootstrapの要否判定に使用する（仕様 06-provisioning.md 6.3.2）。
+// HasAnsibleStep reports whether provision contains an ansible step. It
+// decides whether the default bootstrap is needed (spec 06-provisioning.md
+// 6.3.2).
 func (c *Config) HasAnsibleStep() bool {
 	for _, s := range c.Provision {
 		if s.Ansible != nil {

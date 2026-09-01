@@ -13,18 +13,20 @@ import (
 	"golang.org/x/term"
 )
 
-// Console はホスト側の端末。TTYを伴う実行で使う。
+// Console is the host terminal, used when running with a TTY.
 type Console interface {
-	// Size は端末の桁数・行数を返す。
+	// Size returns the terminal's width and height.
 	Size() (width, height int, err error)
-	// MakeRaw は端末をraw modeへ切り替え、元へ戻す関数を返す。
+	// MakeRaw puts the terminal into raw mode and returns a function that
+	// restores it.
 	MakeRaw() (restore func(), err error)
-	// Resized はウィンドウサイズ変更の通知チャネルと、購読を終える関数を返す。
-	// 購読を終えるとチャネルは閉じる。stop は1度だけ呼ぶこと。
+	// Resized returns a channel notified on window-size changes, and a
+	// function that ends the subscription. Ending it closes the channel.
+	// Call stop exactly once.
 	Resized() (resized <-chan struct{}, stop func())
 }
 
-// osConsole はプロセスの標準入出力に結び付いた Console。
+// osConsole is a Console bound to the process's own standard streams.
 type osConsole struct {
 	In  *os.File
 	Out *os.File
@@ -58,7 +60,7 @@ func (c *osConsole) Resized() (<-chan struct{}, func()) {
 				select {
 				case resized <- struct{}{}:
 				default:
-					// 未処理の通知が残っていれば、それが最新のサイズを読む。
+					// A notification already pending will read the latest size.
 				}
 			case <-done:
 				return
@@ -72,21 +74,23 @@ func (c *osConsole) Resized() (<-chan struct{}, func()) {
 	}
 }
 
-// control は制御用websocketで扱うイベント。
+// control is what the control websocket carries.
 type control struct {
-	// ctx が終了したら、コンテナ内のプロセスへ終了を伝える。
+	// ctx ending tells the process in the container to stop.
 	ctx context.Context
-	// done はexecの完了。ハンドラを終える。
+	// done marks the exec as finished, ending the handler.
 	done <-chan struct{}
-	// console は端末。端末を伴わない実行ではnil。
+	// console is the terminal, nil when running without one.
 	console Console
-	// resized はウィンドウサイズ変更の通知。端末を伴わない実行ではnil。
+	// resized notifies of window-size changes, nil when running without a
+	// terminal.
 	resized <-chan struct{}
 }
 
-// controlHandler は制御用websocketを扱うハンドラを返す。
+// controlHandler returns the handler for the control websocket.
 //
-// Incusは端末サイズもホスト側のシグナルも知らないため、この経路で伝える。
+// Incus knows neither the terminal size nor the signals on the host side, so
+// this is the channel that tells it.
 func controlHandler(c control) func(*websocket.Conn) {
 	return func(conn *websocket.Conn) {
 		defer func() {
@@ -98,11 +102,11 @@ func controlHandler(c control) func(*websocket.Conn) {
 	}
 }
 
-// handle は制御メッセージを送り続ける。
+// handle keeps sending control messages.
 //
-// 送信できなくなった場合は黙って終える。表示の乱れやシグナルの取りこぼしに
-// とどまる一方、ここでの失敗を実行そのものの失敗として扱うと
-// 利用者の作業を壊すためである。
+// When sending stops working it exits quietly. The cost is a garbled display
+// or a dropped signal, whereas treating a failure here as a failure of the
+// run itself would destroy the user's work.
 func (c control) handle(send func(any) error) {
 	for {
 		select {
@@ -110,14 +114,15 @@ func (c control) handle(send func(any) error) {
 			return
 
 		case <-c.ctx.Done():
-			// idev が中断された場合、コンテナ内のプロセスも止める。
-			// 伝えないとパッケージ導入などが走り続け、次の実行と衝突する。
+			// When idev is interrupted, stop the process in the container too.
+			// Left alone, a package installation keeps running and collides
+			// with the next run.
 			_ = send(signalMessage(syscall.SIGTERM))
 			return
 
 		case _, ok := <-c.resized:
 			if !ok {
-				// 購読が終わった。以降はサイズ変更を待たない。
+				// The subscription ended. Stop waiting on resizes.
 				c.resized = nil
 				continue
 			}

@@ -55,10 +55,11 @@ func TestRunNonZeroExitReturnsExitError(t *testing.T) {
 	if exitErr.ExitCode != 3 {
 		t.Errorf("ExitCode = %d, want 3", exitErr.ExitCode)
 	}
-	// 仕様 04-cli.md 4.10: 操作・コマンド・exit code・エラー内容を含める
+	// Spec 04-cli.md 4.10: include the operation, the command, the exit code
+	// and the error.
 	for _, want := range []string{"provision step 2", "sh", "3", "boom"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
 	}
 }
@@ -92,7 +93,7 @@ func TestRunInDirectory(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if !strings.Contains(string(res.Stdout), "marker") {
-		t.Errorf("Stdout = %q, Dir が反映されていない", res.Stdout)
+		t.Errorf("Stdout = %q, want Dir to have taken effect", res.Stdout)
 	}
 }
 
@@ -112,7 +113,8 @@ func TestRunWithEnv(t *testing.T) {
 	}
 }
 
-// 環境変数の値はSecretを含みうるためエラーへ出さない（仕様 04-cli.md 4.10）
+// Environment variable values may be secrets, so they stay out of errors
+// (spec 04-cli.md 4.10).
 func TestErrorDoesNotLeakEnvValues(t *testing.T) {
 	r := runner.New()
 
@@ -125,7 +127,7 @@ func TestErrorDoesNotLeakEnvValues(t *testing.T) {
 		t.Fatal("Run() = nil error, want error")
 	}
 	if strings.Contains(err.Error(), "supersecret") {
-		t.Errorf("error = %q, 環境変数の値を含めないこと", err.Error())
+		t.Errorf("error = %q, want it not to contain the environment value", err.Error())
 	}
 }
 
@@ -161,7 +163,7 @@ func TestRunRespectsContextCancellation(t *testing.T) {
 		t.Fatal("Run() = nil error, want error")
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("elapsed = %v, contextで中断されていない", elapsed)
+		t.Errorf("elapsed = %v, want the context to have interrupted it", elapsed)
 	}
 }
 
@@ -184,11 +186,11 @@ func TestRunLogsCommandWhenLoggerSet(t *testing.T) {
 	}
 
 	if !strings.Contains(buf.String(), "true") {
-		t.Errorf("log = %q, 実行したコマンドを記録すること", buf.String())
+		t.Errorf("log = %q, want the command that ran to be recorded", buf.String())
 	}
 }
 
-// 起動そのものに失敗した場合は ExitError ではなくラップされたエラーを返す
+// A failure to start at all yields a wrapped error, not an ExitError.
 func TestRunStartFailureIsNotExitError(t *testing.T) {
 	r := runner.New()
 
@@ -202,10 +204,10 @@ func TestRunStartFailureIsNotExitError(t *testing.T) {
 
 	var exitErr *runner.ExitError
 	if errors.As(err, &exitErr) {
-		t.Error("起動失敗を ExitError として扱わないこと")
+		t.Error("want a start failure not to be treated as an ExitError")
 	}
 	if !strings.Contains(err.Error(), "operation") {
-		t.Errorf("error = %q, 操作名を含むこと", err.Error())
+		t.Errorf("error = %q, want it to name the operation", err.Error())
 	}
 }
 
@@ -224,7 +226,8 @@ func TestCommandStringWithoutArgs(t *testing.T) {
 	}
 }
 
-// Secretを含みうる引数は表示用文字列でマスクする（仕様 04-cli.md 4.10）
+// Arguments that may carry a secret are masked in the display string
+// (spec 04-cli.md 4.10).
 func TestCommandStringRedactsMarkedArgs(t *testing.T) {
 	c := runner.Command{
 		Name:   "ansible-playbook",
@@ -235,11 +238,11 @@ func TestCommandStringRedactsMarkedArgs(t *testing.T) {
 	got := c.String()
 
 	if strings.Contains(got, "s3cret") || strings.Contains(got, "debug") {
-		t.Errorf("String() = %q, 値を含めないこと", got)
+		t.Errorf("String() = %q, want it not to contain the values", got)
 	}
 	for _, want := range []string{"token=***", "mode=***", "ansible-playbook site.yml"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("String() = %q, %q を含むこと", got, want)
+			t.Errorf("String() = %q, want it to contain %q", got, want)
 		}
 	}
 }
@@ -252,7 +255,7 @@ func TestCommandStringRedactsValueWithoutKey(t *testing.T) {
 	}
 }
 
-// マスクは表示用のみで、実行される引数は変わらない
+// Masking is display-only; the arguments executed are unchanged.
 func TestRedactDoesNotChangeExecutedArgs(t *testing.T) {
 	r := runner.New()
 
@@ -266,11 +269,11 @@ func TestRedactDoesNotChangeExecutedArgs(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if string(res.Stdout) != "s3cret" {
-		t.Errorf("Stdout = %q, 実行時の値は変えないこと", res.Stdout)
+		t.Errorf("Stdout = %q, want the executed value to be unchanged", res.Stdout)
 	}
 }
 
-// 失敗時のエラーメッセージにもマスクが効くこと
+// Masking applies to the error message on failure too.
 func TestExitErrorUsesRedactedCommand(t *testing.T) {
 	r := runner.New()
 
@@ -283,16 +286,16 @@ func TestExitErrorUsesRedactedCommand(t *testing.T) {
 		t.Fatal("Run() = nil error, want error")
 	}
 	if strings.Contains(err.Error(), "s3cret") {
-		t.Errorf("error = %q, Secretを含めないこと", err.Error())
+		t.Errorf("error = %q, want it not to contain the secret", err.Error())
 	}
 }
 
-// 出力を中継している場合、エラーに同じstderrを重複させない
+// When output is streamed, the error does not repeat the same stderr.
 func TestExitErrorOmitsStderrWhenStreamed(t *testing.T) {
 	var stderr bytes.Buffer
 	r := runner.New()
 
-	// stderrの内容がコマンド文字列に現れないようにする
+	// Keep the stderr content out of the command string.
 	_, err := r.Run(context.Background(), runner.Command{
 		Name:   "sh",
 		Args:   []string{"-c", "echo $((6 * 7)) >&2; exit 1"},
@@ -303,14 +306,14 @@ func TestExitErrorOmitsStderrWhenStreamed(t *testing.T) {
 	}
 
 	if strings.TrimSpace(stderr.String()) != "42" {
-		t.Errorf("中継されていない: %q", stderr.String())
+		t.Errorf("not streamed: %q", stderr.String())
 	}
 	if strings.Contains(err.Error(), "42") {
-		t.Errorf("error = %q, 中継済みの内容を重複させないこと", err.Error())
+		t.Errorf("error = %q, want streamed content not to be repeated", err.Error())
 	}
 }
 
-// シグナルで終了した場合、シェルの慣例に合わせた終了コードを返す
+// A process killed by a signal yields the exit code shells use.
 func TestExitCodeForSignaledProcess(t *testing.T) {
 	r := runner.New()
 
@@ -332,9 +335,9 @@ func TestCollapseMultilineArgs(t *testing.T) {
 		arg  string
 		want string
 	}{
-		{"単一行はそのまま", "echo hi", `"echo hi"`},
-		{"複数行は折り畳む", "one\ntwo\nthree", `"one … (+2 lines)"`},
-		{"末尾改行は数えない", "one\ntwo\n", `"one … (+1 lines)"`},
+		{"single line is left alone", "echo hi", `"echo hi"`},
+		{"multiple lines are folded", "one\ntwo\nthree", `"one … (+2 lines)"`},
+		{"a trailing newline is not counted", "one\ntwo\n", `"one … (+1 lines)"`},
 	}
 
 	for _, tt := range tests {
@@ -342,7 +345,7 @@ func TestCollapseMultilineArgs(t *testing.T) {
 			got := runner.Command{Name: "sh", Args: []string{"-c", tt.arg}}.String()
 
 			if !strings.Contains(got, tt.want) {
-				t.Errorf("String() = %q, %q を含むこと", got, tt.want)
+				t.Errorf("String() = %q, want it to contain %q", got, tt.want)
 			}
 		})
 	}

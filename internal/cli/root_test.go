@@ -27,7 +27,7 @@ instance:
   image: images:ubuntu/24.04
 `
 
-// testProject は dev.yml を持つ一時ディレクトリを作る。
+// testProject creates a temporary directory holding a dev.yml.
 func testProject(t *testing.T, body string) string {
 	t.Helper()
 
@@ -42,7 +42,7 @@ func testProject(t *testing.T, body string) string {
 	return root
 }
 
-// fakeApp はfakeで構成したAppと、その裏のIncusクライアントを返す。
+// fakeApp returns an App built on fakes, and the Incus client behind it.
 func fakeApp(t *testing.T, out *bytes.Buffer) (*App, *incustest.Fake) {
 	t.Helper()
 
@@ -61,7 +61,7 @@ func fakeApp(t *testing.T, out *bytes.Buffer) (*App, *incustest.Fake) {
 	return app, client
 }
 
-// execRoot はfakeのAppでルートコマンドを実行する。
+// execRoot runs the root command against a fake App.
 func execRoot(t *testing.T, stdin string, args ...string) (*incustest.Fake, string, error) {
 	t.Helper()
 
@@ -82,7 +82,7 @@ func TestCommandsDispatchToApp(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		want string // 呼ばれるべきIncus操作
+		want string // the Incus operation that must be called
 	}{
 		{"up", []string{"up"}, "create"},
 		{"status", []string{"status"}, "instance"},
@@ -96,7 +96,7 @@ func TestCommandsDispatchToApp(t *testing.T) {
 				t.Fatalf("execute %v: %v", tt.args, err)
 			}
 			if tt.want != "" && !client.Called(tt.want) {
-				t.Errorf("calls = %v, %q を含むこと", client.Calls, tt.want)
+				t.Errorf("calls = %v, want it to contain %q", client.Calls, tt.want)
 			}
 		})
 	}
@@ -109,7 +109,7 @@ func TestValidateCommandOutput(t *testing.T) {
 	}
 	for _, want := range []string{"configuration is valid", "example-project", "dev-example-project"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("output = %q, %q を含むこと", out, want)
+			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
 	}
 }
@@ -127,7 +127,7 @@ func TestStatusJSONFlag(t *testing.T) {
 func TestProvisionCommandRequiresInstance(t *testing.T) {
 	_, _, err := execRoot(t, "", "provision")
 	if err == nil {
-		t.Fatal("provision = nil error, instanceが無ければ失敗すること")
+		t.Fatal("provision = nil error, want a failure without an instance")
 	}
 }
 
@@ -148,14 +148,14 @@ func TestShellCommandPassesArguments(t *testing.T) {
 		t.Fatalf("shell: %v", err)
 	}
 	if len(client.Execs) == 0 {
-		t.Fatal("execされていない")
+		t.Fatal("nothing was executed")
 	}
 	if got := strings.Join(client.Execs[0], " "); got != "make test" {
 		t.Errorf("argv = %q, want %q", got, "make test")
 	}
 }
 
-// 破壊操作は既定で確認を求める（仕様 04-cli.md 4.14）
+// Destructive operations ask for confirmation by default (spec 04-cli.md 4.14).
 func TestDestructiveCommandsConfirm(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -164,13 +164,13 @@ func TestDestructiveCommandsConfirm(t *testing.T) {
 		wantDelete bool
 		wantErr    bool
 	}{
-		{"destroy 承諾", []string{"destroy"}, "y\n", true, false},
-		{"destroy 拒否", []string{"destroy"}, "n\n", false, true},
-		{"destroy 空入力", []string{"destroy"}, "\n", false, true},
+		{"destroy accepted", []string{"destroy"}, "y\n", true, false},
+		{"destroy declined", []string{"destroy"}, "n\n", false, true},
+		{"destroy with empty input", []string{"destroy"}, "\n", false, true},
 		{"destroy EOF", []string{"destroy"}, "", false, true},
 		{"destroy --force", []string{"destroy", "--force"}, "", true, false},
-		{"rebuild 承諾", []string{"rebuild"}, "yes\n", true, false},
-		{"rebuild 拒否", []string{"rebuild"}, "no\n", false, true},
+		{"rebuild accepted", []string{"rebuild"}, "yes\n", true, false},
+		{"rebuild declined", []string{"rebuild"}, "no\n", false, true},
 		{"rebuild --force", []string{"rebuild", "-f"}, "", true, false},
 	}
 
@@ -193,19 +193,19 @@ func TestDestructiveCommandsConfirm(t *testing.T) {
 			err := root.ExecuteContext(context.Background())
 
 			if tt.wantErr && err == nil {
-				t.Error("確認を拒否した場合はエラーになること")
+				t.Error("want an error when the confirmation is declined")
 			}
 			if !tt.wantErr && err != nil {
 				t.Errorf("error = %v", err)
 			}
 			if got := client.Called("delete"); got != tt.wantDelete {
-				t.Errorf("delete実行 = %v, want %v (calls=%v)", got, tt.wantDelete, client.Calls)
+				t.Errorf("delete ran = %v, want %v (calls=%v)", got, tt.wantDelete, client.Calls)
 			}
 		})
 	}
 }
 
-// App の生成に失敗した場合、コマンドはそのエラーを返す
+// When building the App fails, the command returns that error.
 func TestCommandsPropagateFactoryError(t *testing.T) {
 	wantErr := errors.New("factory failed")
 
@@ -237,14 +237,14 @@ func TestRootCommandMetadata(t *testing.T) {
 	}
 	for _, name := range []string{"up", "provision", "shell", "status", "destroy", "rebuild", "validate"} {
 		if _, _, err := root.Find([]string{name}); err != nil {
-			t.Errorf("サブコマンド %q が無い: %v", name, err)
+			t.Errorf("subcommand %q is missing: %v", name, err)
 		}
 	}
 }
 
 func TestExecuteReportsUnknownCommand(t *testing.T) {
 	if err := Execute(context.Background(), "test", []string{"no-such-command"}); err == nil {
-		t.Error("未知のコマンドはエラーになること")
+		t.Error("want an unknown command to be an error")
 	}
 }
 
@@ -271,17 +271,17 @@ func TestNewAppUsesWorkingDirectoryByDefault(t *testing.T) {
 }
 
 func TestNewAppErrors(t *testing.T) {
-	t.Run("プロジェクトが無い", func(t *testing.T) {
+	t.Run("no project", func(t *testing.T) {
 		if _, err := newApp(&globalFlags{directory: t.TempDir()}); err == nil {
 			t.Error("error = nil, want error")
 		}
 	})
 
-	t.Run("設定が不正", func(t *testing.T) {
+	t.Run("invalid configuration", func(t *testing.T) {
 		root := testProject(t, "schema: 1\nfeatures: {}\n")
 		_, err := newApp(&globalFlags{directory: root})
 		if err == nil || !strings.Contains(err.Error(), "features") {
-			t.Errorf("error = %v, 設定の問題を報告すること", err)
+			t.Errorf("error = %v, want the configuration problem reported", err)
 		}
 	})
 }
@@ -295,10 +295,10 @@ func TestReport(t *testing.T) {
 		wantCode int
 		wantOut  bool
 	}{
-		{"成功", nil, 0, false},
-		{"通常のエラー", errors.New("boom"), 1, true},
-		{"コンテナ内コマンドの終了コード", &ExitCodeError{Code: 42}, 42, false},
-		{"ラップされた終了コード", errors.Join(&ExitCodeError{Code: 3}), 3, false},
+		{"success", nil, 0, false},
+		{"an ordinary error", errors.New("boom"), 1, true},
+		{"the exit code of a command in the container", &ExitCodeError{Code: 42}, 42, false},
+		{"a wrapped exit code", errors.Join(&ExitCodeError{Code: 3}), 3, false},
 	}
 
 	for _, tt := range tests {
@@ -309,7 +309,7 @@ func TestReport(t *testing.T) {
 				t.Errorf("Report() = %d, want %d", got, tt.wantCode)
 			}
 			if got := buf.Len() > 0; got != tt.wantOut {
-				t.Errorf("出力の有無 = %v, want %v (%q)", got, tt.wantOut, buf.String())
+				t.Errorf("produced output = %v, want %v (%q)", got, tt.wantOut, buf.String())
 			}
 		})
 	}
@@ -337,11 +337,11 @@ func TestConfirm(t *testing.T) {
 		t.Run(strings.TrimSpace(tt.input), func(t *testing.T) {
 			var out bytes.Buffer
 
-			if got := confirm(strings.NewReader(tt.input), &out, "続けますか?"); got != tt.want {
+			if got := confirm(strings.NewReader(tt.input), &out, "Continue?"); got != tt.want {
 				t.Errorf("confirm(%q) = %v, want %v", tt.input, got, tt.want)
 			}
-			if !strings.Contains(out.String(), "続けますか?") {
-				t.Errorf("プロンプトが出力されていない: %q", out.String())
+			if !strings.Contains(out.String(), "Continue?") {
+				t.Errorf("the prompt was not printed: %q", out.String())
 			}
 		})
 	}
@@ -355,12 +355,12 @@ func TestIsTerminal(t *testing.T) {
 	defer func() { _ = r.Close(); _ = w.Close() }()
 
 	if isTerminal(r) {
-		t.Error("パイプは端末ではない")
+		t.Error("a pipe is not a terminal")
 	}
 }
 
-// グローバルフラグが Incus 操作層まで届くこと
-// （マニュアル 03-commands.md が契約として提示している）
+// The global flags reach the Incus layer. The manual, 03-commands.md, presents
+// this as a contract.
 func TestNewAppWiresIncusFlags(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(testProject(t, rootYAML), ".incus-dev", "dev.yml"))
 	if err != nil {
@@ -372,7 +372,7 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 		t.Errorf("target = %+v", target)
 	}
 
-	// ansible inventory へ渡す値も同じであること
+	// The values handed to the Ansible inventory match.
 	app := NewApp(AppOptions{
 		Config:       cfg,
 		Client:       incustest.New(),
@@ -387,11 +387,11 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	if env.Remote != "dev-server" || env.IncusProject != "development" {
-		t.Errorf("env = %+v, remote/project が一致しないこと", env)
+		t.Errorf("env = %+v, the remote and project do not match", env)
 	}
 }
 
-// provision の部分実行フラグ（仕様 04-cli.md 4.2）
+// The flags for a partial provisioning run (spec 04-cli.md 4.2).
 func TestProvisionPartialExecutionFlags(t *testing.T) {
 	const yaml = rootYAML + `
 provision:
@@ -406,12 +406,12 @@ provision:
 	tests := []struct {
 		name string
 		args []string
-		want []string // 実行されるべきステップ
-		skip []string // 実行されてはいけないステップ
+		want []string // the steps that must run
+		skip []string // the steps that must not run
 	}{
-		{"既定は全部", []string{"provision"}, []string{"echo 1", "echo 2", "echo 3"}, nil},
+		{"everything by default", []string{"provision"}, []string{"echo 1", "echo 2", "echo 3"}, nil},
 		{"--step", []string{"provision", "--step", "second"}, []string{"echo 2"}, []string{"echo 1", "echo 3"}},
-		{"--step 複数", []string{"provision", "--step", "first", "--step", "3"}, []string{"echo 1", "echo 3"}, []string{"echo 2"}},
+		{"--step repeated", []string{"provision", "--step", "first", "--step", "3"}, []string{"echo 1", "echo 3"}, []string{"echo 2"}},
 		{"--from", []string{"provision", "--from", "second"}, []string{"echo 2", "echo 3"}, []string{"echo 1"}},
 	}
 
@@ -444,12 +444,12 @@ provision:
 			executed := strings.Join(client.Calls, "\n")
 			for _, want := range tt.want {
 				if !strings.Contains(executed, want) {
-					t.Errorf("%q が実行されていない: %v", want, client.Calls)
+					t.Errorf("%q never ran: %v", want, client.Calls)
 				}
 			}
 			for _, skip := range tt.skip {
 				if strings.Contains(executed, skip) {
-					t.Errorf("%q を実行している: %v", skip, client.Calls)
+					t.Errorf("%q ran: %v", skip, client.Calls)
 				}
 			}
 		})
@@ -490,16 +490,16 @@ provision:
 	}
 	for _, want := range []string{"1", "named step", "run", "2", "ansible"} {
 		if !strings.Contains(out.String(), want) {
-			t.Errorf("output = %q, %q を含むこと", out.String(), want)
+			t.Errorf("output = %q, want it to contain %q", out.String(), want)
 		}
 	}
-	// Incusへは触れない
+	// Incus is not touched.
 	if len(client.Calls) != 0 {
-		t.Errorf("calls = %v, --list はIncusへ触れないこと", client.Calls)
+		t.Errorf("calls = %v, want --list not to touch Incus", client.Calls)
 	}
 }
 
-// 排他のフラグを同時に指定した場合はエラーになる
+// Combining mutually exclusive flags is an error.
 func TestProvisionFlagsAreMutuallyExclusive(t *testing.T) {
 	for _, args := range [][]string{
 		{"provision", "--step", "a", "--from", "b"},
@@ -508,7 +508,7 @@ func TestProvisionFlagsAreMutuallyExclusive(t *testing.T) {
 	} {
 		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
 			root := newRootCommand("test", func(*globalFlags) (*App, error) {
-				t.Fatal("フラグの検査より前にAppを生成している")
+				t.Fatal("built the App before the flags were checked")
 				return nil, nil
 			})
 			root.SetArgs(args)
@@ -537,11 +537,11 @@ func TestUpDryRunFlag(t *testing.T) {
 		t.Errorf("output = %q", out.String())
 	}
 	if client.Called("create") {
-		t.Errorf("calls = %v, --dry-run はinstanceを作らないこと", client.Calls)
+		t.Errorf("calls = %v, want --dry-run not to create an instance", client.Calls)
 	}
 }
 
-// Incus project は CLI指定 > dev.yml > default の順で決まる
+// The Incus project is decided by the CLI, then dev.yml, then "default".
 func TestIncusProjectPrecedence(t *testing.T) {
 	tests := []struct {
 		name string
@@ -549,10 +549,10 @@ func TestIncusProjectPrecedence(t *testing.T) {
 		flag string
 		want string
 	}{
-		{"既定", rootYAML, "", "default"},
-		{"dev.ymlの指定", rootYAML + "incus:\n  project: from-config\n", "", "from-config"},
-		{"CLIの指定が優先", rootYAML + "incus:\n  project: from-config\n", "from-flag", "from-flag"},
-		{"CLIのみ", rootYAML, "from-flag", "from-flag"},
+		{"the default", rootYAML, "", "default"},
+		{"named in dev.yml", rootYAML + "incus:\n  project: from-config\n", "", "from-config"},
+		{"the CLI wins", rootYAML + "incus:\n  project: from-config\n", "from-flag", "from-flag"},
+		{"the CLI alone", rootYAML, "from-flag", "from-flag"},
 	}
 
 	for _, tt := range tests {
@@ -570,20 +570,20 @@ func TestIncusProjectPrecedence(t *testing.T) {
 	}
 }
 
-// exec / snapshot コマンドの配線
+// How the exec and snapshot commands are wired up.
 func TestExecAndSnapshotCommands(t *testing.T) {
 	tests := []struct {
 		name  string
 		args  []string
 		stdin string
-		want  string // 期待するIncus操作のprefix
+		want  string // the expected prefix of the Incus operation
 	}{
 		{"exec", []string{"exec", "--", "make", "test"}, "", "exec dev-example-project make test"},
 		{"snapshot create", []string{"snapshot", "create", "s1"}, "", "snapshot create dev-example-project s1"},
-		{"snapshot create（名前省略）", []string{"snapshot", "create"}, "", "snapshot create dev-example-project"},
+		{"snapshot create without a name", []string{"snapshot", "create"}, "", "snapshot create dev-example-project"},
 		{"snapshot list", []string{"snapshot", "list"}, "", "snapshot list dev-example-project"},
 		{"snapshot restore", []string{"snapshot", "restore", "s1", "--force"}, "", "snapshot restore dev-example-project s1"},
-		{"snapshot restore（確認）", []string{"snapshot", "restore", "s1"}, "y\n", "snapshot restore dev-example-project s1"},
+		{"snapshot restore with a confirmation", []string{"snapshot", "restore", "s1"}, "y\n", "snapshot restore dev-example-project s1"},
 		{"snapshot delete", []string{"snapshot", "delete", "s1", "-f"}, "", "snapshot delete dev-example-project s1"},
 	}
 
@@ -607,13 +607,13 @@ func TestExecAndSnapshotCommands(t *testing.T) {
 				t.Fatalf("execute %v: %v", tt.args, err)
 			}
 			if !client.Called(tt.want) {
-				t.Errorf("calls = %v, %q を含むこと", client.Calls, tt.want)
+				t.Errorf("calls = %v, want it to contain %q", client.Calls, tt.want)
 			}
 		})
 	}
 }
 
-// 確認を拒否したら実行しない
+// Declining the confirmation runs nothing.
 func TestSnapshotDestructiveCommandsConfirm(t *testing.T) {
 	for _, args := range [][]string{
 		{"snapshot", "restore", "s1"},
@@ -635,16 +635,16 @@ func TestSnapshotDestructiveCommandsConfirm(t *testing.T) {
 			root.SetErr(out)
 
 			if err := root.ExecuteContext(context.Background()); err == nil {
-				t.Error("拒否したのに成功している")
+				t.Error("succeeded despite being declined")
 			}
 			if client.Called("snapshot " + args[1]) {
-				t.Errorf("calls = %v, 拒否したら実行しないこと", client.Calls)
+				t.Errorf("calls = %v, want nothing run once it is declined", client.Calls)
 			}
 		})
 	}
 }
 
-// destroy --volumes の配線
+// How destroy --volumes is wired up.
 func TestDestroyVolumesFlag(t *testing.T) {
 	out := &bytes.Buffer{}
 	cfg, err := config.Load(filepath.Join(
@@ -673,11 +673,11 @@ func TestDestroyVolumesFlag(t *testing.T) {
 		t.Fatalf("destroy --volumes: %v", err)
 	}
 	if client.Volumes["default/dev-example-project-cache"] {
-		t.Error("--volumes でボリュームが削除されていない")
+		t.Error("--volumes did not delete the volume")
 	}
 }
 
-// commandの生成に失敗した場合の伝播
+// How a failure to build the command propagates.
 func TestSnapshotCommandsPropagateFactoryError(t *testing.T) {
 	wantErr := errors.New("factory failed")
 
@@ -701,10 +701,10 @@ func TestSnapshotCommandsPropagateFactoryError(t *testing.T) {
 	}
 }
 
-// 利用者が見るCLIのテキストは英語（ASCII）であること。
+// The CLI text users see is English, and therefore ASCII.
 //
-// このツールは外部公開しており、usage・フラグ説明・確認プロンプトは
-// 英語を標準とする。日本語の説明はマニュアルの日本語版が担う。
+// This tool is published, so usage, flag descriptions and confirmation prompts
+// are English by default. The Japanese manual carries the Japanese explanation.
 func TestUserFacingTextIsASCII(t *testing.T) {
 	nonASCII := regexp.MustCompile(`[^\x00-\x7F]`)
 
@@ -715,13 +715,13 @@ func TestUserFacingTextIsASCII(t *testing.T) {
 				"Short": c.Short, "Long": c.Long, "Example": c.Example, "Use": c.Use,
 			} {
 				if found := nonASCII.FindString(text); found != "" {
-					t.Errorf("%s: %s に非ASCII %q が含まれる: %q",
+					t.Errorf("%s: %s contains the non-ASCII %q: %q",
 						c.CommandPath(), label, found, text)
 				}
 			}
 			check := func(f *pflag.Flag) {
 				if found := nonASCII.FindString(f.Usage); found != "" {
-					t.Errorf("%s: --%s の説明に非ASCII %q が含まれる: %q",
+					t.Errorf("%s: the description of --%s contains the non-ASCII %q: %q",
 						c.CommandPath(), f.Name, found, f.Usage)
 				}
 			}
@@ -756,7 +756,7 @@ func TestUserFacingTextIsASCII(t *testing.T) {
 				_ = root.ExecuteContext(context.Background())
 
 				if found := nonASCII.FindString(out.String()); found != "" {
-					t.Errorf("確認プロンプトに非ASCII %q が含まれる: %q", found, out.String())
+					t.Errorf("the confirmation prompt contains the non-ASCII %q: %q", found, out.String())
 				}
 			})
 		}

@@ -1,7 +1,7 @@
-// Package runnertest はテスト用のRunner実装を提供する。
+// Package runnertest provides a Runner implementation for tests.
 //
-// Incus daemonを必要とせずコマンド構築を検証するために使用する
-// （仕様 08-testing.md 8.1）。
+// Use it to verify how commands are built without needing an Incus daemon
+// (spec 08-testing.md 8.1).
 package runnertest
 
 import (
@@ -13,22 +13,23 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
-// Fake は実行せずにコマンドを記録するRunner。
+// Fake is a Runner that records commands instead of running them.
 type Fake struct {
-	// Handler が設定されていれば、応答の決定に使用される。
+	// Handler, when set, decides the response.
 	Handler func(runner.Command) (runner.Result, error)
-	// Stdout はコマンド文字列のprefixに対する標準出力。
+	// Stdout maps a command-string prefix to the standard output to return.
 	Stdout map[string]string
-	// Err はコマンド文字列のprefixに対して返すエラー。
+	// Err maps a command-string prefix to the error to return.
 	Err map[string]error
 
-	// Calls は実行されたコマンドの記録。
+	// Calls records the commands that were run.
 	Calls []runner.Command
-	// Stdins は各コマンドへ渡された標準入力の内容（Callsと同じ順序）。
+	// Stdins holds the standard input given to each command, in the same order
+	// as Calls.
 	Stdins []string
 }
 
-// Run はコマンドを記録し、設定された応答を返す。
+// Run records the command and returns the configured response.
 func (f *Fake) Run(_ context.Context, c runner.Command) (runner.Result, error) {
 	f.Calls = append(f.Calls, c)
 
@@ -61,7 +62,7 @@ func (f *Fake) Run(_ context.Context, c runner.Command) (runner.Result, error) {
 	return runner.Result{}, nil
 }
 
-// Commands は記録されたコマンドを文字列で返す。
+// Commands returns the recorded commands as strings.
 func (f *Fake) Commands() []string {
 	out := make([]string, 0, len(f.Calls))
 	for _, c := range f.Calls {
@@ -70,8 +71,8 @@ func (f *Fake) Commands() []string {
 	return out
 }
 
-// LastArgv は最後に実行されたコマンドを、マスクせずに返す。
-// 実際に実行される引数を検証するために使う。
+// LastArgv returns the last command run, unmasked.
+// Use it to verify the arguments that are actually executed.
 func (f *Fake) LastArgv() string {
 	if len(f.Calls) == 0 {
 		return ""
@@ -80,7 +81,7 @@ func (f *Fake) LastArgv() string {
 	return strings.Join(append([]string{c.Name}, c.Args...), " ")
 }
 
-// Argvs は実行されたコマンドを、マスクせずに返す。
+// Argvs returns the commands that were run, unmasked.
 func (f *Fake) Argvs() []string {
 	out := make([]string, 0, len(f.Calls))
 	for _, c := range f.Calls {
@@ -89,8 +90,8 @@ func (f *Fake) Argvs() []string {
 	return out
 }
 
-// LastCommand は最後に実行されたコマンドの表示用文字列を返す。
-// Secretを含みうる値はマスクされる。
+// LastCommand returns the display string of the last command run.
+// Values that may be secrets are masked.
 func (f *Fake) LastCommand() string {
 	if len(f.Calls) == 0 {
 		return ""
@@ -98,7 +99,7 @@ func (f *Fake) LastCommand() string {
 	return f.Calls[len(f.Calls)-1].String()
 }
 
-// LastStdin は最後のコマンドへ渡された標準入力を返す。
+// LastStdin returns the standard input given to the last command.
 func (f *Fake) LastStdin() string {
 	if len(f.Stdins) == 0 {
 		return ""

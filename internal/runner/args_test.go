@@ -7,7 +7,8 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
-// 引数の組み立てとマスク指定を同時に行い、indexの計算間違いを避ける
+// Building the arguments and marking them for masking together avoids
+// miscalculating an index.
 func TestArgList(t *testing.T) {
 	a := runner.Args("exec", "dev-x")
 	a.Add("--cwd", "/workspace")
@@ -33,12 +34,12 @@ func TestArgList(t *testing.T) {
 	display := c.String()
 	for _, secret := range []string{"s3cret", "echo $TOKEN"} {
 		if strings.Contains(display, secret) {
-			t.Errorf("String() = %q, %q を含めないこと", display, secret)
+			t.Errorf("String() = %q, want it not to contain %q", display, secret)
 		}
 	}
 	for _, want := range []string{"incus exec dev-x", "--cwd /workspace", "TOKEN=***"} {
 		if !strings.Contains(display, want) {
-			t.Errorf("String() = %q, %q を含むこと", display, want)
+			t.Errorf("String() = %q, want it to contain %q", display, want)
 		}
 	}
 }

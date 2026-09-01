@@ -1,4 +1,4 @@
-// Package incustest はテスト用の incus.Client 実装を提供する。
+// Package incustest provides an incus.Client implementation for tests.
 package incustest
 
 import (
@@ -11,39 +11,40 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
 )
 
-// Fake はIncus daemonを必要としない incus.Client 実装。
+// Fake is an incus.Client implementation that needs no Incus daemon.
 type Fake struct {
-	// Instances は存在するinstance。キーはinstance名。
+	// Instances are the instances that exist, keyed by name.
 	Instances map[string]*incus.Instance
-	// Profiles は存在するProfile名。
+	// Profiles are the names of the profiles that exist.
 	Profiles []string
-	// SnapshotsByInstance はinstanceごとのスナップショット。
+	// SnapshotsByInstance holds each instance's snapshots.
 	SnapshotsByInstance map[string][]incus.Snapshot
-	// Volumes は存在するstorage volume（"pool/name"）。
+	// Volumes are the storage volumes that exist, as "pool/name".
 	Volumes map[string]bool
 
-	// ExecFunc が設定されていれば Exec の応答に使用する。
+	// ExecFunc, when set, decides what Exec returns.
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
-	// FailReady が真の場合 WaitReady が失敗する。
+	// FailReady makes WaitReady fail.
 	FailReady bool
-	// NetworkNotReady が真の場合 WaitReady が incus.ErrNetworkNotReady を返す。
+	// NetworkNotReady makes WaitReady return incus.ErrNetworkNotReady.
 	NetworkNotReady bool
-	// FailOn は操作名のprefixに対して返すエラー。
-	// 例: {"create": errBoom} とすると CreateInstance が失敗する。
+	// FailOn maps an operation-name prefix to the error to return. For
+	// example {"create": errBoom} makes CreateInstance fail.
 	FailOn map[string]error
-	// Hook は各操作の直前に呼ばれる。非nilのエラーを返すとその操作が失敗する。
-	// 「2回目の呼び出しだけ失敗させる」といった制御に使う。
+	// Hook is called just before each operation; returning a non-nil error
+	// makes that operation fail. Use it for things like "fail only the second
+	// call".
 	Hook func(call string) error
 
-	// Calls は呼び出し順の記録（例: "create dev-x", "start dev-x"）。
+	// Calls records the calls in order, such as "create dev-x", "start dev-x".
 	Calls []string
-	// Execs は実行されたargvの記録。
+	// Execs records the argv of each execution.
 	Execs [][]string
 }
 
 var _ incus.Client = (*Fake)(nil)
 
-// New は default profile を持つFakeを返す。
+// New returns a Fake that has the default profile.
 func New() *Fake {
 	return &Fake{
 		Instances: map[string]*incus.Instance{},
@@ -51,7 +52,7 @@ func New() *Fake {
 	}
 }
 
-// AddInstance はinstanceを登録する。
+// AddInstance registers an instance.
 func (f *Fake) AddInstance(inst *incus.Instance) *Fake {
 	if inst.Config == nil {
 		inst.Config = map[string]string{}
@@ -63,7 +64,7 @@ func (f *Fake) AddInstance(inst *incus.Instance) *Fake {
 	return f
 }
 
-// record は呼び出しを記録し、FailOn に一致すればそのエラーを返す。
+// record notes the call and returns the matching FailOn error, if any.
 func (f *Fake) record(format string, args ...any) error {
 	call := fmt.Sprintf(format, args...)
 	f.Calls = append(f.Calls, call)
@@ -79,7 +80,7 @@ func (f *Fake) record(format string, args ...any) error {
 	return nil
 }
 
-// Called は指定のprefixで始まる呼び出しがあったかを返す。
+// Called reports whether any call began with the given prefix.
 func (f *Fake) Called(prefix string) bool {
 	for _, c := range f.Calls {
 		if strings.HasPrefix(c, prefix) {
@@ -89,7 +90,7 @@ func (f *Fake) Called(prefix string) bool {
 	return false
 }
 
-// Instance は登録済みinstanceを返す。存在しなければ incus.ErrInstanceNotFound を返す。
+// Instance returns a registered instance, or incus.ErrInstanceNotFound.
 func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error) {
 	if err := f.record("instance %s", name); err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error)
 	return inst, nil
 }
 
-// CreateInstance はinstanceを登録する。状態は Stopped になる。
+// CreateInstance registers an instance, in the Stopped state.
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
 	if err := f.record("create %s image=%s type=%s profiles=%v noprofiles=%v config=%v devices=%v",
 		spec.Name, spec.Image, spec.Type, spec.Profiles, spec.NoProfiles,
@@ -127,7 +128,7 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 	return nil
 }
 
-// StartInstance はinstanceの状態を Running にする。
+// StartInstance moves an instance to Running.
 func (f *Fake) StartInstance(_ context.Context, name string) error {
 	if err := f.record("start %s", name); err != nil {
 		return err
@@ -138,7 +139,7 @@ func (f *Fake) StartInstance(_ context.Context, name string) error {
 	return nil
 }
 
-// StopInstance はinstanceの状態を Stopped にする。
+// StopInstance moves an instance to Stopped.
 func (f *Fake) StopInstance(_ context.Context, name string) error {
 	if err := f.record("stop %s", name); err != nil {
 		return err
@@ -149,7 +150,7 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 	return nil
 }
 
-// DeleteInstance はinstanceを削除する。
+// DeleteInstance removes an instance.
 func (f *Fake) DeleteInstance(_ context.Context, name string) error {
 	if err := f.record("delete %s", name); err != nil {
 		return err
@@ -158,7 +159,7 @@ func (f *Fake) DeleteInstance(_ context.Context, name string) error {
 	return nil
 }
 
-// ApplyConfig は指定されたconfigキーを反映する。
+// ApplyConfig applies the given config keys.
 func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]string) error {
 	if len(config) == 0 {
 		return nil
@@ -176,7 +177,7 @@ func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]str
 	return nil
 }
 
-// UnsetConfig は指定されたconfigキーを削除する。
+// UnsetConfig removes the given config keys.
 func (f *Fake) UnsetConfig(_ context.Context, name string, keys []string) error {
 	if len(keys) == 0 {
 		return nil
@@ -194,7 +195,7 @@ func (f *Fake) UnsetConfig(_ context.Context, name string, keys []string) error 
 	return nil
 }
 
-// ApplyDevices は指定されたdeviceを反映する。
+// ApplyDevices applies the given devices.
 func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]incus.Device) error {
 	if len(devices) == 0 {
 		return nil
@@ -206,7 +207,8 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
-	// 本物の ApplyDevices は want に無いキーを消さない。fakeも同じ挙動にする。
+	// The real ApplyDevices does not remove keys absent from want, so neither
+	// does the fake.
 	for devName, dev := range devices {
 		current, ok := inst.Devices[devName]
 		if !ok || current.Type() != dev.Type() {
@@ -220,7 +222,7 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	return nil
 }
 
-// RemoveDevices は指定されたdeviceを削除する。
+// RemoveDevices removes the given devices.
 func (f *Fake) RemoveDevices(_ context.Context, name string, devices []string) error {
 	if len(devices) == 0 {
 		return nil
@@ -238,7 +240,7 @@ func (f *Fake) RemoveDevices(_ context.Context, name string, devices []string) e
 	return nil
 }
 
-// ProfileExists は Profiles に含まれるかを返す。
+// ProfileExists reports whether the name is in Profiles.
 func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	if err := f.record("profile %s", name); err != nil {
 		return false, err
@@ -251,7 +253,7 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	return false, nil
 }
 
-// VolumeExists は登録済みボリュームかを返す。
+// VolumeExists reports whether the volume is registered.
 func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	if err := f.record("volume exists %s %s", pool, name); err != nil {
 		return false, err
@@ -259,7 +261,7 @@ func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) 
 	return f.Volumes[pool+"/"+name], nil
 }
 
-// CreateVolume はボリュームを登録する。
+// CreateVolume registers a volume.
 func (f *Fake) CreateVolume(_ context.Context, pool, name string, config map[string]string) error {
 	if err := f.record("volume create %s %s %v", pool, name, sortedPairs(config)); err != nil {
 		return err
@@ -271,7 +273,7 @@ func (f *Fake) CreateVolume(_ context.Context, pool, name string, config map[str
 	return nil
 }
 
-// DeleteVolume はボリュームを削除する。
+// DeleteVolume removes a volume.
 func (f *Fake) DeleteVolume(_ context.Context, pool, name string) error {
 	if err := f.record("volume delete %s %s", pool, name); err != nil {
 		return err
@@ -280,7 +282,7 @@ func (f *Fake) DeleteVolume(_ context.Context, pool, name string) error {
 	return nil
 }
 
-// CreateSnapshot はスナップショットを登録する。
+// CreateSnapshot registers a snapshot.
 func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) error {
 	if err := f.record("snapshot create %s %s", instance, snapshot); err != nil {
 		return err
@@ -293,7 +295,7 @@ func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) erro
 	return nil
 }
 
-// Snapshots は登録済みのスナップショットを返す。
+// Snapshots returns the registered snapshots.
 func (f *Fake) Snapshots(_ context.Context, instance string) ([]incus.Snapshot, error) {
 	if err := f.record("snapshot list %s", instance); err != nil {
 		return nil, err
@@ -301,12 +303,12 @@ func (f *Fake) Snapshots(_ context.Context, instance string) ([]incus.Snapshot, 
 	return f.SnapshotsByInstance[instance], nil
 }
 
-// RestoreSnapshot は復元を記録する。
+// RestoreSnapshot records a restore.
 func (f *Fake) RestoreSnapshot(_ context.Context, instance, snapshot string) error {
 	return f.record("snapshot restore %s %s", instance, snapshot)
 }
 
-// DeleteSnapshot はスナップショットを削除する。
+// DeleteSnapshot removes a snapshot.
 func (f *Fake) DeleteSnapshot(_ context.Context, instance, snapshot string) error {
 	if err := f.record("snapshot delete %s %s", instance, snapshot); err != nil {
 		return err
@@ -327,13 +329,13 @@ func (f *Fake) DeleteSnapshot(_ context.Context, instance, snapshot string) erro
 	return nil
 }
 
-// Exec は実行内容を記録し、ExecFunc があればその結果を返す。
+// Exec records the execution and returns what ExecFunc says, if it is set.
 func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.ExecOptions) (int, error) {
 	if err := f.record("exec %s %s", name, strings.Join(argv, " ")); err != nil {
 		return 1, err
 	}
 
-	// 本物は停止中・不在のinstanceに対して失敗する。
+	// The real thing fails against a stopped or absent instance.
 	inst, ok := f.Instances[name]
 	if !ok {
 		return 1, fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
@@ -349,7 +351,7 @@ func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.Exe
 	return 0, nil
 }
 
-// WaitReady は FailReady が真の場合にエラーを返す。
+// WaitReady returns an error when FailReady is set.
 func (f *Fake) WaitReady(_ context.Context, name string, _ incus.WaitOptions) error {
 	if err := f.record("waitready %s", name); err != nil {
 		return err

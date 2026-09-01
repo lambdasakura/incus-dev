@@ -16,18 +16,20 @@ import (
 )
 
 const (
-	// InventoryHost は生成するinventory上のホスト名（仕様 06-provisioning.md 6.5.2）。
+	// InventoryHost is the host name in the generated inventory
+	// (spec 06-provisioning.md 6.5.2).
 	InventoryHost = "dev"
-	// InventoryGroup は生成するinventory上のグループ名。
+	// InventoryGroup is the group name in the generated inventory.
 	InventoryGroup = "devkit"
-	// ConnectionPlugin はコンテナへの接続に使用するconnection plugin。
+	// ConnectionPlugin is the connection plugin used to reach the container.
 	ConnectionPlugin = "community.general.incus"
 )
 
-// checkPrerequisites はansibleステップの前提が揃っているかを1度だけ確認する。
+// checkPrerequisites verifies, once, that the prerequisites for ansible steps
+// are in place.
 //
-// 揃っていない場合、ansible-playbook の出力は原因が分かりにくいため、
-// 対処方法を示して先に止める（仕様 06-provisioning.md 6.5.1）。
+// Without them, ansible-playbook's own output makes the cause hard to see, so
+// stop early and say what to do (spec 06-provisioning.md 6.5.1).
 func (e *Executor) checkPrerequisites(ctx context.Context) error {
 	e.ansibleCheck.Do(func() {
 		if _, err := e.Runner.Run(ctx, runner.Command{
@@ -52,7 +54,7 @@ func (e *Executor) checkPrerequisites(ctx context.Context) error {
 	return e.ansibleErr
 }
 
-// execAnsible はホスト側で ansible-playbook を実行する（仕様 06-provisioning.md 6.5）。
+// execAnsible runs ansible-playbook on the host (spec 06-provisioning.md 6.5).
 func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, env Env) error {
 	if err := e.checkPrerequisites(ctx); err != nil {
 		return err
@@ -73,7 +75,8 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 		return fmt.Errorf("write devkit vars: %w", err)
 	}
 
-	// 秘密情報は別ファイルにする。0600の一時ファイルで、実行後に削除される。
+	// Secrets go in a file of their own: a mode 0600 temporary file, deleted
+	// once the run is over.
 	secretsPath := filepath.Join(dir, "secrets.json")
 	if len(env.Secrets) > 0 {
 		if err := writeJSON(secretsPath, env.Secrets); err != nil {
@@ -85,7 +88,7 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	if step.Inventory != "" {
 		args.Add("-i", resolve(env.ProjectRoot, step.Inventory))
 	}
-	// devkitの変数を先に渡し、プロジェクト側での上書きを許す。
+	// Pass devkit's variables first, so the project can override them.
 	args.Add("--extra-vars=@" + varsPath)
 	if len(env.Secrets) > 0 {
 		args.Add("--extra-vars=@" + secretsPath)
@@ -99,12 +102,12 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	if len(step.SkipTags) > 0 {
 		args.Add("--skip-tags", strings.Join(step.SkipTags, ","))
 	}
-	// extra_args は ansible-playbook へ素通しするため、
-	// -e で秘密の変数を渡すといった使い方がありうる。
+	// extra_args passes straight to ansible-playbook, so it may well carry a
+	// secret variable through -e.
 	args.AddSecret(step.ExtraArgs...)
 	args.Add(resolve(env.ProjectRoot, step.Playbook))
 
-	// ラベルは RunSteps 側で付与するため、ここでは付けない（二重表示になる）。
+	// RunSteps adds the label, so adding one here would show it twice.
 	cmd := runner.Command{
 		Name:   "ansible-playbook",
 		Dir:    env.ProjectRoot,
@@ -118,7 +121,7 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	return err
 }
 
-// inventoryFor はdevkitが生成する一時inventoryの内容を組み立てる。
+// inventoryFor builds the contents of the temporary inventory devkit generates.
 func inventoryFor(env Env) map[string]any {
 	host := map[string]any{
 		"ansible_host":          env.Instance,
@@ -137,7 +140,8 @@ func inventoryFor(env Env) map[string]any {
 	}
 }
 
-// writeYAML は値をYAMLとして書き出す。一時ファイルなので所有者のみ読める。
+// writeYAML writes a value as YAML. It is a temporary file, readable only by
+// its owner.
 func writeYAML(path string, v any) error {
 	data, err := yaml.Marshal(v)
 	if err != nil {
@@ -146,7 +150,7 @@ func writeYAML(path string, v any) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// writeJSON は値をJSONとして書き出す。
+// writeJSON writes a value as JSON.
 func writeJSON(path string, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -155,7 +159,8 @@ func writeJSON(path string, v any) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// ansibleEnv はプロジェクトの ansible.cfg があればそれを使わせる（仕様 6.5.3）。
+// ansibleEnv points Ansible at the project's ansible.cfg when it has one
+// (spec 6.5.3).
 func ansibleEnv(root string) []string {
 	cfg := filepath.Join(root, project.ConfigDir, "ansible", "ansible.cfg")
 	if _, err := os.Stat(cfg); err != nil {

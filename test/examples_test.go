@@ -1,4 +1,4 @@
-// Package test はリポジトリ全体の構造とサンプルを検証する。
+// Package test checks the repository's overall structure and its examples.
 package test
 
 import (
@@ -9,7 +9,7 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 )
 
-// examples/ 配下のサンプルが常に妥当であること（仕様 08-testing.md 8.4）
+// The samples under examples/ are always valid (spec 08-testing.md 8.4).
 func TestExamplesAreValid(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join("..", "examples"))
 	if err != nil {
@@ -30,6 +30,6 @@ func TestExamplesAreValid(t *testing.T) {
 		checked++
 	}
 	if checked == 0 {
-		t.Error("examples が1つも見つからない")
+		t.Error("no example was found")
 	}
 }

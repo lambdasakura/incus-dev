@@ -47,12 +47,12 @@ func TestStringMapUnmarshalErrors(t *testing.T) {
 	var m StringMap
 
 	if err := m.UnmarshalJSON([]byte(`["not an object"]`)); err == nil {
-		t.Error("配列を受け付けないこと")
+		t.Error("want an array rejected")
 	}
 	if err := m.UnmarshalJSON([]byte(`{"key": {"nested": 1}}`)); err == nil {
-		t.Error("スカラ以外の値を受け付けないこと")
+		t.Error("want a non-scalar value rejected")
 	} else if !strings.Contains(err.Error(), "key") {
-		t.Errorf("error = %q, キー名を含むこと", err.Error())
+		t.Errorf("error = %q, want it to name the key", err.Error())
 	}
 }
 
@@ -60,11 +60,11 @@ func TestStepUnmarshalError(t *testing.T) {
 	var s Step
 
 	if err := s.UnmarshalJSON([]byte(`"not an object"`)); err == nil {
-		t.Error("文字列を受け付けないこと")
+		t.Error("want a string rejected")
 	}
 }
 
-// 両方指定・どちらも無い場合はデコード時にはエラーにせず、validationで報告する
+// Both set, and neither set, are not decode errors; validation reports them.
 func TestStepUnmarshalLeavesAmbiguousStepEmpty(t *testing.T) {
 	tests := []string{
 		`{"run": "cmd", "ansible": {"playbook": "p.yml"}}`,
@@ -77,7 +77,7 @@ func TestStepUnmarshalLeavesAmbiguousStepEmpty(t *testing.T) {
 			t.Fatalf("UnmarshalJSON(%s) error = %v", in, err)
 		}
 		if s.Run != nil || s.Ansible != nil {
-			t.Errorf("UnmarshalJSON(%s) = %+v, どちらも設定しないこと", in, s)
+			t.Errorf("UnmarshalJSON(%s) = %+v, want neither field set", in, s)
 		}
 	}
 }
@@ -120,11 +120,12 @@ func TestParseVersion(t *testing.T) {
 
 func TestRuntimeCompatibleReportsInvalidCurrent(t *testing.T) {
 	if _, err := runtimeCompatible("1.0", "broken"); err == nil {
-		t.Error("現行バージョンが不正ならエラーになること")
+		t.Error("want an error when the current version is malformed")
 	}
 }
 
-// stepsがリストでない場合はJSON Schemaが弾くため、validateStepsは何もしない
+// The JSON Schema rejects steps that are not a list, so validateSteps does
+// nothing with them.
 func TestValidateStepsIgnoresNonList(t *testing.T) {
 	var ps problems
 	validateSteps(map[string]any{"provision": "not a list"}, "provision", true, &ps)
@@ -137,14 +138,14 @@ func TestValidateStepsIgnoresNonList(t *testing.T) {
 
 func TestCompileSchemaRejectsBrokenInput(t *testing.T) {
 	if _, err := compileSchema([]byte("{")); err == nil {
-		t.Error("壊れたJSONを受け付けないこと")
+		t.Error("want broken JSON rejected")
 	}
 	if _, err := compileSchema([]byte(`{"type": 123}`)); err == nil {
-		t.Error("不正なSchemaを受け付けないこと")
+		t.Error("want an invalid schema rejected")
 	}
 }
 
-// 同梱Schemaは常にコンパイルできること
+// The embedded schema always compiles.
 func TestEmbeddedSchemaCompiles(t *testing.T) {
 	if devSchema() == nil {
 		t.Error("devSchema() = nil")
@@ -175,12 +176,12 @@ func TestDecodeDocumentRejectsInvalidJSON(t *testing.T) {
 
 func TestCompileSchemaRejectsNonObject(t *testing.T) {
 	if _, err := compileSchema([]byte(`[1, 2]`)); err == nil {
-		t.Error("配列をSchemaとして受け付けないこと")
+		t.Error("want an array rejected as a schema")
 	}
 }
 
 func TestCompileSchemaRejectsInvalidID(t *testing.T) {
 	if _, err := compileSchema([]byte(`{"$id": "::::"}`)); err == nil {
-		t.Error("不正な $id を受け付けないこと")
+		t.Error("want an invalid $id rejected")
 	}
 }

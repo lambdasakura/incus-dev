@@ -37,7 +37,7 @@ func TestPlanActionsForNewInstance(t *testing.T) {
 		"Provision step 2/2: main playbook (ansible",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("plan =\n%s\n%q を含むこと", got, want)
+			t.Errorf("plan =\n%s\nwant it to contain %q", got, want)
 		}
 	}
 }
@@ -51,8 +51,8 @@ func TestPlanActionsForExistingInstance(t *testing.T) {
 		Status: "Running",
 		Config: map[string]string{
 			managedProjectKey: "example-project",
-			"limits.cpu":      "4",          // 変更あり
-			idmapConfigKey:    "uid 1000 0", // shiftへ切り替えるので取り消される
+			"limits.cpu":      "4",          // changed
+			idmapConfigKey:    "uid 1000 0", // unset, since we switch to shift
 		},
 		Devices: map[string]incus.Device{
 			"workspace": {"type": "disk", "path": "/workspace", "source": "/old"},
@@ -68,12 +68,12 @@ func TestPlanActionsForExistingInstance(t *testing.T) {
 		"Update device workspace",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("plan =\n%s\n%q を含むこと", got, want)
+			t.Errorf("plan =\n%s\nwant it to contain %q", got, want)
 		}
 	}
 	for _, unwanted := range []string{"Create instance", "Start instance"} {
 		if strings.Contains(got, unwanted) {
-			t.Errorf("plan =\n%s\n%q を含めないこと", got, unwanted)
+			t.Errorf("plan =\n%s\nwant it not to contain %q", got, unwanted)
 		}
 	}
 }
@@ -85,7 +85,7 @@ func TestPlanActionsStartsStoppedInstance(t *testing.T) {
 	got := strings.Join(planActions(cfg, "dev-example-project", current, idmapPlan{}), "\n")
 
 	if !strings.Contains(got, "Start instance") {
-		t.Errorf("plan =\n%s\n停止中なら起動を示すこと", got)
+		t.Errorf("plan =\n%s\nwant it to show a start when it is stopped", got)
 	}
 }
 
@@ -95,10 +95,10 @@ func TestPlanActionsBootstrapSource(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"既定", dryRunYAML, "Bootstrap: 1 step (default)"},
-		{"明示", planBase + "bootstrap:\n  - run: a\n  - run: b\n", "Bootstrap: 2 step(s) (from dev.yml)"},
-		{"無効", planBase + "bootstrap: []\n", "Bootstrap: skipped"},
-		{"不要", planBase + "provision:\n  - run: a\n", "Bootstrap: skipped"},
+		{"default", dryRunYAML, "Bootstrap: 1 step (default)"},
+		{"declared", planBase + "bootstrap:\n  - run: a\n  - run: b\n", "Bootstrap: 2 step(s) (from dev.yml)"},
+		{"disabled", planBase + "bootstrap: []\n", "Bootstrap: skipped"},
+		{"not needed", planBase + "provision:\n  - run: a\n", "Bootstrap: skipped"},
 	}
 
 	for _, tt := range tests {
@@ -106,7 +106,7 @@ func TestPlanActionsBootstrapSource(t *testing.T) {
 			got := strings.Join(planActions(mustParse(t, tt.yaml), "dev-x", nil, idmapPlan{}), "\n")
 
 			if !strings.Contains(got, tt.want) {
-				t.Errorf("plan =\n%s\n%q を含むこと", got, tt.want)
+				t.Errorf("plan =\n%s\nwant it to contain %q", got, tt.want)
 			}
 		})
 	}

@@ -1,5 +1,5 @@
-// Package project はプロジェクトroot（.incus-dev/dev.yml を持つディレクトリ）の
-// 探索を担当する。
+// Package project locates the project root, the directory holding
+// .incus-dev/dev.yml.
 package project
 
 import (
@@ -10,36 +10,36 @@ import (
 )
 
 const (
-	// ConfigDir はプロジェクト側の設定ディレクトリ名。
+	// ConfigDir is the name of the project's configuration directory.
 	ConfigDir = ".incus-dev"
-	// ConfigFile は開発環境定義ファイル名。
+	// ConfigFile is the name of the environment definition file.
 	ConfigFile = "dev.yml"
 )
 
-// ErrNotFound はプロジェクトrootが見つからなかったことを示す。
+// ErrNotFound reports that no project root was found.
 var ErrNotFound = errors.New("project root not found")
 
-// Project は探索されたプロジェクトを表す。
+// Project is a discovered project.
 type Project struct {
-	// Root はプロジェクトrootの絶対パス。
+	// Root is the absolute path of the project root.
 	Root string
-	// ConfigPath は dev.yml の絶対パス。
+	// ConfigPath is the absolute path of dev.yml.
 	ConfigPath string
 }
 
-// Discover は startDir から親方向へ .incus-dev/dev.yml を探索する。
-// 最も近いプロジェクトrootを返す。
+// Discover looks for .incus-dev/dev.yml from startDir upwards and returns
+// the nearest project root.
 func Discover(startDir string) (*Project, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve start directory %q: %w", startDir, err)
 	}
-	// t.TempDir() などがsymlinkを含む場合に備えて正規化する。
+	// Normalise, in case the path contains a symlink (t.TempDir() often does).
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
 
-	// .incus-dev/ はあるが dev.yml が無いディレクトリ（設定漏れの可能性）。
+	// A directory with .incus-dev/ but no dev.yml, which is likely a mistake.
 	var configDirWithoutFile string
 
 	for {

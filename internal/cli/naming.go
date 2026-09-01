@@ -10,18 +10,18 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/runner"
 )
 
-// branchFunc は現在のGitブランチ名を返す。
+// branchFunc returns the current Git branch name.
 type branchFunc func() (string, error)
 
-// instanceNameFor は project.scope に従ってinstance名を決める
-// （仕様 05-incus.md 5.1）。
+// instanceNameFor derives the instance name according to project.scope
+// (spec 05-incus.md 5.1).
 //
-// 既定は従来どおりプロジェクト名のみ。同一マシンで複数のチェックアウトを
-// 扱う場合に、パスやブランチで区別できるようにする。
+// The default is the project name alone, as before. Several checkouts on one
+// machine can be told apart by path or by branch.
 func instanceNameFor(cfg *config.Config, branch branchFunc) (string, error) {
 	switch cfg.Project.ScopeOrDefault() {
 	case config.ScopePath:
-		// チェックアウト先ごとに安定した接尾辞にする。
+		// A suffix that is stable per checkout.
 		return incus.InstanceNameWithSuffix(cfg.Project.Name, incus.ShortHash(cfg.Root)), nil
 
 	case config.ScopeBranch:
@@ -39,10 +39,10 @@ func instanceNameFor(cfg *config.Config, branch branchFunc) (string, error) {
 	}
 }
 
-// gitBranch は project root の現在のブランチ名を返す。
+// gitBranch returns the current branch name at the project root.
 //
-// symbolic-ref はコミットが無いリポジトリでもブランチ名を返す。
-// detached HEAD では失敗するため、その場合はコミットの短縮ハッシュを使う。
+// symbolic-ref gives a branch name even in a repository with no commits. It
+// fails on a detached HEAD, where the commit's short hash is used instead.
 func gitBranch(ctx context.Context, r runner.Runner, root string) branchFunc {
 	return func() (string, error) {
 		for _, args := range [][]string{

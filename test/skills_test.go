@@ -10,9 +10,9 @@ import (
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 )
 
-// skillDirs は skills/ 配下のスキル一覧を返す。
+// skillDirs lists the skills under skills/.
 //
-// 言語別に複数のスキルがあるため、どれも同じ検査を通す。
+// There is one per language, and every one goes through the same checks.
 func skillDirs(t *testing.T) []string {
 	t.Helper()
 
@@ -28,13 +28,13 @@ func skillDirs(t *testing.T) []string {
 		}
 	}
 	if len(dirs) == 0 {
-		t.Fatal("skills/ にスキルが1つも無い")
+		t.Fatal("skills/ holds no skill at all")
 	}
 	return dirs
 }
 
-// スキルが配る雛形が常に妥当であること。
-// 壊れた雛形をエージェントへ渡すと、そのまま壊れた dev.yml が生まれる。
+// The template a skill hands out is always valid. A broken template given to an
+// agent turns straight into a broken dev.yml.
 func TestSkillTemplateIsValid(t *testing.T) {
 	for _, dir := range skillDirs(t) {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
@@ -47,8 +47,8 @@ func TestSkillTemplateIsValid(t *testing.T) {
 	}
 }
 
-// スキルが案内するコマンドが実在すること。
-// CLIを変えたときに追従漏れへ気付けるようにする。
+// The commands a skill points at exist. This is what catches a skill left
+// behind when the CLI changes.
 func TestSkillReferencesExistingCommands(t *testing.T) {
 	root := filepath.Join("..", "skills")
 
@@ -57,23 +57,24 @@ func TestSkillReferencesExistingCommands(t *testing.T) {
 		"status": true, "validate": true, "destroy": true, "rebuild": true,
 		"snapshot": true, "completion": true,
 	}
-	// `idev <サブコマンド>` の形を拾う（`idev --version` などは対象外）。
+	// Pick up the `idev <subcommand>` shape; `idev --version` and the like are out
+	// of scope.
 	command := regexp.MustCompile(`idev ([a-z][a-z-]*)`)
 
-	// frontmatterは散文なので対象外。英語では "the idev command" のような
-	// 言い回しが混ざり、コマンドの案内と区別できない。
+	// The frontmatter is prose and out of scope: in English, phrasing such as
+	// "the idev command" is indistinguishable from pointing at a command.
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
-		body, err := os.ReadFile(path) //nolint:gosec // 走査対象はリポジトリ内の固定パス
+		body, err := os.ReadFile(path) //nolint:gosec // the walk is over a fixed path inside the repository
 		if err != nil {
 			return err
 		}
 		for _, m := range command.FindAllStringSubmatch(withoutFrontmatter(string(body)), -1) {
 			if !known[m[1]] {
-				t.Errorf("%s: 存在しないコマンド %q を案内している", path, "idev "+m[1])
+				t.Errorf("%s: points at %q, which does not exist", path, "idev "+m[1])
 			}
 		}
 		return nil
@@ -83,7 +84,7 @@ func TestSkillReferencesExistingCommands(t *testing.T) {
 	}
 }
 
-// withoutFrontmatter はYAML frontmatterを取り除いた本文を返す。
+// withoutFrontmatter returns the body with the YAML frontmatter removed.
 func withoutFrontmatter(text string) string {
 	rest, ok := strings.CutPrefix(text, "---\n")
 	if !ok {
@@ -95,9 +96,9 @@ func withoutFrontmatter(text string) string {
 	return text
 }
 
-// スキルの入口（SKILL.md）が、エージェントが読める形であること。
+// A skill's entry point, SKILL.md, is in a shape an agent can read.
 //
-// name はスキルの識別子なので、ディレクトリ名と一致し、かつ重複しないこと。
+// name identifies the skill, so it matches the directory name and is unique.
 func TestSkillHasFrontmatter(t *testing.T) {
 	seen := map[string]string{}
 
@@ -110,31 +111,31 @@ func TestSkillHasFrontmatter(t *testing.T) {
 
 			text := string(body)
 			if !strings.HasPrefix(text, "---\n") {
-				t.Fatal("SKILL.md がfrontmatterで始まっていない")
+				t.Fatal("SKILL.md does not begin with frontmatter")
 			}
 			front, _, found := strings.Cut(strings.TrimPrefix(text, "---\n"), "\n---\n")
 			if !found {
-				t.Fatal("frontmatterが閉じていない")
+				t.Fatal("the frontmatter is never closed")
 			}
 			for _, key := range []string{"name:", "description:"} {
 				if !strings.Contains(front, key) {
-					t.Errorf("frontmatterに %s が無い", key)
+					t.Errorf("the frontmatter has no %s", key)
 				}
 			}
 
 			name := skillName(front)
 			if want := filepath.Base(dir); name != want {
-				t.Errorf("name = %q, ディレクトリ名 %q と一致すること", name, want)
+				t.Errorf("name = %q, want it to match the directory name %q", name, want)
 			}
 			if other, dup := seen[name]; dup {
-				t.Errorf("name %q が %s と重複している", name, other)
+				t.Errorf("name %q collides with %s", name, other)
 			}
 			seen[name] = dir
 		})
 	}
 }
 
-// skillName はfrontmatterから name の値を取り出す。無ければ空文字列。
+// skillName pulls the value of name out of the frontmatter, or the empty string.
 func skillName(front string) string {
 	for _, line := range strings.Split(front, "\n") {
 		if rest, ok := strings.CutPrefix(line, "name:"); ok {

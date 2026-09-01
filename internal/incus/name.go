@@ -7,22 +7,24 @@ import (
 )
 
 const (
-	// InstanceNamePrefix は生成するinstance名の接頭辞。
-	// コマンド名 idev とは独立しており、「開発環境用instance」を意味する。
+	// InstanceNamePrefix is the prefix of the instance names devkit creates.
+	// It is independent of the command name idev, and means "an instance for
+	// development".
 	InstanceNamePrefix = "dev-"
-	// maxInstanceNameLength はIncusのinstance名の最大長。
+	// maxInstanceNameLength is the longest name Incus accepts.
 	maxInstanceNameLength = 63
 )
 
-// InstanceName はプロジェクト名からIncus instance名を生成する。
-// Incusのinstance名制約（英数字とハイフン、63文字以内）に適合するよう正規化する。
+// InstanceName derives an Incus instance name from a project name,
+// normalising it to what Incus accepts: letters, digits and hyphens, at most
+// 63 characters.
 func InstanceName(projectName string) string {
 	return InstanceNameWithSuffix(projectName, "")
 }
 
-// InstanceNameWithSuffix は接尾辞付きのinstance名を生成する。
+// InstanceNameWithSuffix derives an instance name with a suffix.
 //
-// 同一マシンで複数のチェックアウトを区別するために使う（仕様 05-incus.md 5.1）。
+// It tells several checkouts on one machine apart (spec 05-incus.md 5.1).
 func InstanceNameWithSuffix(projectName, suffix string) string {
 	if suffix != "" {
 		projectName += "-" + suffix
@@ -30,7 +32,7 @@ func InstanceNameWithSuffix(projectName, suffix string) string {
 	return instanceName(projectName)
 }
 
-// ShortHash は名前を区別するための短い16進文字列を返す。
+// ShortHash returns a short hexadecimal string that distinguishes a name.
 func ShortHash(s string) string {
 	return shortHash(s)
 }
@@ -52,8 +54,8 @@ func instanceName(projectName string) string {
 	}
 	normalized := strings.Trim(sb.String(), "-")
 	if normalized == "" {
-		// 英数字を含まない名前はすべて同じ結果になってしまうため、
-		// 元の名前から短いハッシュを作って区別する。
+		// Names with no letters or digits would all normalise to the same
+		// thing, so distinguish them with a short hash of the original.
 		normalized = shortHash(projectName)
 	}
 
@@ -64,7 +66,7 @@ func instanceName(projectName string) string {
 	return strings.TrimRight(name, "-")
 }
 
-// shortHash は名前を区別するための短い16進文字列を返す。
+// shortHash returns a short hexadecimal string that distinguishes a name.
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:4])
