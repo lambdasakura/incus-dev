@@ -6,8 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/config"
 	"gitlab.light-of-moe.com/sakura/incus-devkit/internal/incus"
@@ -695,4 +699,66 @@ func TestSnapshotCommandsPropagateFactoryError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 利用者が見るCLIのテキストは英語（ASCII）であること。
+//
+// このツールは外部公開しており、usage・フラグ説明・確認プロンプトは
+// 英語を標準とする。日本語の説明はマニュアルの日本語版が担う。
+func TestUserFacingTextIsASCII(t *testing.T) {
+	nonASCII := regexp.MustCompile(`[^\x00-\x7F]`)
+
+	t.Run("help", func(t *testing.T) {
+		var walk func(c *cobra.Command)
+		walk = func(c *cobra.Command) {
+			for label, text := range map[string]string{
+				"Short": c.Short, "Long": c.Long, "Example": c.Example, "Use": c.Use,
+			} {
+				if found := nonASCII.FindString(text); found != "" {
+					t.Errorf("%s: %s に非ASCII %q が含まれる: %q",
+						c.CommandPath(), label, found, text)
+				}
+			}
+			check := func(f *pflag.Flag) {
+				if found := nonASCII.FindString(f.Usage); found != "" {
+					t.Errorf("%s: --%s の説明に非ASCII %q が含まれる: %q",
+						c.CommandPath(), f.Name, found, f.Usage)
+				}
+			}
+			c.Flags().VisitAll(check)
+			c.PersistentFlags().VisitAll(check)
+			for _, sub := range c.Commands() {
+				walk(sub)
+			}
+		}
+		walk(NewRootCommand("test"))
+	})
+
+	t.Run("confirm", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"destroy"}, {"rebuild"},
+			{"snapshot", "restore", "s1"}, {"snapshot", "delete", "s1"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				out := &bytes.Buffer{}
+				app, client := fakeApp(t, out)
+				client.AddInstance(&incus.Instance{
+					Name:   "dev-example-project",
+					Status: "Running",
+					Config: map[string]string{managedProjectKey: "example-project"},
+				})
+
+				root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+				root.SetArgs(args)
+				root.SetIn(strings.NewReader("n\n"))
+				root.SetOut(out)
+				root.SetErr(out)
+				_ = root.ExecuteContext(context.Background())
+
+				if found := nonASCII.FindString(out.String()); found != "" {
+					t.Errorf("確認プロンプトに非ASCII %q が含まれる: %q", found, out.String())
+				}
+			})
+		}
+	})
 }
