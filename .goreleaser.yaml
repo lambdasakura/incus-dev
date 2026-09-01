@@ -1,0 +1,88 @@
+# GoReleaser builds the release archives and publishes the GitHub Release.
+#
+# Try it locally without publishing anything:
+#     goreleaser release --snapshot --clean
+version: 2
+
+project_name: incus-devkit
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: idev
+    main: ./cmd/idev
+    binary: idev
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # main.version is what `idev --version` reports.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    # Reproducible builds: stamp the commit time, not the build time.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: idev
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - README.ja.md
+      - LICENSE
+      # Whole directories are included recursively; a `**/*` glob would
+      # skip the files sitting directly in them.
+      - docs/manual
+      - examples
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^chore:'
+      - '^ci:'
+      - '^docs:'
+      - '^test:'
+
+release:
+  prerelease: auto
+  footer: |
+    ## Installation
+
+    Download the archive for your platform, unpack it, and put `idev` on your
+    `PATH`. Verify the download against `checksums.txt` first:
+
+    ```bash
+    sha256sum --check --ignore-missing checksums.txt
+    ```
+
+    See `docs/manual/01-installation.md` in the archive for the rest of the
+    setup (Incus, and optionally Ansible).
