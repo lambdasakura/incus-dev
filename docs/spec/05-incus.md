@@ -300,6 +300,8 @@ remote・project・imageの解決には `incus` コマンドと同じ設定
   **失敗しても必ず元へ戻す**（戻さないとシェルが壊れる）
 - 端末サイズを `InstanceExecPost.Width` / `Height` で渡す
 - SIGWINCH を受けたら、制御用websocketへ `window-resize` を送る
+  （Windowsには SIGWINCH が無いため、購読はビルドタグで分離し、
+  そちらでは開始時のサイズのみを送る。仕様 07-implementation.md 7.7）
 - ホストの `TERM` をコンテナへ渡す。Incusは既定値を補わないため、
   渡さないと `vim` や `less` が端末を判別できない
 

@@ -297,7 +297,21 @@ project root検出にGitを利用してもよい。
 
 ---
 
-## 7.7 コーディング規約
+## 7.7 対応プラットフォーム
+
+配布するのは linux / darwin / windows の amd64・arm64 バイナリである。
+いずれも `CGO_ENABLED=0` の静的バイナリとする。
+
+Incus daemon自体はLinux上で動くが、`idev` はAPIクライアントであるため、
+remoteのIncusへ接続する用途で macOS / Windows からも利用できる。
+
+プラットフォーム依存の処理はビルドタグで分離したファイルに置く
+（例: `internal/incus/exec_tty_unix.go` と `exec_tty_windows.go`）。
+`runtime.GOOS` による実行時分岐は使わない。
+
+---
+
+## 7.8 コーディング規約
 
 - `gofmt` / `go vet` を通すこと（CIで検証する）
 - `golangci-lint` の導入を推奨する
@@ -310,7 +324,7 @@ project root検出にGitを利用してもよい。
 
 ---
 
-## 7.8 AIエージェントによる開発時の原則
+## 7.9 AIエージェントによる開発時の原則
 
 本ツール自体をAIエージェント（Codex / Claude Code）で開発する場合、以下を守る。
 
