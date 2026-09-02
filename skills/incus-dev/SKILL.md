@@ -36,6 +36,7 @@ expressible in `dev.yml` yet.
 | Prepare the environment (first time, after a `dev.yml` change) | `idev up` |
 | Run a command in the container | `idev exec -- make test` |
 | Get an interactive shell | `idev shell` |
+| Run something as another user | `idev exec --user root -- apt-get ...` |
 | Re-run provisioning only | `idev provision` |
 | See what would happen first | `idev up --dry-run` |
 | Read the state machine-readably | `idev status --json` |
@@ -43,6 +44,10 @@ expressible in `dev.yml` yet.
 | Check `dev.yml` alone (touches no Incus) | `idev validate` |
 | Start over | `idev rebuild --force` |
 | Remove it (host sources stay) | `idev destroy --force` |
+
+`--user` overrides `shell.user` for one run, on both `shell` and `exec`. It
+takes a name or a uid. Editing `shell.user` in `dev.yml` instead changes it for
+everyone working on the project.
 
 `idev ip` prints one address and nothing else, so it can be substituted.
 IPv4 before IPv6, the same one every run, and nothing at all on stdout when

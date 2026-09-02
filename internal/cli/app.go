@@ -483,19 +483,28 @@ func (a *App) Rebuild(ctx context.Context) error {
 }
 
 // Shell runs an interactive shell, or a given command, inside the container.
-func (a *App) Shell(ctx context.Context, argv []string) error {
-	return a.execInContainer(ctx, argv, a.interactive)
+func (a *App) Shell(ctx context.Context, argv []string, opt ShellOptions) error {
+	return a.execInContainer(ctx, argv, a.interactive, opt)
 }
 
 // Exec runs a command inside the container without allocating a terminal.
 //
 // It is meant for scripts and CI, and unlike shell it is never interactive.
-func (a *App) Exec(ctx context.Context, argv []string) error {
-	return a.execInContainer(ctx, argv, false)
+func (a *App) Exec(ctx context.Context, argv []string, opt ShellOptions) error {
+	return a.execInContainer(ctx, argv, false, opt)
+}
+
+// ShellOptions is the per-run override of the shell declaration.
+type ShellOptions struct {
+	// User replaces shell.user for this run. Empty means the declaration
+	// stands: a shell that expanded a variable to nothing and a caller who
+	// meant "the instance default" arrive here alike, so the second is asked
+	// for by naming the user (spec 04-cli.md 4.3).
+	User string
 }
 
 // execInContainer runs a command inside the container.
-func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) error {
+func (a *App) execInContainer(ctx context.Context, argv []string, tty bool, opt ShellOptions) error {
 	inst, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp)
 	if err != nil {
 		return err
@@ -505,12 +514,15 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 	}
 
 	sh := a.cfg.ShellOrDefault()
+	if opt.User != "" {
+		sh.User = opt.User
+	}
 	if len(argv) == 0 {
 		argv = []string{sh.Command}
 	}
 	argv, user := asUser(argv, sh)
 
-	opt := incus.ExecOptions{
+	exec := incus.ExecOptions{
 		Cwd:  sh.Cwd,
 		User: user,
 		// Allocating a pseudo-terminal when nothing is attached to one puts
@@ -522,7 +534,7 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 		Stderr: a.errOut,
 	}
 
-	code, err := a.client.Exec(ctx, a.instance, argv, opt)
+	code, err := a.client.Exec(ctx, a.instance, argv, exec)
 	if err != nil {
 		// A command that merely exited non-zero has its exit code propagated;
 		// it is not idev's own error.

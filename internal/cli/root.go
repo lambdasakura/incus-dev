@@ -278,6 +278,7 @@ func newProvisionCommand(g *globalFlags, newApp, offline appFactory) *cobra.Comm
 }
 
 func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	var user string
 	c := &cobra.Command{
 		Use:   "shell [-- command...]",
 		Short: "Open a shell in the container, or run the given command",
@@ -286,9 +287,11 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.Shell(cmd.Context(), args)
+			return app.Shell(cmd.Context(), args, ShellOptions{User: user})
 		},
 	}
+	c.Flags().StringVar(&user, "user", "",
+		"user to run as, overriding shell.user for this run (a name or a uid)")
 	// Keep idev from reading the -lc of idev shell -- bash -lc "..." as its own
 	// flag.
 	c.Flags().SetInterspersed(false)
@@ -297,6 +300,7 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 }
 
 func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	var user string
 	c := &cobra.Command{
 		Use:   "exec -- <command>",
 		Short: "Run a command in the container without allocating a terminal",
@@ -313,9 +317,11 @@ func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.Exec(cmd.Context(), args)
+			return app.Exec(cmd.Context(), args, ShellOptions{User: user})
 		},
 	}
+	c.Flags().StringVar(&user, "user", "",
+		"user to run as, overriding shell.user for this run (a name or a uid)")
 	// Keep idev from reading the -l of idev exec -- ls -l as its own flag.
 	c.Flags().SetInterspersed(false)
 

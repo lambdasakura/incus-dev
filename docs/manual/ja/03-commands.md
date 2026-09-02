@@ -201,6 +201,25 @@ idev shell -- go test ./... | tee test.log
 
 コマンドの終了コードはそのまま `idev` の終了コードになる。
 
+### `--user`
+
+その実行に限り `shell.user` を上書きする。`idev exec` にも同じフラグがある。
+
+```bash
+idev shell --user root
+idev exec --user root -- apt-get install -y tcpdump
+```
+
+`shell.user` は「普段どのユーザーで作業するか」というプロジェクト全員の宣言であり、
+一度rootが要るだけで `dev.yml` を書き換えるのは釣り合わない。
+値は名前かuidで、解釈は `shell.user` と同じである。
+`shell.user` を設定した状態でinstanceの既定ユーザーへ戻すには、
+`--user root` のように名前を指定する。
+
+`examples/dev-user/` がこの構成の実物である。
+provisioningでアカウントを作り、`shell.user` でそこへ入り、
+rootが要るときは `--user root` を使う。
+
 ---
 
 ## 3.5.1 `idev exec`

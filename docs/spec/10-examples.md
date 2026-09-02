@@ -174,6 +174,55 @@ Roleは完全にプロジェクトの所有物であり、idevの更新の影響
 
 ---
 
+## 10.3.1 一般ユーザーで作業する
+
+provisioningでアカウントを作り、`shell.user` でそこへ入る。
+`examples/dev-user/` が実物である。
+
+```yaml
+workspace:
+  idmap: shift
+
+provision:
+  - name: developer account
+    run: sh /workspace/.incus-dev/scripts/create-user.sh
+    env:
+      DEV_USER: developer
+      DEV_UID: "1000"
+      DEV_GID: "1000"
+
+shell:
+  user: developer
+  command: /bin/bash
+  cwd: /workspace
+```
+
+`idmap` の選択がこの構成の成立条件である。実daemonで測ると次のようになる。
+
+| `workspace.idmap` | コンテナ内 root が書いたファイル | コンテナ内の一般アカウント |
+| --- | --- | --- |
+| `raw` | ホストの実行ユーザー | workspaceへ書き込めない |
+| `shift` | ホストの `root` | uidが一致すればホストの実行ユーザー |
+
+`raw` が付け替えるのはコンテナの **root** の1点だけであり、
+一般アカウントのidは何もしない場合と変わらない。
+workspaceはコンテナ内からrootの所有に見えるので、そもそも書き込めない。
+`shift` はそのマウントで名前空間の効果を打ち消すため、
+アカウントに実行ユーザーと同じuid/gidを与えれば書いたファイルの所有者が一致する。
+`DEV_UID` / `DEV_GID` がそれである。詳しくは
+[03-configuration.md](03-configuration.md) 3.7.3。
+
+イメージが既に同じuidのアカウントを持つ場合（Ubuntuイメージの `ubuntu` は
+uid 1000）、`useradd --non-unique` で両方が存在する。
+`id` が返す名前はgetentが先に返した方になるが、
+workspaceにとって意味を持つのはuidであり、それは要求したものになる。
+
+一時的にrootで入るには `idev shell --user root` を使う
+（[04-cli.md](04-cli.md) 4.3）。`dev.yml` を書き換えると
+その変更は他の全員へ及ぶ。
+
+---
+
 ## 10.4 併用と順序制御
 
 `run` と `ansible` は自由に混在でき、記述順に実行される。

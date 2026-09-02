@@ -1,0 +1,55 @@
+# Work as an ordinary user rather than as root.
+#
+# Provisioning creates the account; shell.user is what makes 'idev shell' and
+# 'idev exec' land in it. 'idev shell --user root' gets you root for one
+# command without editing this file.
+schema: 1
+
+runtime:
+  version: "1.1"
+
+project:
+  name: dev-user-example
+
+instance:
+  image: images:ubuntu/24.04
+
+workspace:
+  source: .
+  target: /workspace
+  # shift, not the default auto, and the choice is what makes this example
+  # work. The two modes map opposite ends of the container:
+  #
+  #   raw    swaps one id in the container's map: container root becomes
+  #          you on the host. Every other id is left where it was, so the
+  #          workspace looks root-owned from inside and an ordinary
+  #          account cannot write to it at all.
+  #   shift  leaves the map alone and cancels it out on this mount, so
+  #          container uid N is host uid N. An account holding your uid
+  #          writes files that are yours.
+  #
+  # That is why DEV_UID and DEV_GID below have to be yours.
+  idmap: shift
+
+provision:
+  - name: base packages
+    run: |
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends sudo git make
+
+  - name: developer account
+    run: sh /workspace/.incus-dev/scripts/create-user.sh
+    env:
+      DEV_USER: developer
+      # Your ids on the host: run 'id -u' and 'id -g'. A file this account
+      # writes in the workspace belongs to the host user and group with these
+      # ids, so they have to be yours.
+      DEV_UID: "1000"
+      DEV_GID: "1000"
+
+shell:
+  # Where 'idev shell' and 'idev exec' land.
+  user: developer
+  command: /bin/bash
+  cwd: /workspace

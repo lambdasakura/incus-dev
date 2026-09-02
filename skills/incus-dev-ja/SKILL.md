@@ -33,6 +33,7 @@ idev exec -- make test
 | 環境を用意する（初回・`dev.yml` 変更後） | `idev up` |
 | コンテナ内でコマンドを実行する | `idev exec -- make test` |
 | 対話シェルに入る | `idev shell` |
+| 別のユーザーで実行する | `idev exec --user root -- apt-get ...` |
 | provisionだけ流し直す | `idev provision` |
 | 何が起きるか先に見る | `idev up --dry-run` |
 | 状態を機械可読に取る | `idev status --json` |
@@ -40,6 +41,10 @@ idev exec -- make test
 | `dev.yml` の妥当性だけ確認する（Incusに触れない） | `idev validate` |
 | 作り直す | `idev rebuild --force` |
 | 消す（ホストのソースは残る） | `idev destroy --force` |
+
+`--user` はその実行に限り `shell.user` を上書きする（`shell` / `exec` 共通、
+名前かuid）。`dev.yml` の `shell.user` を書き換えると、
+プロジェクトに関わる全員に及ぶ。
 
 `idev ip` はアドレスを1つだけ、それ以外は何も出さない（コマンド置換に入れるため）。
 IPv4をIPv6より優先し、毎回同じものを返す。アドレスが無い場合は標準出力へ

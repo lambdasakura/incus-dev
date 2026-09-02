@@ -12,6 +12,7 @@
 | [minimal](minimal/) | `dev.yml` 1ファイルのみ |
 | [shell-based](shell-based/) | シェルスクリプトで構成（Ansible不要） |
 | [ansible-based](ansible-based/) | Ansibleで構成 |
+| [dev-user](dev-user/) | provisioningで一般ユーザーを作り、`idev shell` をそこへ入れる |
 
 各例のディレクトリで以下を実行できる。
 

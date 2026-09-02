@@ -365,7 +365,7 @@ func TestMissingInstanceAdvisesUpWhereThatHelps(t *testing.T) {
 		name string
 		run  func(cli.App) error
 	}{
-		{"shell", func(a cli.App) error { return a.Shell(context.Background(), nil) }},
+		{"shell", func(a cli.App) error { return a.Shell(context.Background(), nil, cli.ShellOptions{}) }},
 		{"provision", func(a cli.App) error {
 			return a.Provision(context.Background(), provision.Selection{})
 		}},
@@ -499,7 +499,7 @@ func TestRebuildWhenInstanceMissingJustCreates(t *testing.T) {
 func TestShellRequiresRunningInstance(t *testing.T) {
 	app, _, _ := newApp(t, baseYAML)
 
-	if err := app.Shell(context.Background(), nil); err == nil {
+	if err := app.Shell(context.Background(), nil, cli.ShellOptions{}); err == nil {
 		t.Fatal("Shell() = nil error, want a failure without an instance")
 	}
 }
@@ -512,7 +512,7 @@ func TestShellExecutesInteractiveShell(t *testing.T) {
 		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
-	if err := app.Shell(context.Background(), nil); err != nil {
+	if err := app.Shell(context.Background(), nil, cli.ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if len(client.Execs) == 0 {
@@ -531,7 +531,7 @@ func TestShellRunsGivenCommand(t *testing.T) {
 		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
-	if err := app.Shell(context.Background(), []string{"make", "test"}); err != nil {
+	if err := app.Shell(context.Background(), []string{"make", "test"}, cli.ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if diff := cmp.Diff([]string{"make", "test"}, client.Execs[0]); diff != "" {
@@ -648,7 +648,7 @@ func TestShellPropagatesExitCode(t *testing.T) {
 		return 42, nil
 	}
 
-	err := app.Shell(context.Background(), []string{"sh", "-c", "exit 42"})
+	err := app.Shell(context.Background(), []string{"sh", "-c", "exit 42"}, cli.ShellOptions{})
 
 	var exitErr *cli.ExitCodeError
 	if !errors.As(err, &exitErr) {
@@ -699,7 +699,7 @@ func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 				CheckIDMap:  func(int, int) error { return nil },
 			})
 
-			if err := app.Shell(context.Background(), []string{"pwd"}); err != nil {
+			if err := app.Shell(context.Background(), []string{"pwd"}, cli.ShellOptions{}); err != nil {
 				t.Fatalf("Shell() error = %v", err)
 			}
 			if got.TTY != tt.wantTTY {
@@ -737,7 +737,7 @@ func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Shell(context.Background(), []string{"pwd"}); err != nil {
+	if err := app.Shell(context.Background(), []string{"pwd"}, cli.ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if !gotStdout {
@@ -837,7 +837,7 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 		return 0, nil
 	}
 
-	if err := app.Shell(context.Background(), nil); err != nil {
+	if err := app.Shell(context.Background(), nil, cli.ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
@@ -911,7 +911,7 @@ func TestShellPassesTerm(t *testing.T) {
 		CheckIDMap:  func(int, int) error { return nil },
 	})
 
-	if err := app.Shell(context.Background(), nil); err != nil {
+	if err := app.Shell(context.Background(), nil, cli.ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if got.Term != "xterm-256color" {
@@ -1084,10 +1084,10 @@ func TestCommandsReadTheInstanceOnce(t *testing.T) {
 			return a.Provision(context.Background(), provision.Selection{})
 		}},
 		{"exec", func(a *cli.App) error {
-			return a.Exec(context.Background(), []string{"true"})
+			return a.Exec(context.Background(), []string{"true"}, cli.ShellOptions{})
 		}},
 		{"shell", func(a *cli.App) error {
-			return a.Shell(context.Background(), nil)
+			return a.Shell(context.Background(), nil, cli.ShellOptions{})
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1423,5 +1423,75 @@ func TestUpNamesTheInstanceAfterTheCheckoutByDefault(t *testing.T) {
 			t.Errorf("%s mounts %q, want its own checkout %q",
 				tt.app.InstanceName(), got, tt.root)
 		}
+	}
+}
+
+// --user overrides shell.user for one run (spec 04-cli.md 4.3).
+func TestShellUserOverride(t *testing.T) {
+	yaml := baseYAML + `
+shell:
+  user: developer
+  command: /bin/bash
+`
+	tests := []struct {
+		name string
+		opt  cli.ShellOptions
+		want []string
+	}{
+		{
+			"the declared user by default",
+			cli.ShellOptions{},
+			[]string{"su", "-s", "/bin/bash", "developer", "-c", "'/bin/bash'"},
+		},
+		{
+			"overridden for this run",
+			cli.ShellOptions{User: "root"},
+			[]string{"su", "-s", "/bin/bash", "root", "-c", "'/bin/bash'"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, client, _ := newApp(t, yaml)
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{"user.incus-dev.project": "example-project"},
+			})
+
+			var got []string
+			client.ExecFunc = func(_ string, argv []string, _ incus.ExecOptions) (int, error) {
+				got = argv
+				return 0, nil
+			}
+			if err := app.Shell(context.Background(), nil, tt.opt); err != nil {
+				t.Fatalf("Shell() error = %v", err)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("argv mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// A numeric override is passed as a uid, the way shell.user is (spec 3.14).
+func TestExecUserOverrideAcceptsAUID(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
+	})
+
+	var got incus.ExecOptions
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		got = opt
+		return 0, nil
+	}
+	if err := app.Exec(context.Background(), []string{"true"}, cli.ShellOptions{User: "1000"}); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got.User != "1000" {
+		t.Errorf("ExecOptions.User = %q, want the uid passed through", got.User)
 	}
 }

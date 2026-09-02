@@ -211,6 +211,24 @@ idev shell -- go test ./... | tee test.log
 
 The command's exit code becomes `idev`'s exit code.
 
+### `--user`
+
+Overrides `shell.user` for one run. `idev exec` takes the same flag.
+
+```bash
+idev shell --user root
+idev exec --user root -- apt-get install -y tcpdump
+```
+
+`shell.user` is the project's answer to which user work happens as, and it is
+everyone's; needing root once should not mean editing `dev.yml`. The value is a
+name or a uid, read exactly as `shell.user` is. To reach the instance's default
+user while `shell.user` is set, name it: `--user root`.
+
+`examples/dev-user/` is a project set up this way — provisioning creates the
+account, `shell.user` puts you in it, and `--user root` is there for the times
+you need root.
+
 ---
 
 ## 3.5.1 `idev exec`

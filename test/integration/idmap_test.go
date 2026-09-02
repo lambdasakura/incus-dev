@@ -325,3 +325,73 @@ func TestWorkspaceMapFormMountsEveryEntry(t *testing.T) {
 		}
 	}
 }
+
+// raw and shift map opposite ends of the container (spec 3.7.3).
+//
+// The whole examples/dev-user/ configuration rests on this: raw maps the
+// container's root onto the host user, so the workspace appears root-owned
+// inside and an ordinary account cannot write to it at all. shift maps a
+// container uid onto the host uid of the same number, so an account given the
+// host user's uid can. Written as a comment either would be a belief; here it
+// is the daemon's answer.
+func TestIDMapMapsOppositeEndsForRawAndShift(t *testing.T) {
+	requireIncus(t)
+
+	hostUID := os.Getuid()
+	if hostUID == 0 {
+		t.Skip("running as root leaves nothing to tell apart")
+	}
+
+	for _, tt := range []struct {
+		mode string
+		// rootWriteOwner is the host uid of a file the container writes as
+		// root; userCanWrite says whether an account holding the host's own
+		// uid can write to the workspace at all.
+		rootWriteOwner int
+		userCanWrite   bool
+	}{
+		{"raw", hostUID, false},
+		{"shift", 0, true},
+	} {
+		t.Run(tt.mode, func(t *testing.T) {
+			f := newFixture(t, strings.Replace(idmapYAML,
+				"  image: {{IMAGE}}",
+				"  image: {{IMAGE}}\nworkspace:\n  idmap: "+tt.mode, 1))
+
+			if out, err := f.run("up"); err != nil {
+				t.Skipf("this host cannot run idmap: %s here: %v\n%s", tt.mode, err, out)
+			}
+
+			// adduser on the busybox image, useradd on a glibc one.
+			if out, err := f.run("exec", "--", "sh", "-c", fmt.Sprintf(
+				"adduser -D -H -u %d probe 2>/dev/null || "+
+					"useradd -M --non-unique -u %d probe", hostUID, hostUID)); err != nil {
+				t.Fatalf("creating the probe account: %v\n%s", err, out)
+			}
+			f.mustRun("exec", "--", "touch", "/workspace/by-root")
+
+			info, err := os.Stat(filepath.Join(f.root, "by-root"))
+			if err != nil {
+				t.Fatalf("by-root: %v", err)
+			}
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !ok {
+				t.Fatalf("by-root: no ownership from %T", info.Sys())
+			}
+			if got := int(stat.Uid); got != tt.rootWriteOwner {
+				t.Errorf("idmap %s: a file the container wrote as root is owned by "+
+					"uid %d on the host, want %d", tt.mode, got, tt.rootWriteOwner)
+			}
+
+			_, err = f.run("exec", "--user", "probe", "--", "touch", "/workspace/by-user")
+			switch {
+			case tt.userCanWrite && err != nil:
+				t.Errorf("idmap %s: an account with the host's uid cannot write to "+
+					"the workspace: %v", tt.mode, err)
+			case !tt.userCanWrite && err == nil:
+				t.Errorf("idmap %s: an ordinary account could write to the workspace; "+
+					"under raw it appears owned by root inside", tt.mode)
+			}
+		})
+	}
+}

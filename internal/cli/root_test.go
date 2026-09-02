@@ -1100,3 +1100,40 @@ func TestTheConfirmationPromptGoesToStderr(t *testing.T) {
 		t.Errorf("stderr = %q, want it to carry the question", errOut)
 	}
 }
+
+// --user reaches the container, on both commands that run one (spec 04-cli.md
+// 4.3).
+func TestShellAndExecPassTheUserFlag(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{"shell", []string{"shell", "--user", "developer", "--", "true"}},
+		{"exec", []string{"exec", "--user", "developer", "--", "true"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			app, client := fakeApp(t, out)
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{"user.incus-dev.project": "example-project"},
+			})
+
+			root := newRootCommand("test", stub(app), stub(app))
+			root.SetArgs(tt.args)
+			root.SetOut(out)
+
+			if err := root.ExecuteContext(context.Background()); err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+			if len(client.Execs) == 0 {
+				t.Fatal("nothing was executed")
+			}
+			// A name rather than a uid, so it arrives as su.
+			if got := strings.Join(client.Execs[0], " "); !strings.Contains(got, "developer") {
+				t.Errorf("argv = %q, want the flag's user to reach the container", got)
+			}
+		})
+	}
+}

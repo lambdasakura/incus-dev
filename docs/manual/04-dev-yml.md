@@ -366,6 +366,30 @@ directory.
 `raw` requires `root:<uid>:1` in `/etc/subuid` and `/etc/subgid`
 ([01-installation.md](01-installation.md), 1.5).
 
+The table is about files the container creates **as root**. Both modes are
+easier to read against what happens with neither, so here are all three,
+measured on a host whose user is uid 1000:
+
+| | Container's id map | Written by root | Written by uid 1000 |
+| --- | --- | --- | --- |
+| `none` | uid 0 → host 1000000 | host 1000000 | host 1001000 |
+| `raw` | uid 0 → host **1000**, the rest unchanged | host **1000** | host 1001000 |
+| `shift` | same as `none` | host **0** | host **1000** |
+
+`raw` translates nothing at the mount. It inserts a one-wide entry into the
+container's id map -- "host 1000 is container 0" -- so only container root
+changes, which is why the right-hand column matches `none`, and why
+`/etc/subuid` needs exactly one id. The change applies everywhere in the
+container, not just to the workspace.
+
+`shift` leaves the id map alone and cancels it out on that mount: every id
+crossing it loses the 1000000 the namespace added. Container uid N looking like
+host uid N is two translations meeting in the middle, not the absence of one.
+
+So an ordinary account can work under `shift` and not under `raw`: there the
+workspace looks root-owned from inside. That is what `examples/dev-user/` does,
+and why it sets `idmap: shift`.
+
 `auto` uses `raw` when it can, falls back to `shift` when it cannot, and warns.
 Either way the workspace is readable and writable; the only difference is who
 owns what the container creates.

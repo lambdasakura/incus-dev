@@ -193,7 +193,7 @@ func TestShellPropagatesErrors(t *testing.T) {
 	t.Run("the instance is unmanaged", func(t *testing.T) {
 		client := incustest.New().AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
 
-		if err := appWith(t, rootYAML, client).Shell(context.Background(), nil); err == nil {
+		if err := appWith(t, rootYAML, client).Shell(context.Background(), nil, ShellOptions{}); err == nil {
 			t.Error("error = nil, want error")
 		}
 	})
@@ -203,7 +203,7 @@ func TestShellPropagatesErrors(t *testing.T) {
 		managed(client, "Stopped")
 		client.FailOn = map[string]error{"start": errBoom}
 
-		if err := appWith(t, rootYAML, client).Shell(context.Background(), nil); !errors.Is(err, errBoom) {
+		if err := appWith(t, rootYAML, client).Shell(context.Background(), nil, ShellOptions{}); !errors.Is(err, errBoom) {
 			t.Errorf("error = %v, want %v", err, errBoom)
 		}
 	})
@@ -213,7 +213,7 @@ func TestShellPropagatesErrors(t *testing.T) {
 		managed(client, "Running")
 		client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 0, errBoom }
 
-		err := appWith(t, rootYAML, client).Shell(context.Background(), []string{"true"})
+		err := appWith(t, rootYAML, client).Shell(context.Background(), []string{"true"}, ShellOptions{})
 		if !errors.Is(err, errBoom) {
 			t.Errorf("error = %v, want %v", err, errBoom)
 		}
@@ -901,8 +901,8 @@ func TestCommandsWarnAboutAnotherCheckout(t *testing.T) {
 		name string
 		run  func(*App) error
 	}{
-		{"exec", func(a *App) error { return a.Exec(context.Background(), []string{"true"}) }},
-		{"shell", func(a *App) error { return a.Shell(context.Background(), nil) }},
+		{"exec", func(a *App) error { return a.Exec(context.Background(), []string{"true"}, ShellOptions{}) }},
+		{"shell", func(a *App) error { return a.Shell(context.Background(), nil, ShellOptions{}) }},
 		{"provision", func(a *App) error {
 			return a.Provision(context.Background(), provision.Selection{})
 		}},
@@ -1666,7 +1666,7 @@ func TestShellConvertsExitErrorToExitCode(t *testing.T) {
 		return 0, &runner.ExitError{Cmd: "incus exec", ExitCode: 42}
 	}
 
-	err := appWith(t, rootYAML, client).Shell(context.Background(), []string{"false"})
+	err := appWith(t, rootYAML, client).Shell(context.Background(), []string{"false"}, ShellOptions{})
 
 	var exitErr *ExitCodeError
 	if !errors.As(err, &exitErr) || exitErr.Code != 42 {
@@ -2237,7 +2237,7 @@ func TestShellUsesConfiguredSettings(t *testing.T) {
 	}
 
 	body := rootYAML + "shell:\n  command: /bin/bash\n  cwd: /workspace/src\n  user: \"1000\"\n"
-	if err := appWith(t, body, client).Shell(context.Background(), nil); err != nil {
+	if err := appWith(t, body, client).Shell(context.Background(), nil, ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
@@ -2255,7 +2255,7 @@ func TestShellWithNamedUser(t *testing.T) {
 	managed(client, "Running")
 
 	body := rootYAML + "shell:\n  user: developer\n  command: /bin/bash\n"
-	if err := appWith(t, body, client).Shell(context.Background(), []string{"make", "test"}); err != nil {
+	if err := appWith(t, body, client).Shell(context.Background(), []string{"make", "test"}, ShellOptions{}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
@@ -2288,7 +2288,7 @@ func TestExecDoesNotAllocateTTY(t *testing.T) {
 		CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Exec(context.Background(), []string{"make", "test"}); err != nil {
+	if err := app.Exec(context.Background(), []string{"make", "test"}, ShellOptions{}); err != nil {
 		t.Fatalf("Exec() error = %v", err)
 	}
 	if tty {
@@ -2995,7 +2995,7 @@ func TestUnmanagedErrorExplainsANameCollision(t *testing.T) {
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	err := app.Shell(context.Background(), []string{"true"})
+	err := app.Shell(context.Background(), []string{"true"}, ShellOptions{})
 	if err == nil {
 		t.Fatal("Shell() = nil error, want the collision reported")
 	}
@@ -3026,7 +3026,7 @@ func TestUnmanagedErrorExplainsACollisionUnderScope(t *testing.T) {
 		Out:    &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	err := app.Shell(context.Background(), []string{"true"})
+	err := app.Shell(context.Background(), []string{"true"}, ShellOptions{})
 	if err == nil {
 		t.Fatal("Shell() = nil error, want the collision reported")
 	}
@@ -3053,7 +3053,7 @@ func TestUnmanagedErrorWithoutANormalisationExplanation(t *testing.T) {
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	err := app.Shell(context.Background(), []string{"true"})
+	err := app.Shell(context.Background(), []string{"true"}, ShellOptions{})
 	if err == nil {
 		t.Fatal("Shell() = nil error, want the clash reported")
 	}
@@ -3077,7 +3077,7 @@ func TestUnmanagedErrorForAnInstanceIdevDidNotMake(t *testing.T) {
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	err := app.Shell(context.Background(), []string{"true"})
+	err := app.Shell(context.Background(), []string{"true"}, ShellOptions{})
 	if err == nil {
 		t.Fatal("Shell() = nil error, want the unmanaged instance reported")
 	}
@@ -3884,8 +3884,8 @@ func TestExecOutputGoesToStdout(t *testing.T) {
 		name string
 		run  func(*App) error
 	}{
-		{"exec", func(a *App) error { return a.Exec(context.Background(), []string{"true"}) }},
-		{"shell", func(a *App) error { return a.Shell(context.Background(), []string{"true"}) }},
+		{"exec", func(a *App) error { return a.Exec(context.Background(), []string{"true"}, ShellOptions{}) }},
+		{"shell", func(a *App) error { return a.Shell(context.Background(), []string{"true"}, ShellOptions{}) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out.Reset()

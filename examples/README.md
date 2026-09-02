@@ -12,6 +12,7 @@ they are not embedded in the binary.
 | [minimal](minimal/) | A single `dev.yml`, nothing else |
 | [shell-based](shell-based/) | Provisioned with shell scripts; no Ansible |
 | [ansible-based](ansible-based/) | Provisioned with Ansible |
+| [dev-user](dev-user/) | Provisioning creates an ordinary account; `idev shell` lands in it |
 
 You can run the following inside any of these directories.
 
