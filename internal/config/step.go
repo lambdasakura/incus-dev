@@ -13,6 +13,7 @@ type Step struct {
 	Name    string
 	Run     *RunStep
 	Ansible *AnsibleStep
+	Galaxy  *GalaxyStep
 }
 
 // RunStep はコンテナ内でのコマンド実行。
@@ -42,6 +43,14 @@ type AnsibleStep struct {
 	ExtraArgs []string `json:"extra_args,omitempty"`
 }
 
+// GalaxyStep はホスト側での ansible-galaxy install 実行。
+//
+// Ansible Roleやcollectionの導入をプロジェクト側で完結させるために使う。
+type GalaxyStep struct {
+	Requirements string   `json:"requirements"`
+	ExtraArgs    []string `json:"extra_args,omitempty"`
+}
+
 // DisplayName はログ表示用の名前を返す。index は1始まり。
 func (s Step) DisplayName(index int) string {
 	if s.Name != "" {
@@ -59,6 +68,7 @@ type stepJSON struct {
 	User    string       `json:"user"`
 	Env     StringMap    `json:"env"`
 	Ansible *AnsibleStep `json:"ansible"`
+	Galaxy  *GalaxyStep  `json:"galaxy"`
 }
 
 // UnmarshalJSON はステップをデコードする。
@@ -72,15 +82,20 @@ func (s *Step) UnmarshalJSON(b []byte) error {
 	}
 
 	s.Name = raw.Name
-	hasRun := raw.Run != nil
-	hasAnsible := raw.Ansible != nil
 
-	if hasRun == hasAnsible {
-		// どちらも無い / 両方ある場合はvalidationが報告する。
+	// 種別が1つに定まらない場合はvalidationが位置付きで報告する。
+	kinds := 0
+	for _, present := range []bool{raw.Run != nil, raw.Ansible != nil, raw.Galaxy != nil} {
+		if present {
+			kinds++
+		}
+	}
+	if kinds != 1 {
 		return nil
 	}
 
-	if hasRun {
+	switch {
+	case raw.Run != nil:
 		s.Run = &RunStep{
 			Script: *raw.Run,
 			Shell:  raw.Shell,
@@ -88,9 +103,11 @@ func (s *Step) UnmarshalJSON(b []byte) error {
 			User:   raw.User,
 			Env:    raw.Env,
 		}
-		return nil
+	case raw.Ansible != nil:
+		s.Ansible = raw.Ansible
+	default:
+		s.Galaxy = raw.Galaxy
 	}
-	s.Ansible = raw.Ansible
 	return nil
 }
 

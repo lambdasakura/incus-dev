@@ -40,6 +40,9 @@ idev shell -- sh -c 'exit 42'; echo $?   # 42
 
 `dev-<プロジェクト名>` となる。英数字とハイフン以外は正規化される。
 
+同じプロジェクトを複数の場所に clone する場合は、`dev.yml` の
+`project.scope` で区別できます（`path` または `branch`）。
+
 ```text
 project.name: my.project_1   →   instance: dev-my-project-1
 ```
@@ -91,6 +94,17 @@ idev up
 
 **既にあるinstanceを破壊することはない。** `dev.yml` を変更したあとに
 再実行すれば、リソースやdeviceの変更が反映される。
+
+`dev.yml` から設定やdeviceを削除した場合も追従する。ただし
+**devkitが適用したものだけ** が対象で、`incus config set` などで
+手動追加した設定には触れない。
+
+```bash
+idev up --restart
+```
+
+`security.nesting` のように反映へ再起動が必要な変更があるとき、
+instanceを再起動する。既定では警告のみを表示する。
 
 idev が作ったものでないinstanceが同名で存在する場合は、
 何もせずに失敗する（誤って壊さないため）。
@@ -205,6 +219,25 @@ idev rebuild --force
 
 コンテナ内の状態はすべて失われる。`dev.yml` から設定項目を削除した場合、
 その削除を確実に反映させたいときにも使う（`idev up` は削除を追従しない）。
+
+---
+
+## 3.8.1 `idev snapshot`
+
+環境を壊す前に退避しておき、あとで戻せます。
+
+```bash
+idev snapshot create before-upgrade
+idev snapshot list
+idev snapshot restore before-upgrade
+idev snapshot delete before-upgrade
+```
+
+名前を省略すると日時（`20260831-142530`）が付きます。
+`restore` と `delete` は確認を求めます（`--force` で省略）。
+
+**ホスト側のworkspaceには影響しません。** bind mount であり、
+instanceの状態ではないためです。
 
 ---
 

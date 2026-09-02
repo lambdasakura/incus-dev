@@ -295,3 +295,152 @@ provision:
 		t.Errorf("limits.cpu = %q", got)
 	}
 }
+
+// 新規作成直後でも、ネットワークを使うステップが成功すること。
+//
+// instanceが起動してコマンドを実行できるようになった時点では、
+// まだIPv4が割り当てられておらず外部へ出られない。ここを待たないと
+// パッケージ導入を伴うプロジェクトは初回のupが必ず失敗する。
+func TestFirstUpCanUseNetwork(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+provision:
+  - name: install package
+    run: command -v jq >/dev/null 2>&1 || apk add --no-cache jq
+`)
+
+	f.mustRun("up")
+
+	if got := f.mustRun("shell", "--", "sh", "-c", "command -v jq"); !strings.Contains(got, "jq") {
+		t.Errorf("パッケージが導入されていない: %q", got)
+	}
+}
+
+// provision の部分実行（仕様 04-cli.md 4.2）
+func TestProvisionPartialExecution(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+provision:
+  - name: first
+    run: echo first >> /etc/idev-order
+  - name: second
+    run: echo second >> /etc/idev-order
+  - name: third
+    run: echo third >> /etc/idev-order
+`)
+	f.mustRun("up")
+	f.mustRun("shell", "--", "sh", "-c", ": > /etc/idev-order")
+
+	if out := f.mustRun("provision", "--list"); !strings.Contains(out, "second") {
+		t.Errorf("--list = %q, ステップ名を示すこと", out)
+	}
+
+	f.mustRun("provision", "--step", "second")
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-order"); strings.TrimSpace(got) != "second" {
+		t.Errorf("実行結果 = %q, 指定したステップのみ実行すること", got)
+	}
+
+	f.mustRun("shell", "--", "sh", "-c", ": > /etc/idev-order")
+	f.mustRun("provision", "--from", "2")
+
+	want := "second\nthird"
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-order"); strings.TrimSpace(got) != want {
+		t.Errorf("実行結果 = %q, want %q", got, want)
+	}
+
+	// 解決できない指定はその場で失敗する
+	if out := f.mustFail("provision", "--step", "no-such-step"); !strings.Contains(out, "available steps") {
+		t.Errorf("output = %q, 選べるステップを示すこと", out)
+	}
+}
+
+// --dry-run はIncusへ一切変更を加えない（仕様 04-cli.md 4.8）
+func TestUpDryRun(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+provision:
+  - name: setup
+    run: "true"
+`)
+
+	out := f.mustRun("up", "--dry-run")
+
+	for _, want := range []string{
+		"Create instance " + f.instance,
+		"Add device workspace",
+		"Start instance",
+		"Provision step 1/1: setup (run)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output =\n%s\n%q を含むこと", out, want)
+		}
+	}
+	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+		t.Fatalf("instanceを作成している: %q", got)
+	}
+
+	// 実際に作ったあとは、既存instanceとして扱う
+	f.mustRun("up")
+	if out := f.mustRun("up", "--dry-run"); !strings.Contains(out, "Use existing instance") {
+		t.Errorf("output =\n%s\n既存instanceとして扱うこと", out)
+	}
+}
+
+// 永続ボリュームは instance を作り直しても残る（仕様 03-configuration.md 3.13）
+func TestPersistentVolume(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+volumes:
+  cache:
+    path: /cache
+    size: 64MiB
+`)
+	t.Cleanup(func() {
+		_, _ = runIncus("storage", "volume", "delete", "default", f.instance+"-cache")
+	})
+
+	f.mustRun("up")
+	f.mustRun("shell", "--", "sh", "-c", "echo persistent > /cache/data")
+
+	f.mustRun("rebuild", "--force")
+	if got := f.mustRun("shell", "--", "cat", "/cache/data"); !strings.Contains(got, "persistent") {
+		t.Errorf("rebuild でボリュームの中身が失われている: %q", got)
+	}
+
+	// destroy では残す
+	f.mustRun("destroy", "--force")
+	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); !strings.Contains(out, f.instance+"-cache") {
+		t.Error("destroy でボリュームまで削除している")
+	}
+
+	// --volumes を指定したときだけ消す
+	f.mustRun("up")
+	f.mustRun("destroy", "--force", "--volumes")
+	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); strings.Contains(out, f.instance+"-cache") {
+		t.Error("--volumes でボリュームが削除されていない")
+	}
+}
+
+// 秘密情報はホストから注入され、表示ではマスクされる
+func TestSecretInjection(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+secrets:
+  API_TOKEN:
+    env: IDEV_TEST_TOKEN
+provision:
+  - name: use secret
+    run: printf %s "$API_TOKEN" > /etc/idev-secret
+`)
+
+	// 未設定なら instance を作る前に止まる
+	out := f.mustFail("up")
+	if !strings.Contains(out, "API_TOKEN") || !strings.Contains(out, "IDEV_TEST_TOKEN") {
+		t.Errorf("output = %q, 足りない秘密情報を報告すること", out)
+	}
+	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+		t.Error("秘密情報を解決できないのにinstanceを作成している")
+	}
+
+	t.Setenv("IDEV_TEST_TOKEN", "from-host-env")
+	f.mustRun("up")
+
+	if got := f.mustRun("shell", "--", "cat", "/etc/idev-secret"); got != "from-host-env" {
+		t.Errorf("コンテナ内の値 = %q", got)
+	}
+}

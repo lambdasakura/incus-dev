@@ -269,6 +269,20 @@ func (c *CLI) ApplyDevices(ctx context.Context, name string, devices map[string]
 	return nil
 }
 
+// RemoveDevices は指定されたdeviceを削除する。
+//
+// devkit自身が作成したdeviceを取り消すために使う。
+// 利用者が手で追加したdeviceへは使わない（仕様 05-incus.md 5.4.4）。
+func (c *CLI) RemoveDevices(ctx context.Context, name string, devices []string) error {
+	for _, dev := range devices {
+		if _, err := c.run(ctx, "remove device "+dev,
+			c.args([]string{"config", "device", "remove"}, c.qualify(name), dev)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ProfileExists はProfileの存在を返す。devkitはProfileを作成しない（REQ-007）。
 func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 	args := c.args([]string{"profile", "list"}, "--format", "json")
@@ -293,6 +307,83 @@ func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// VolumeExists はstorage volumeの存在を返す。
+func (c *CLI) VolumeExists(ctx context.Context, pool, name string) (bool, error) {
+	res, err := c.run(ctx, "list storage volumes",
+		c.args([]string{"storage", "volume", "list"}, c.qualify(pool), "--format", "json"))
+	if err != nil {
+		return false, err
+	}
+
+	var volumes []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(res.Stdout, &volumes); err != nil {
+		return false, fmt.Errorf("parse storage volume list: %w", err)
+	}
+	for _, v := range volumes {
+		if v.Name == name && v.Type == "custom" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CreateVolume はstorage volumeを作成する。
+func (c *CLI) CreateVolume(ctx context.Context, pool, name string, config map[string]string) error {
+	args := c.args([]string{"storage", "volume", "create"}, c.qualify(pool), name)
+	for _, k := range sortedKeys(config) {
+		args = append(args, k+"="+config[k])
+	}
+
+	_, err := c.run(ctx, "create storage volume "+name, args)
+	return err
+}
+
+// DeleteVolume はstorage volumeを削除する。
+func (c *CLI) DeleteVolume(ctx context.Context, pool, name string) error {
+	_, err := c.run(ctx, "delete storage volume "+name,
+		c.args([]string{"storage", "volume", "delete"}, c.qualify(pool), name))
+	return err
+}
+
+// CreateSnapshot はinstanceのスナップショットを作成する。
+func (c *CLI) CreateSnapshot(ctx context.Context, instance, snapshot string) error {
+	_, err := c.run(ctx, "create snapshot "+snapshot,
+		c.args([]string{"snapshot", "create"}, c.qualify(instance), snapshot))
+	return err
+}
+
+// Snapshots はinstanceのスナップショット一覧を返す。
+func (c *CLI) Snapshots(ctx context.Context, instance string) ([]Snapshot, error) {
+	res, err := c.run(ctx, "list snapshots",
+		c.args([]string{"snapshot", "list"}, c.qualify(instance), "--format", "json"))
+	if err != nil {
+		return nil, err
+	}
+
+	var snapshots []Snapshot
+	if err := json.Unmarshal(res.Stdout, &snapshots); err != nil {
+		return nil, fmt.Errorf("parse snapshot list: %w", err)
+	}
+	return snapshots, nil
+}
+
+// RestoreSnapshot はinstanceをスナップショットの状態へ戻す。
+func (c *CLI) RestoreSnapshot(ctx context.Context, instance, snapshot string) error {
+	_, err := c.run(ctx, "restore snapshot "+snapshot,
+		c.args([]string{"snapshot", "restore"}, c.qualify(instance), snapshot))
+	return err
+}
+
+// DeleteSnapshot はスナップショットを削除する。
+func (c *CLI) DeleteSnapshot(ctx context.Context, instance, snapshot string) error {
+	_, err := c.run(ctx, "delete snapshot "+snapshot,
+		c.args([]string{"snapshot", "delete"}, c.qualify(instance), snapshot))
+	return err
 }
 
 // Exec はコンテナ内でコマンドを実行し、終了コードを返す。
@@ -351,15 +442,33 @@ func numericUser(user string) (string, bool) {
 	return user, true
 }
 
-// WaitReady はコンテナ内でコマンドを実行できるようになるまで待つ。
+// WaitReady はinstanceがprovisioningを受けられる状態になるまで待つ。
+//
+// コマンドを実行できるようになった時点では、まだネットワークアドレスが
+// 割り当てられていないことがある。パッケージの導入を伴うステップが
+// 初回から失敗しないよう、アドレスの割り当ても待つ。
 func (c *CLI) WaitReady(ctx context.Context, name string, opt WaitOptions) error {
 	if opt.Timeout <= 0 {
 		opt.Timeout = 60 * time.Second
+	}
+	if opt.NetworkTimeout <= 0 {
+		opt.NetworkTimeout = 30 * time.Second
+	}
+	if opt.IPv4Grace <= 0 {
+		opt.IPv4Grace = 5 * time.Second
 	}
 	if opt.Interval <= 0 {
 		opt.Interval = 500 * time.Millisecond
 	}
 
+	if err := c.waitExec(ctx, name, opt); err != nil {
+		return err
+	}
+	return c.waitNetwork(ctx, name, opt)
+}
+
+// waitExec はコンテナ内でコマンドを実行できるようになるまで待つ。
+func (c *CLI) waitExec(ctx context.Context, name string, opt WaitOptions) error {
 	deadline := time.Now().Add(opt.Timeout)
 	var lastErr error
 	for {
@@ -377,6 +486,52 @@ func (c *CLI) WaitReady(ctx context.Context, name string, opt WaitOptions) error
 			}
 			return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, lastErr)
 		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(opt.Interval):
+		}
+	}
+}
+
+// waitNetwork は外部と通信できる状態になるまで待つ。
+//
+// Incusの既定のブリッジではIPv6(ULA)が先に付き、IPv4のDHCPが完了して
+// デフォルトルートが入るまでは外へ出られない。パッケージ導入を伴う
+// ステップが初回から失敗しないよう、IPv4の割り当てまで待つ。
+//
+// IPv6のみの環境で無駄に待たないよう、IPv6が付いた後は IPv4Grace までしか
+// 待たない。NICを持たないinstanceでは待たない。アドレスが1つも
+// 付かないまま時間切れになった場合は ErrNetworkNotReady を返す
+// （静的設定などもありうるため、致命的な失敗とするかは呼び出し側が判断する）。
+func (c *CLI) waitNetwork(ctx context.Context, name string, opt WaitOptions) error {
+	limit := time.Now().Add(opt.NetworkTimeout)
+	var graceLimit time.Time
+
+	for {
+		inst, err := c.Instance(ctx, name)
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case !inst.HasNIC(), inst.HasIPv4Address():
+			return nil
+
+		case inst.HasGlobalAddress():
+			// IPv6だけ付いた状態。IPv4を待つが、無期限には待たない。
+			if graceLimit.IsZero() {
+				graceLimit = time.Now().Add(opt.IPv4Grace)
+			}
+			if time.Now().After(graceLimit) {
+				return nil
+			}
+
+		case time.Now().After(limit):
+			return fmt.Errorf("%w: instance %s has no address after %s",
+				ErrNetworkNotReady, name, opt.NetworkTimeout)
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

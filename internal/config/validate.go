@@ -52,6 +52,9 @@ func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateSteps(raw, "bootstrap", false, ps)
 	validateSteps(raw, "provision", true, ps)
 	validateInstance(c, ps)
+	validateShell(c, ps)
+	validateVolumes(c, ps)
+	validateSecrets(c, ps)
 	validateStepValues(c, ps)
 	validateWorkspace(c, ps)
 
@@ -114,6 +117,60 @@ func parseVersion(v string) (major, minor int, err error) {
 	return major, minor, nil
 }
 
+// validateVolumes は永続ボリュームの宣言を検証する。
+func validateVolumes(c *Config, ps *problems) {
+	for _, name := range sortedKeys(c.Volumes) {
+		vol := c.Volumes[name]
+		path := "volumes." + name
+
+		if !filepath.IsAbs(vol.Path) {
+			ps.add(path+".path", "must be an absolute path in the container, got %q", vol.Path)
+		}
+		if name == WorkspaceDeviceName {
+			ps.add(path, "%q is reserved for the workspace mount", WorkspaceDeviceName)
+		}
+		if _, conflict := c.Instance.Devices[name]; conflict {
+			ps.add(path, "conflicts with instance.devices.%s", name)
+		}
+	}
+}
+
+// validateSecrets は秘密情報の宣言を検証する。
+func validateSecrets(c *Config, ps *problems) {
+	for _, name := range sortedKeys(c.Secrets) {
+		secret := c.Secrets[name]
+		path := "secrets." + name
+
+		switch {
+		case secret.Env != "" && secret.File != "":
+			ps.add(path, "env and file are mutually exclusive; specify only one")
+		case secret.Env == "" && secret.File == "":
+			ps.add(path, "must specify either env or file")
+		}
+		if strings.HasPrefix(name, devkitEnvPrefix) {
+			ps.add(path, "%s* is reserved for devkit", devkitEnvPrefix)
+		}
+	}
+}
+
+// validateShell は shell 設定を検証する。
+func validateShell(c *Config, ps *problems) {
+	if c.Shell == nil {
+		return
+	}
+	for _, f := range []struct{ field, value string }{
+		{"user", c.Shell.User},
+		{"command", c.Shell.Command},
+	} {
+		if strings.HasPrefix(f.value, "-") {
+			ps.add("shell."+f.field, "must not start with %q", "-")
+		}
+	}
+	if c.Shell.Cwd != "" && !filepath.IsAbs(c.Shell.Cwd) {
+		ps.add("shell.cwd", "must be an absolute path in the container, got %q", c.Shell.Cwd)
+	}
+}
+
 // validateStepValues は、コンテナ内でのコマンド実行時に
 // オプションとして解釈されうる値を拒否する。
 func validateStepValues(c *Config, ps *problems) {
@@ -143,6 +200,9 @@ func validateStepValues(c *Config, ps *problems) {
 // runOnlyFields は run ステップ専用のフィールド。
 var runOnlyFields = []string{"cwd", "env", "shell", "user"}
 
+// stepKinds はステップの種別を表すキー。
+var stepKinds = []string{"run", "ansible", "galaxy"}
+
 // validateSteps はステップの形（run/ansibleの排他性など）を生のドキュメントから検証する。
 // 位置情報を正確に報告するため、構造体ではなく raw を見る。
 func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *problems) {
@@ -156,19 +216,24 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 		if !ok {
 			continue
 		}
-		_, hasRun := m["run"]
-		_, hasAnsible := m["ansible"]
-
-		switch {
-		case hasRun && hasAnsible:
-			ps.add(path, "run and ansible are mutually exclusive; specify only one")
-		case !hasRun && !hasAnsible:
-			ps.add(path, "must specify either run or ansible")
+		var kinds []string
+		for _, kind := range stepKinds {
+			if _, ok := m[kind]; ok {
+				kinds = append(kinds, kind)
+			}
 		}
 
-		if hasAnsible {
+		switch {
+		case len(kinds) > 1:
+			ps.add(path, "%s are mutually exclusive; specify only one", strings.Join(kinds, " and "))
+		case len(kinds) == 0:
+			ps.add(path, "must specify one of: %s", strings.Join(stepKinds, ", "))
+		}
+
+		_, hasRun := m["run"]
+		if !hasRun && len(kinds) > 0 {
 			if !allowAnsible {
-				ps.add(path, "ansible steps are not allowed in %s; use run steps only", key)
+				ps.add(path, "only run steps are allowed in %s", key)
 			}
 			var extra []string
 			for _, f := range runOnlyFields {
@@ -182,6 +247,9 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 		}
 	}
 }
+
+// devkitEnvPrefix はdevkitが注入する環境変数の接頭辞。
+const devkitEnvPrefix = "DEVKIT_"
 
 // profileNamePattern はIncusのProfile名として妥当な形。
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -301,6 +369,12 @@ func validatePaths(c *Config, ps *problems) {
 
 func checkStepPaths(c *Config, steps []Step, key string, ps *problems) {
 	for i, s := range steps {
+		if s.Galaxy != nil {
+			path := fmt.Sprintf("%s[%d].galaxy.requirements", key, i)
+			if _, err := os.Stat(c.ResolvePath(s.Galaxy.Requirements)); err != nil {
+				ps.add(path, "%v", err)
+			}
+		}
 		if s.Ansible == nil {
 			continue
 		}

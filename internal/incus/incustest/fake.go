@@ -17,11 +17,17 @@ type Fake struct {
 	Instances map[string]*incus.Instance
 	// Profiles は存在するProfile名。
 	Profiles []string
+	// SnapshotsByInstance はinstanceごとのスナップショット。
+	SnapshotsByInstance map[string][]incus.Snapshot
+	// Volumes は存在するstorage volume（"pool/name"）。
+	Volumes map[string]bool
 
 	// ExecFunc が設定されていれば Exec の応答に使用する。
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
 	// FailReady が真の場合 WaitReady が失敗する。
 	FailReady bool
+	// NetworkNotReady が真の場合 WaitReady が incus.ErrNetworkNotReady を返す。
+	NetworkNotReady bool
 	// FailOn は操作名のprefixに対して返すエラー。
 	// 例: {"create": errBoom} とすると CreateInstance が失敗する。
 	FailOn map[string]error
@@ -223,6 +229,24 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	return nil
 }
 
+// RemoveDevices は指定されたdeviceを削除する。
+func (f *Fake) RemoveDevices(_ context.Context, name string, devices []string) error {
+	if len(devices) == 0 {
+		return nil
+	}
+	if err := f.record("removedevices %s %v", name, devices); err != nil {
+		return err
+	}
+	inst, ok := f.Instances[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
+	}
+	for _, dev := range devices {
+		delete(inst.Devices, dev)
+	}
+	return nil
+}
+
 // ProfileExists は Profiles に含まれるかを返す。
 func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	if err := f.record("profile %s", name); err != nil {
@@ -234,6 +258,82 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// VolumeExists は登録済みボリュームかを返す。
+func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) {
+	if err := f.record("volume exists %s %s", pool, name); err != nil {
+		return false, err
+	}
+	return f.Volumes[pool+"/"+name], nil
+}
+
+// CreateVolume はボリュームを登録する。
+func (f *Fake) CreateVolume(_ context.Context, pool, name string, config map[string]string) error {
+	if err := f.record("volume create %s %s %v", pool, name, sortedPairs(config)); err != nil {
+		return err
+	}
+	if f.Volumes == nil {
+		f.Volumes = map[string]bool{}
+	}
+	f.Volumes[pool+"/"+name] = true
+	return nil
+}
+
+// DeleteVolume はボリュームを削除する。
+func (f *Fake) DeleteVolume(_ context.Context, pool, name string) error {
+	if err := f.record("volume delete %s %s", pool, name); err != nil {
+		return err
+	}
+	delete(f.Volumes, pool+"/"+name)
+	return nil
+}
+
+// CreateSnapshot はスナップショットを登録する。
+func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) error {
+	if err := f.record("snapshot create %s %s", instance, snapshot); err != nil {
+		return err
+	}
+	if f.SnapshotsByInstance == nil {
+		f.SnapshotsByInstance = map[string][]incus.Snapshot{}
+	}
+	f.SnapshotsByInstance[instance] = append(f.SnapshotsByInstance[instance],
+		incus.Snapshot{Name: snapshot})
+	return nil
+}
+
+// Snapshots は登録済みのスナップショットを返す。
+func (f *Fake) Snapshots(_ context.Context, instance string) ([]incus.Snapshot, error) {
+	if err := f.record("snapshot list %s", instance); err != nil {
+		return nil, err
+	}
+	return f.SnapshotsByInstance[instance], nil
+}
+
+// RestoreSnapshot は復元を記録する。
+func (f *Fake) RestoreSnapshot(_ context.Context, instance, snapshot string) error {
+	return f.record("snapshot restore %s %s", instance, snapshot)
+}
+
+// DeleteSnapshot はスナップショットを削除する。
+func (f *Fake) DeleteSnapshot(_ context.Context, instance, snapshot string) error {
+	if err := f.record("snapshot delete %s %s", instance, snapshot); err != nil {
+		return err
+	}
+	existing, ok := f.SnapshotsByInstance[instance]
+	if !ok {
+		return nil
+	}
+
+	kept := existing[:0]
+	for _, s := range existing {
+		if s.Name != snapshot {
+			kept = append(kept, s)
+		}
+	}
+	f.SnapshotsByInstance[instance] = kept
+
+	return nil
 }
 
 // Exec は実行内容を記録し、ExecFunc があればその結果を返す。
@@ -265,6 +365,9 @@ func (f *Fake) WaitReady(_ context.Context, name string, _ incus.WaitOptions) er
 	}
 	if f.FailReady {
 		return fmt.Errorf("instance %s did not become ready", name)
+	}
+	if f.NetworkNotReady {
+		return fmt.Errorf("%w: instance %s", incus.ErrNetworkNotReady, name)
 	}
 	return nil
 }

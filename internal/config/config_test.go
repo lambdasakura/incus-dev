@@ -795,3 +795,252 @@ func TestValidateRejectsEqualsInConfigKey(t *testing.T) {
 		t.Errorf("error = %q", err.Error())
 	}
 }
+
+func TestValidateRejectsEqualsInDeviceKey(t *testing.T) {
+	err := parseErr(t, minimal+"  devices:\n    data:\n      type: disk\n      \"a=b\": x\n")
+	if !strings.Contains(err.Error(), "=") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+// shell セクション（仕様 3.13）
+func TestShellSettings(t *testing.T) {
+	c := parse(t, minimal+`
+shell:
+  user: developer
+  command: /bin/bash
+  cwd: /workspace/src
+`)
+	sh := c.ShellOrDefault()
+	if sh.User != "developer" || sh.Command != "/bin/bash" || sh.Cwd != "/workspace/src" {
+		t.Errorf("ShellOrDefault() = %+v", sh)
+	}
+}
+
+func TestShellDefaults(t *testing.T) {
+	c := parse(t, minimal)
+
+	sh := c.ShellOrDefault()
+	if sh.Command != config.DefaultShell {
+		t.Errorf("Command = %q, want %q", sh.Command, config.DefaultShell)
+	}
+	if sh.Cwd != "/workspace" {
+		t.Errorf("Cwd = %q, workspace.target を既定にすること", sh.Cwd)
+	}
+	if sh.User != "" {
+		t.Errorf("User = %q, 既定は指定なし", sh.User)
+	}
+}
+
+// workspace.target を変えたら shell の既定も追従する
+func TestShellCwdFollowsWorkspace(t *testing.T) {
+	c := parse(t, minimal+"workspace:\n  target: /src\n")
+
+	if got := c.ShellOrDefault().Cwd; got != "/src" {
+		t.Errorf("Cwd = %q, want /src", got)
+	}
+}
+
+// incus セクション（仕様 3.13）
+func TestIncusProjectSetting(t *testing.T) {
+	c := parse(t, minimal+"incus:\n  project: development\n")
+
+	if c.Incus == nil || c.Incus.Project != "development" {
+		t.Errorf("Incus = %+v", c.Incus)
+	}
+}
+
+func TestValidateRejectsFlagLikeShellValues(t *testing.T) {
+	for _, y := range []string{
+		minimal + "shell:\n  user: \"-x\"\n",
+		minimal + "shell:\n  command: \"--login\"\n",
+	} {
+		if err := parseErr(t, y); !strings.Contains(err.Error(), "must not start with") {
+			t.Errorf("error = %q", err.Error())
+		}
+	}
+}
+
+func TestValidateShellCwdMustBeAbsolute(t *testing.T) {
+	err := parseErr(t, minimal+"shell:\n  cwd: relative\n")
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+// galaxy ステップ（仕様 06-provisioning.md 6.5.5）
+func TestGalaxyStep(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "collections: []\n")
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+      extra_args: ["--force"]
+`)
+
+	c, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	g := c.Provision[0].Galaxy
+	if g == nil {
+		t.Fatal("Galaxy = nil")
+	}
+	if g.Requirements != ".incus-dev/ansible/requirements.yml" {
+		t.Errorf("Requirements = %q", g.Requirements)
+	}
+	if len(g.ExtraArgs) != 1 || g.ExtraArgs[0] != "--force" {
+		t.Errorf("ExtraArgs = %v", g.ExtraArgs)
+	}
+}
+
+func TestGalaxyStepErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "requirements欠落",
+			yaml: minimal + "provision:\n  - galaxy: {}\n",
+			want: "requirements",
+		},
+		{
+			name: "runとの併用",
+			yaml: minimal + "provision:\n  - run: echo\n    galaxy:\n      requirements: r.yml\n",
+			want: "provision[0]",
+		},
+		{
+			name: "ansibleとの併用",
+			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    galaxy:\n      requirements: r.yml\n",
+			want: "provision[0]",
+		},
+		{
+			name: "bootstrapでは使えない",
+			yaml: minimal + "bootstrap:\n  - galaxy:\n      requirements: r.yml\n",
+			want: "bootstrap[0]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestGalaxyRequirementsMustExist(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+provision:
+  - galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "requirements.yml") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// volumes（仕様 03-configuration.md 3.16）
+func TestVolumes(t *testing.T) {
+	c := parse(t, minimal+`
+volumes:
+  cache:
+    path: /home/dev/.cache
+    size: 10GiB
+  data:
+    path: /var/lib/postgresql
+    pool: fast
+`)
+	if got := c.Volumes["cache"].Path; got != "/home/dev/.cache" {
+		t.Errorf("cache.path = %q", got)
+	}
+	if got := c.Volumes["cache"].PoolOrDefault(); got != "default" {
+		t.Errorf("cache pool = %q, 既定は default", got)
+	}
+	if got := c.Volumes["data"].PoolOrDefault(); got != "fast" {
+		t.Errorf("data pool = %q", got)
+	}
+	if got := c.Volumes["cache"].Size; got != "10GiB" {
+		t.Errorf("cache.size = %q", got)
+	}
+}
+
+func TestVolumeErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"path欠落", minimal + "volumes:\n  cache: {}\n", "path"},
+		{"pathが相対", minimal + "volumes:\n  cache:\n    path: rel\n", "absolute"},
+		{"予約名", minimal + "volumes:\n  workspace:\n    path: /w\n", "reserved"},
+		{
+			name: "deviceと衝突",
+			yaml: minimal + "  devices:\n    cache:\n      type: disk\n      source: /tmp\n      path: /c\n" +
+				"volumes:\n  cache:\n    path: /cache\n",
+			want: "conflicts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+// secrets（仕様 03-configuration.md 3.12）
+func TestSecrets(t *testing.T) {
+	c := parse(t, minimal+`
+secrets:
+  API_TOKEN:
+    env: MY_TOKEN
+  DEPLOY_KEY:
+    file: ~/.config/key
+  OPTIONAL_ONE:
+    env: MAYBE
+    optional: true
+`)
+	if got := c.Secrets["API_TOKEN"].Env; got != "MY_TOKEN" {
+		t.Errorf("API_TOKEN.env = %q", got)
+	}
+	if got := c.Secrets["DEPLOY_KEY"].File; got != "~/.config/key" {
+		t.Errorf("DEPLOY_KEY.file = %q", got)
+	}
+	if !c.Secrets["OPTIONAL_ONE"].Optional {
+		t.Error("optional が反映されていない")
+	}
+	if got := c.Secrets["API_TOKEN"].Source(); !strings.Contains(got, "MY_TOKEN") {
+		t.Errorf("Source() = %q", got)
+	}
+}
+
+func TestSecretErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"env と file の併用", minimal + "secrets:\n  A:\n    env: X\n    file: /f\n", "mutually exclusive"},
+		{"どちらも無い", minimal + "secrets:\n  A:\n    optional: true\n", "must specify"},
+		{"devkit予約の名前", minimal + "secrets:\n  DEVKIT_TOKEN:\n    env: X\n", "reserved"},
+		{"環境変数名として不正", minimal + "secrets:\n  \"bad-name\":\n    env: X\n", "bad-name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+			}
+		})
+	}
+}

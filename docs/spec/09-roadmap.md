@@ -29,14 +29,23 @@ workspace bind mount（idmap: auto）
 devkit管理情報 user.incus-devkit.*
 ```
 
+### CLI補助
+
+```text
+up --dry-run
+provision --step / --from / --list
+status --json
+```
+
 ### Provisioning
 
 ```text
-instance ready 待ち
+instance ready 待ち（ネットワークの割り当てを含む）
 bootstrap（既定 + 上書き + 無効化）
 run ステップ（コンテナ内実行）
 ansible ステップ（community.general.incus / 一時inventory）
 devkit変数の注入
+部分実行（--step / --from / --list）
 ```
 
 ### Configuration
@@ -64,14 +73,11 @@ requirements.yml の自動適用
 ## 9.2 MVP以降の候補
 
 ```text
-provision --step / --from（部分実行）
 galaxy ステップ型（ansible-galaxy install）
 追加のステップ型（必要が生じた場合のみ）
 
 idev exec
 idev shell の user / command / cwd 設定
-JSON output
-shell completion
 
 instance.config の削除追従（user.incus-devkit.managed による差分unset）
 再起動が必要な設定変更の自動処理

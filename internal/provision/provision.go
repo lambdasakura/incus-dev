@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
 	"github.com/lambdasakura/incus-dev/internal/incus"
@@ -57,6 +58,10 @@ type Executor struct {
 	// Stdout / Stderr はステップ出力の中継先。nilの場合は破棄する。
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// ansibleステップの前提確認は1度だけ行う。
+	ansibleCheck sync.Once
+	ansibleErr   error
 }
 
 // Bootstrap はbootstrapステップを実行する。
@@ -65,14 +70,32 @@ func (e *Executor) Bootstrap(ctx context.Context, cfg *config.Config, env Env) e
 }
 
 // Provision はprovisionステップを実行する。
-func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env) error {
-	return e.RunSteps(ctx, cfg.Provision, "provision", env)
+// sel が指定されていれば、その一部だけを実行する。
+func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env, sel Selection) error {
+	indices, err := Select(cfg.Provision, sel)
+	if err != nil {
+		return err
+	}
+	return e.runSteps(ctx, cfg.Provision, indices, "provision", env)
 }
 
 // RunSteps はステップを順に実行する。失敗した時点で後続を実行しない。
 func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind string, env Env) error {
+	indices := make([]int, len(steps))
+	for i := range steps {
+		indices[i] = i
+	}
+	return e.runSteps(ctx, steps, indices, kind, env)
+}
+
+// runSteps は indices で指定された位置のステップを、宣言順に実行する。
+//
+// ラベルには全体の中での位置を示す。一部だけを実行した場合に
+// "step 1/1" と表示されると、どれを流したのか分からなくなるため。
+func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []int, kind string, env Env) error {
 	total := len(steps)
-	for i, step := range steps {
+	for _, i := range indices {
+		step := steps[i]
 		label := fmt.Sprintf("%s step %d/%d: %s", kind, i+1, total, step.DisplayName(i+1))
 		e.log(label)
 
@@ -94,6 +117,8 @@ func (e *Executor) runStep(ctx context.Context, step config.Step, env Env) error
 		return e.execRun(ctx, step.Run, env)
 	case step.Ansible != nil:
 		return e.execAnsible(ctx, step.Ansible, env)
+	case step.Galaxy != nil:
+		return e.execGalaxy(ctx, step.Galaxy, env)
 	default:
 		return fmt.Errorf("step has neither run nor ansible")
 	}

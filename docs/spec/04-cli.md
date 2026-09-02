@@ -12,10 +12,12 @@ idev
 idev up
 idev provision
 idev shell
+idev exec
 idev status
 idev destroy
 idev rebuild
 idev validate
+idev snapshot
 ```
 
 ## 4.0 共通フラグ
@@ -65,6 +67,14 @@ idev up
 - 既存instanceがdevkit管理下でない場合は明示的に失敗する
 - 既存instanceに対しても、`dev.yml` の宣言内容は再適用する
   （[05-incus.md](05-incus.md) 参照）
+- 宣言から消えた設定・deviceは、devkitが適用したものに限り取り消す
+
+```bash
+idev up --restart
+```
+
+反映に再起動が必要な変更があれば、instanceを再起動する。
+既定では警告のみを表示する（作業中のプロセスを予期せず止めないため）。
 
 ---
 
@@ -90,14 +100,21 @@ Incus instanceを再作成せず、bootstrapとprovisionステップのみ再実
 
 ### 部分実行
 
-ステップ数が増えると全体再実行が重くなるため、以下を提供することを推奨する。
+ステップ数が増えると全体再実行が重くなるため、一部だけを実行できる。
 
 ```bash
-idev provision --step <name>      # 特定ステップのみ実行
+idev provision --list             # ステップの一覧（Incusへは触れない）
+idev provision --step <name>      # 指定ステップのみ実行（複数指定可）
 idev provision --from <name>      # 指定ステップ以降を実行
 ```
 
-MVPではoptionalとする。
+- ステップは名前または番号（1始まり）で指定する
+- 複数一致する名前は、すべて実行する
+- 指定順ではなく **宣言順** で実行する（前から順に積み上げる前提のため）
+- 解決できない指定は、instanceへ触れる前に失敗し、選べるステップを示す
+- ログとエラーには全体の中での位置を表示する（`step 2/3`）
+- bootstrapは省略しない。provisionerを動かすための準備であり、
+  軽量かつ冪等であることを前提としているため
 
 ---
 
@@ -158,6 +175,8 @@ Workspace:  /home/user/src/example-project -> /workspace
 - runtime version
 - devkit管理下かどうか
 
+これらは実装済みである。
+
 ---
 
 ## 4.5 `idev destroy`
@@ -173,12 +192,15 @@ idev destroy
 - ソースコードはbind mountされたホスト側ディレクトリなので削除してはならない
 - devkit管理下でないinstanceは削除してはならない
 - 破壊操作のため、既定では確認を求める
+- **永続ボリューム（`volumes`）は削除しない**
 
 ```bash
-idev destroy --force
+idev destroy --force      # 確認を省略
+idev destroy --volumes    # 永続ボリュームも削除する
 ```
 
-将来的にpersistent volumeを追加する場合、削除ポリシーを明示的に管理する。
+永続ボリュームはinstanceを作り直しても残すためのものなので、
+削除は明示的な指示があった場合のみ行う。
 
 ---
 
@@ -207,6 +229,23 @@ idev rebuild --force
 
 `dev.yml` から削除した設定を確実に消したい場合の正規手段でもある
 （[05-incus.md](05-incus.md) 5.4.4 参照）。
+
+---
+
+## 4.6.1 `idev snapshot`
+
+instanceのスナップショットを操作する。
+
+```bash
+idev snapshot create [name]     # 名前を省略すると日時（20060102-150405）
+idev snapshot list
+idev snapshot restore <name>    # 破壊的。確認を求める（--force で省略）
+idev snapshot delete <name>     # 同上
+```
+
+- 対象はdevkit管理下のinstanceに限る
+- 復元してもホスト側のworkspaceには影響しない
+  （bind mountであり、instanceの状態ではないため）
 
 ---
 
@@ -248,13 +287,9 @@ Incus daemonへの問い合わせ（Profileの実在確認など）は行わな�
 
 ## 4.8 Dry Run
 
-可能であれば、
-
 ```bash
 idev up --dry-run
 ```
-
-をサポートする。
 
 実際に変更せず、実行予定の操作を表示する。
 
@@ -270,7 +305,16 @@ Provision step 1/2: prepare (run)
 Provision step 2/2: main playbook (ansible .incus-dev/ansible/site.yml)
 ```
 
-初期MVPではoptionalとする。
+- ホスト側の前提（idmap、Profileの存在、管理下のinstanceか）は
+  `idev up` と同じように確認する。preflightとして使えるようにするため
+- Incusへの読み取りは行うが、変更は一切行わない
+- 既存instanceに対しては、現状との差分だけを表示する
+- devkitの管理用キー（`user.incus-devkit.*`）は常に設定されるため
+  1行にまとめる
+
+実行予定の算出は、実際に適用する経路と同じ関数
+（`desiredConfig` / `desiredDevices` / `staleIDMapKeys`）を使う。
+表示と実際の適用がずれないようにするため。
 
 ---
 

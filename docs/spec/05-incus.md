@@ -24,16 +24,17 @@ dev-example-project
 プレフィックス `dev-` は「開発環境用instance」を意味するものであり、
 コマンド名 `idev` とは独立している。`incus list` での可読性を優先する。
 
-ただし同一マシン上で複数checkoutを利用する可能性を考慮する。
-
-将来的には以下のような方式をサポート可能とする。
+同一マシン上で複数のチェックアウトを扱う場合、`project.scope` で
+区別の仕方を選べる（[03-configuration.md](03-configuration.md) 3.5）。
 
 ```text
-dev-example-project-main
-dev-example-project-a8f213
+scope: name    dev-example-project              （既定）
+scope: path    dev-example-project-cb958c73     チェックアウト先ごと
+scope: branch  dev-example-project-feature-x    ブランチごと
 ```
 
-初期実装では単純なproject name方式でよい。
+既定は従来どおりプロジェクト名のみとし、明示的に指定した場合のみ
+名前が変わるようにする。既存の環境が意図せず別物になることを避けるため。
 
 命名ロジックは単独の純粋関数として実装し、単体テスト可能にする。
 
@@ -127,35 +128,41 @@ YAML
 
 ### 5.4.4 削除の扱い
 
-MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunsetは行わない。
+`dev.yml` から削除された設定は、**devkitが適用したものに限り** 取り消す。
 
-理由：devkitが管理していない設定（利用者が手動で追加したもの）を
-誤って削除する危険があるため。
-
-クリーンな状態が必要な場合は `idev rebuild` を使用する。
-
-例外として、**devkit自身が設定したidmap関連のキー**（`raw.idmap`）は、
-方式を切り替えた際に取り消す。利用者が書いたキーには触れない。
-残したままにすると、`raw.idmap` と `shift` が二重に適用されるためである。
-
-将来的には、devkitが適用したキーの一覧を
+devkitは適用したconfigキーとdevice名を、instance自身へ記録する。
 
 ```text
-user.incus-devkit.managed
+user.incus-devkit.managed  = limits.cpu,limits.memory,raw.idmap
+user.incus-devkit.devices  = extdata,workspace
 ```
 
-に記録し、差分をunsetする方式を検討する。
+`idev up` のたびに記録と宣言を突き合わせ、記録にあって宣言に無いものを
+取り消す。記録に無いもの（利用者が `incus config set` で手動追加した設定や
+device）には一切触れない。
+
+記録を持たない古いinstanceに対しては、devkit自身が設定したidmapキー
+（`raw.idmap`）のみを対象とする。
+
+完全にクリーンな状態が必要な場合は `idev rebuild` を使用する。
 
 ### 5.4.5 再起動を要する設定
 
 一部の設定は変更にinstance再起動を要する。
 
-devkitは再起動が必要な変更を検出した場合、以下のいずれかとする。
+devkitは再起動が必要な変更を検出した場合、既定では警告のみを表示する。
 
-- 明示的に警告し、再起動が必要である旨を表示する
-- `--restart` 等の明示的な指示があった場合のみ再起動する
+```bash
+idev up --restart
+```
 
-利用者の作業中プロセスを予期せず停止させてはならない。
+が指定された場合に限り、instanceを再起動して反映する。
+
+利用者の作業中プロセスを予期せず停止させてはならないため、
+再起動は明示的な指示があった場合のみ行う。
+
+対象は devkit が実際に変更・取り消したキーに限る。
+触れていないキーを含めると、何もしていないのに警告が出続けてしまう。
 
 ---
 

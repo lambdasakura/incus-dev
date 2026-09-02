@@ -155,6 +155,28 @@ project:
 
 Incus instance名生成などに利用する（[05-incus.md](05-incus.md) 参照）。
 
+### scope
+
+同一マシンで複数のチェックアウトを扱う場合の、instance名の区別の仕方。
+
+```yaml
+project:
+  name: my-project
+  scope: path        # name（既定） | path | branch
+```
+
+| 値 | instance名 | 用途 |
+| --- | --- | --- |
+| `name`（既定） | `dev-my-project` | 従来どおり |
+| `path` | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
+| `branch` | `dev-my-project-feature-x` | ブランチごとに分ける（Gitが必要） |
+
+`branch` はコミットが無いリポジトリでもブランチ名を解決する。
+detached HEADの場合はコミットの短縮ハッシュを使う。
+
+既定を変えると既存の環境が別物になってしまうため、
+明示的に指定した場合のみ名前が変わる。
+
 ---
 
 ## 3.6 instance
@@ -577,44 +599,112 @@ project rootの外を指すパスは警告してよいが、禁止はしない�
 
 ---
 
-## 3.12 Secret
+## 3.12 secrets
 
-以下を `dev.yml` へ直接書くことを推奨しない。
+`dev.yml` はGitへcommitされる前提のため、**値そのものを書いてはならない**。
 
 - API key
 - Access token
 - Password
 - Private key
 
-特にGitへcommitされることを前提に設計する。
+これらはホスト側から注入する。
 
-Secretが必要な場合は、以下から注入する方式を優先する。
+```yaml
+secrets:
+  API_TOKEN:
+    env: HOST_TOKEN          # ホストの環境変数から
+  DEPLOY_KEY:
+    file: ~/.config/key      # ホストのファイルから（前後の空白は除く）
+  OPTIONAL_ONE:
+    env: MAYBE
+    optional: true           # 取得できなくてもよい
+```
 
-- ホスト側の環境変数
-- ホスト側のファイル
-- password manager / secret manager
+- `env` と `file` は排他。どちらか一方を指定する
+- `DEVKIT_` で始まる名前は使えない（devkitの予約）
+- 取得できないものがあれば、**instanceへ触れる前に** どれが足りないかを
+  まとめて報告する
 
-将来的にdevkit側で注入機構を提供する可能性はあるが、初期実装では対象外とする。
+注入先：
+
+| ステップ | 渡し方 |
+| --- | --- |
+| `run` | 環境変数として渡す。同名の `env` を書いた場合はそちらが優先 |
+| `ansible` | `--extra-vars` として渡す（0600の一時ファイル、実行後に削除） |
+
+値はログとエラーの表示でマスクされる（[04-cli.md](04-cli.md) 4.10）。
+ただし **ステップ自身が出力した内容はマスクできない**点に注意する。
 
 ---
 
-## 3.13 将来的な拡張予定フィールド
+## 3.13 volumes
+
+instanceを作り直しても残るデータ領域。
+
+```yaml
+volumes:
+  cache:
+    path: /home/dev/.cache   # 必須。コンテナ内のマウント先
+    pool: default            # 任意。既定 default
+    size: 10GiB              # 任意。省略時はpoolの既定
+```
+
+- Incus上の名前は `<instance名>-<キー>` とする。
+  複数チェックアウトが同じボリュームを共有しないようにするため
+- 存在しなければ作成し、あればそのまま使う
+- `idev destroy` では **削除しない**。作り直しても残すためのものであり、
+  削除は `idev destroy --volumes` で明示的に指示する
+- `idev rebuild` でも残す
+- キー名は device 名と衝突してはならない
+
+ビルドキャッシュやデータベースの実体など、
+「作り直したいが消したくないもの」を置く。
+
+---
+
+## 3.14 shell
+
+`idev shell` と `idev exec` の既定を指定する。
+
+```yaml
+shell:
+  user: developer      # 実行ユーザー。省略時はinstanceの既定（root）
+  command: /bin/bash   # 起動するシェル。既定 /bin/sh
+  cwd: /workspace/src  # 作業ディレクトリ。既定は workspace.target
+```
+
+`user` に数値uidを指定した場合はIncusのexecへそのまま渡す。
+ユーザー名の場合はコンテナ内で `su` を用いて切り替える
+（Incusのexecはuidしか受け付けないため）。
+
+---
+
+## 3.15 incus
+
+Incus側の操作対象を指定する。
+
+```yaml
+incus:
+  project: development
+```
+
+CLIの `--incus-project` が指定された場合はそちらが優先される。
+どちらも無ければ `default` を使う。
+
+remoteの指定は現時点では対象外とする。
+remoteを使うとworkspaceのbind mountがホスト側パスを前提とするため
+成立せず、共有方式そのものを決め直す必要があるためである。
+
+---
+
+## 3.16 将来的な拡張予定フィールド
 
 以下は初期実装では対象外だが、後方互換に追加できる構造としておく。
 
 ```yaml
 incus:
-  remote: local
-  project: development
-
-shell:
-  user: developer
-  command: /bin/bash
-  cwd: /workspace
-
-provision:
-  - galaxy:                       # ansible-galaxy install
-      requirements: .incus-dev/ansible/requirements.yml
+  remote: dev-server
 ```
 
-詳細は [05-incus.md](05-incus.md)、[09-roadmap.md](09-roadmap.md) を参照。
+詳細は [09-roadmap.md](09-roadmap.md) を参照。

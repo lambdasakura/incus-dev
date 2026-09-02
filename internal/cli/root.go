@@ -15,6 +15,7 @@ import (
 	"github.com/lambdasakura/incus-dev/internal/config"
 	"github.com/lambdasakura/incus-dev/internal/incus"
 	"github.com/lambdasakura/incus-dev/internal/project"
+	"github.com/lambdasakura/incus-dev/internal/provision"
 	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
@@ -25,6 +26,12 @@ type globalFlags struct {
 	incusRemote  string
 	incusProject string
 }
+
+// defaultIncusProject は指定が無い場合に使うIncus project。
+const defaultIncusProject = "default"
+
+// errAborted は確認を拒否したことを示す。
+var errAborted = errors.New("aborted")
 
 // appFactory はコマンドが使う App を生成する。テストでは差し替える。
 type appFactory func(*globalFlags) (*App, error)
@@ -51,16 +58,19 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	pf.BoolVarP(&g.verbose, "verbose", "v", false, "詳細を出力する")
 	pf.StringVarP(&g.directory, "directory", "C", "", "探索を開始するディレクトリ（既定: カレントディレクトリ）")
 	pf.StringVar(&g.incusRemote, "incus-remote", "local", "Incus remote")
-	pf.StringVar(&g.incusProject, "incus-project", "default", "Incus project")
+	pf.StringVar(&g.incusProject, "incus-project", "",
+		"Incus project（未指定なら dev.yml の incus.project、それも無ければ default）")
 
 	root.AddCommand(
 		newUpCommand(g, factory),
 		newProvisionCommand(g, factory),
 		newShellCommand(g, factory),
+		newExecCommand(g, factory),
 		newStatusCommand(g, factory),
 		newDestroyCommand(g, factory),
 		newRebuildCommand(g, factory),
 		newValidateCommand(g, factory),
+		newSnapshotCommand(g, factory),
 	)
 	return root
 }
@@ -85,15 +95,25 @@ func newApp(g *globalFlags) (*App, error) {
 		return nil, err
 	}
 
+	// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
+	incusProject := g.incusProject
+	if incusProject == "" {
+		incusProject = cfg.IncusProject()
+	}
+	if incusProject == "" {
+		incusProject = defaultIncusProject
+	}
+
 	cmdRunner := runner.NewWithLogger(newLogger(os.Stderr, g.verbose))
 	client := &incus.CLI{
 		Runner:  cmdRunner,
 		Remote:  g.incusRemote,
-		Project: g.incusProject,
+		Project: incusProject,
 	}
 
-	return NewApp(AppOptions{
+	return NewAppFor(AppOptions{
 		Config:       cfg,
+		Branch:       gitBranch(context.Background(), cmdRunner, proj.Root),
 		Client:       client,
 		Runner:       cmdRunner,
 		In:           os.Stdin,
@@ -102,8 +122,8 @@ func newApp(g *globalFlags) (*App, error) {
 		Verbose:      g.verbose,
 		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
 		Remote:       g.incusRemote,
-		IncusProject: g.incusProject,
-	}), nil
+		IncusProject: incusProject,
+	})
 }
 
 // isTerminal はファイルが端末に接続されているかを返す。
@@ -115,7 +135,12 @@ func isTerminal(f *os.File) bool {
 }
 
 func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	return &cobra.Command{
+	var (
+		dryRun  bool
+		restart bool
+	)
+
+	c := &cobra.Command{
 		Use:   "up",
 		Short: "instanceを用意し、bootstrapとprovisionを実行する",
 		Args:  cobra.NoArgs,
@@ -124,13 +149,30 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.Up(cmd.Context())
+			if dryRun {
+				return app.Plan(cmd.Context())
+			}
+			return app.Up(cmd.Context(), UpOptions{Restart: restart})
 		},
 	}
+	c.Flags().BoolVar(&dryRun, "dry-run", false,
+		"実行予定の操作を表示するだけで、Incusへ変更を加えない")
+	c.Flags().BoolVar(&restart, "restart", false,
+		"反映に再起動が必要な変更があれば、instanceを再起動する")
+
+	c.MarkFlagsMutuallyExclusive("dry-run", "restart")
+
+	return c
 }
 
 func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	return &cobra.Command{
+	var (
+		only     []string
+		from     string
+		listOnly bool
+	)
+
+	c := &cobra.Command{
 		Use:   "provision",
 		Short: "instanceを作り直さずにprovisionのみ再実行する",
 		Args:  cobra.NoArgs,
@@ -139,9 +181,25 @@ func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return app.Provision(cmd.Context())
+			if listOnly {
+				return app.ListSteps()
+			}
+			return app.Provision(cmd.Context(), provision.Selection{Only: only, From: from})
 		},
 	}
+
+	c.Flags().StringArrayVar(&only, "step", nil,
+		"指定したステップのみ実行する（名前または番号。複数指定可）")
+	c.Flags().StringVar(&from, "from", "",
+		"指定したステップ以降を実行する（名前または番号）")
+	c.Flags().BoolVar(&listOnly, "list", false,
+		"provisionステップの一覧を表示する（Incusへは触れない）")
+
+	c.MarkFlagsMutuallyExclusive("step", "from")
+	c.MarkFlagsMutuallyExclusive("step", "list")
+	c.MarkFlagsMutuallyExclusive("from", "list")
+
+	return c
 }
 
 func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
@@ -157,6 +215,24 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		},
 	}
 	// idev shell -- bash -lc "..." の -lc を idev のフラグと解釈させない。
+	c.Flags().SetInterspersed(false)
+
+	return c
+}
+
+func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	c := &cobra.Command{
+		Use:   "exec -- <command>",
+		Short: "コンテナ内でコマンドを実行する（端末を割り当てない）",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := newApp(g)
+			if err != nil {
+				return err
+			}
+			return app.Exec(cmd.Context(), args)
+		},
+	}
+	// idev exec -- ls -l の -l を idev のフラグと解釈させない。
 	c.Flags().SetInterspersed(false)
 
 	return c
@@ -181,7 +257,10 @@ func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 }
 
 func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
-	var force bool
+	var (
+		force   bool
+		volumes bool
+	)
 	c := &cobra.Command{
 		Use:   "destroy",
 		Short: "instanceを削除する（ホスト側のソースは削除しない）",
@@ -193,12 +272,14 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			}
 			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
 				fmt.Sprintf("instance %s を削除します。よろしいですか?", app.InstanceName())) {
-				return errors.New("aborted")
+				return errAborted
 			}
-			return app.Destroy(cmd.Context())
+			return app.Destroy(cmd.Context(), DestroyOptions{Volumes: volumes})
 		},
 	}
 	c.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
+	c.Flags().BoolVar(&volumes, "volumes", false, "永続ボリュームも削除する")
+
 	return c
 }
 
@@ -215,12 +296,92 @@ func newRebuildCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			}
 			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
 				fmt.Sprintf("instance %s を破棄して作り直します。よろしいですか?", app.InstanceName())) {
-				return errors.New("aborted")
+				return errAborted
 			}
 			return app.Rebuild(cmd.Context())
 		},
 	}
 	c.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
+	return c
+}
+
+func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	c := &cobra.Command{
+		Use:   "snapshot",
+		Short: "instanceのスナップショットを操作する",
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "create [name]",
+		Short: "スナップショットを作成する（名前を省略すると日時）",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := newApp(g)
+			if err != nil {
+				return err
+			}
+			var name string
+			if len(args) > 0 {
+				name = args[0]
+			}
+			return app.CreateSnapshot(cmd.Context(), name)
+		},
+	})
+
+	c.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "スナップショットの一覧を表示する",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			app, err := newApp(g)
+			if err != nil {
+				return err
+			}
+			return app.ListSnapshots(cmd.Context())
+		},
+	})
+
+	var force bool
+	restore := &cobra.Command{
+		Use:   "restore <name>",
+		Short: "スナップショットの状態へ戻す（instance内の現在の状態は失われる）",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := newApp(g)
+			if err != nil {
+				return err
+			}
+			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+				fmt.Sprintf("instance %s を %s の状態へ戻します。現在の状態は失われます。よろしいですか?",
+					app.InstanceName(), args[0])) {
+				return errAborted
+			}
+			return app.RestoreSnapshot(cmd.Context(), args[0])
+		},
+	}
+	restore.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
+	c.AddCommand(restore)
+
+	var deleteForce bool
+	del := &cobra.Command{
+		Use:   "delete <name>",
+		Short: "スナップショットを削除する",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := newApp(g)
+			if err != nil {
+				return err
+			}
+			if !deleteForce && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+				fmt.Sprintf("スナップショット %s を削除します。よろしいですか?", args[0])) {
+				return errAborted
+			}
+			return app.DeleteSnapshot(cmd.Context(), args[0])
+		},
+	}
+	del.Flags().BoolVarP(&deleteForce, "force", "f", false, "確認せずに実行する")
+	c.AddCommand(del)
+
 	return c
 }
 

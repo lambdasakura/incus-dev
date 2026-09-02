@@ -113,6 +113,8 @@ func (f *fixture) run(args ...string) (string, error) {
 
 	cmd := exec.Command(idevBin, args...)
 	cmd.Dir = f.root
+	cmd.Env = os.Environ() // t.Setenv で設定した値を引き継ぐ
+
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

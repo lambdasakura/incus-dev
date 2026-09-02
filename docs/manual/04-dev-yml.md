@@ -12,6 +12,7 @@ runtime:
 
 project:
   name: my-project                 # 必須。instance名の元になる
+  scope: name                      # 任意。name（既定）| path | branch
 
 instance:
   image: images:ubuntu/24.04       # 必須
@@ -29,6 +30,23 @@ workspace:                         # 任意
   source: .
   target: /workspace
   idmap: auto
+
+volumes:                           # 任意。作り直しても残るデータ領域
+  cache:
+    path: /home/dev/.cache
+    size: 10GiB
+
+secrets:                           # 任意。ホストから注入する秘密情報
+  API_TOKEN:
+    env: HOST_TOKEN
+
+shell:                             # 任意。idev shell / idev exec の既定
+  user: developer
+  command: /bin/bash
+  cwd: /workspace
+
+incus:                             # 任意
+  project: development
 
 bootstrap:                         # 任意
   - run: command -v python3 || apk add python3
@@ -280,11 +298,52 @@ provision:
 
 ---
 
-## 4.10 書いてはいけないもの
+## 4.10 volumes
 
-以下を `dev.yml` へ直接書かない。Gitにコミットされる前提のファイルである。
+instanceを作り直しても残したいデータを置きます。
 
-- APIキー、アクセストークン、パスワード、秘密鍵
+```yaml
+volumes:
+  cache:
+    path: /home/dev/.cache   # コンテナ内のマウント先
+    size: 10GiB              # 任意
+    pool: default            # 任意
+```
 
-必要な場合はホスト側の環境変数やファイルから注入する。
-（idev による注入機構は現時点では提供していない。）
+`idev rebuild` しても中身は残ります。`idev destroy` でも残り、
+消したい場合は `idev destroy --volumes` を使います。
+
+ビルドキャッシュやデータベースの実体など、
+「環境は作り直したいが消したくないもの」に向いています。
+
+---
+
+## 4.11 secrets
+
+`dev.yml` はGitにコミットされる前提なので、**値そのものは書きません**。
+ホスト側から注入します。
+
+```yaml
+secrets:
+  API_TOKEN:
+    env: HOST_TOKEN          # ホストの環境変数から
+  DEPLOY_KEY:
+    file: ~/.config/key      # ホストのファイルから
+  OPTIONAL_ONE:
+    env: MAYBE
+    optional: true           # 無くてもよい
+```
+
+- `run` ステップには環境変数として渡ります
+- `ansible` ステップには `--extra-vars` として渡ります（0600の一時ファイル）
+- 取得できないものがあると、**instanceに触れる前に** どれが足りないか表示して止まります
+- ログやエラーの表示では値がマスクされます
+
+```console
+$ idev up
+[idev] error: cannot resolve secret(s):
+  API_TOKEN (environment variable HOST_TOKEN): not set
+```
+
+ただし **ステップ自身が出力した内容まではマスクできません**。
+`echo $API_TOKEN` のような書き方は避けてください。
