@@ -52,12 +52,19 @@ user.incus-dev.root    = /home/user/src/example-project
 user.incus-dev.schema  = 1
 user.incus-dev.image   = images:ubuntu/24.04
 user.incus-dev.volumes = default/dev-example-project-cache
+user.incus-dev.restart-pending = security.nesting
 ```
 
 目的：
 
 - 既存instanceが本当にこのプロジェクトのものかを確認する
 - 名前衝突時に、無関係なinstanceを破壊しないようにする
+
+`user.incus-dev.root` が現在のproject rootと食い違う場合は警告する。
+既定の `project.scope: name` では同じプロジェクトの複数checkoutが
+1つのinstanceを共有する設計であり、`idev up` はworkspaceを最後に実行した
+checkoutへ向け直す。黙って向け直すと、もう一方のcheckoutで作業している人が
+気付かないうちに別のツリーをビルドすることになる。
 
 `idev destroy` および `idev rebuild` は、対象instanceが
 idev管理下でない場合、明示的に失敗する。
@@ -188,6 +195,14 @@ idev up --restart
 
 利用者の作業中プロセスを予期せず停止させてはならないため、
 再起動は明示的な指示があった場合のみ行う。
+
+**再起動が必要であるという事実は instance へ記録する**
+（`user.incus-dev.restart-pending`）。警告を出すのは変更を書き込んだ回であり、
+利用者がその案内に従って `idev up --restart` を実行する頃には、
+宣言とinstanceのconfigは既に一致していて比較対象が残っていないためである。
+記録が無いと、案内されたコマンドが何もせずに終わる。
+
+記録は再起動に成功した時点で消す。
 
 停止も同じ理由で **正常停止を先に試みる**。ただし応答しないinstanceで
 固まらないよう待ち時間には上限（30秒）を設け、超えた場合は強制停止する。

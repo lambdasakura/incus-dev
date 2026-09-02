@@ -909,6 +909,32 @@ func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 	}
 }
 
+// A failing step names the instance it ran against.
+//
+// Spec 04-cli.md 4.10 lists Target among the minimum a failure reports, and
+// with project.scope: path or branch the instance name is derived rather than
+// obvious — a CI log without it cannot say which environment failed.
+func TestStepFailureNamesTheInstance(t *testing.T) {
+	cfg := parseConfig(t, base+`
+provision:
+  - name: setup
+    run: "false"
+`)
+
+	client := newIncus()
+	client.code[""] = 1
+
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{})
+
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
+	}
+	if !strings.Contains(err.Error(), "dev-example-project") {
+		t.Errorf("error = %q, want it to name the instance", err.Error())
+	}
+}
+
 // A galaxy step is what installs community.general, so requiring it up front
 // would make the documented pattern impossible.
 //

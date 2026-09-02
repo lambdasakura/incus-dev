@@ -108,7 +108,7 @@ incus-dev/
 └── test/
     ├── examples_test.go        # examples/ が読めることの確認
     ├── skills_test.go          # skills/ の雛形とコマンド名の確認
-    ├── structure_test.go       # パッケージ依存方向の確認
+    ├── structure_test.go       # REQ-007の資産検査とパッケージ依存方向の確認
     └── integration/            # //go:build integration
 ```
 

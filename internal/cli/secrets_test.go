@@ -141,7 +141,7 @@ func TestStepKindGalaxy(t *testing.T) {
 func TestPlanActionsShowsGalaxyRequirements(t *testing.T) {
 	cfg := mustParse(t, planBase+"provision:\n  - galaxy:\n      requirements: .incus-dev/requirements.yml\n")
 
-	got := strings.Join(planActions(cfg, "dev-x", nil, idmapPlan{}), "\n")
+	got := strings.Join(planActions(cfg, "dev-x", nil, idmapPlan{}, nil), "\n")
 	if !strings.Contains(got, "(galaxy .incus-dev/requirements.yml)") {
 		t.Errorf("plan =\n%s", got)
 	}

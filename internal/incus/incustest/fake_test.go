@@ -86,7 +86,7 @@ func TestFakeConfigAndDevices(t *testing.T) {
 		t.Fatalf("UnsetConfig(nil) error = %v", err)
 	}
 
-	// As the real thing does, keys that were not declared stay.
+	// As the real thing does, a declared device is replaced.
 	dev := map[string]incus.Device{"ws": {"type": "disk", "path": "/ws", "shift": "true"}}
 	if err := f.ApplyDevices(ctx, "dev-x", dev); err != nil {
 		t.Fatal(err)
@@ -95,8 +95,11 @@ func TestFakeConfigAndDevices(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.Instances["dev-x"].Devices["ws"]
-	if got["path"] != "/ws2" || got["shift"] != "true" {
-		t.Errorf("device = %v, want undeclared keys kept", got)
+	if got["path"] != "/ws2" {
+		t.Errorf("device = %v, want the declared path", got)
+	}
+	if _, ok := got["shift"]; ok {
+		t.Errorf("device = %v, want a key that left the declaration gone", got)
 	}
 
 	// A changed type means a recreated device.
@@ -330,5 +333,32 @@ func TestFakeDeleteSnapshot(t *testing.T) {
 	}
 	if before[0].Name != "a" || before[1].Name != "b" {
 		t.Errorf("the slice returned earlier became %v", before)
+	}
+}
+
+// The fake replaces a declared device, as the real ApplyDevices does.
+//
+// Merging instead would leave every internal/cli test checking the opposite
+// of what production does, which is where a device-replacement regression
+// would land.
+func TestFakeApplyDevicesReplaces(t *testing.T) {
+	f := incustest.New()
+	f.AddInstance(&incus.Instance{
+		Name: "dev-x",
+		Devices: map[string]incus.Device{
+			"data": {"type": "disk", "pool": "fast", "source": "vol", "path": "/data"},
+		},
+	})
+
+	err := f.ApplyDevices(context.Background(), "dev-x", map[string]incus.Device{
+		"data": {"type": "disk", "source": "/srv/data", "path": "/data"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDevices() error = %v", err)
+	}
+
+	got := f.Instances["dev-x"].Devices["data"]
+	if _, ok := got["pool"]; ok {
+		t.Errorf("data = %v, want the key that left the declaration gone", got)
 	}
 }

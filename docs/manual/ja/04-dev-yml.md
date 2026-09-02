@@ -360,6 +360,10 @@ volumes:
 `idev rebuild` しても中身は残る。`idev destroy` でも残るため、
 消したい場合は `idev destroy --volumes` を使う。
 
+`size` と `pool` はvolume作成時にのみ読まれる。後から変更しても効果は無く、
+idevがリサイズすることもない。`incus storage volume delete` で消してから
+`idev up` を実行すると作り直される。
+
 **宣言から消したり名前を変えたりしてもデータは消えない。**
 idevは作成したvolumeを覚えているので、宣言から消えたものは `idev up` が警告し、
 `idev destroy --volumes` の削除対象にも残る。

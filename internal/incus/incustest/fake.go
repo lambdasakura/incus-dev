@@ -222,17 +222,9 @@ func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]i
 	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
-	// The real ApplyDevices does not remove keys absent from want, so neither
-	// does the fake.
+	// A declared device is replaced, not merged into, as the real one does.
 	for devName, dev := range devices {
-		current, ok := inst.Devices[devName]
-		if !ok || current.Type() != dev.Type() {
-			inst.Devices[devName] = maps.Clone(dev)
-			continue
-		}
-		for k, v := range dev {
-			current[k] = v
-		}
+		inst.Devices[devName] = maps.Clone(dev)
 	}
 	return nil
 }

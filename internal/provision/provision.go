@@ -104,7 +104,11 @@ func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []
 	total := len(steps)
 	for _, i := range indices {
 		step := steps[i]
-		label := fmt.Sprintf("%s step %d/%d: %s", kind, i+1, total, step.DisplayName(i+1))
+		// The instance is named because the failure has to say which
+		// environment it came from: with project.scope path or branch the name
+		// is derived, not obvious (spec 04-cli.md 4.10).
+		label := fmt.Sprintf("%s step %d/%d in %s: %s",
+			kind, i+1, total, env.Instance, step.DisplayName(i+1))
 		e.log(label)
 
 		if err := e.runStep(ctx, step, env); err != nil {

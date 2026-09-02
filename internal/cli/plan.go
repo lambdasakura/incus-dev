@@ -23,6 +23,10 @@ const (
 	// never re-images an existing instance, so this is what tells the user
 	// their edit to instance.image has not taken effect.
 	managedImageKey = config.ReservedConfigPrefix + "image"
+	// managedRestartKey records the keys whose change is waiting on a restart.
+	// The warning is emitted by the run that writes them, so by the time the
+	// user acts on it there is nothing left to compare against.
+	managedRestartKey = config.ReservedConfigPrefix + "restart-pending"
 	// managedVolumesKey records the volumes idev created, as pool/name. A
 	// volume dropped from the declaration would otherwise be unreachable:
 	// nothing names it any more, so nothing could delete it.
@@ -47,9 +51,13 @@ func desiredConfig(cfg *config.Config, plan idmapPlan, current map[string]string
 	out[managedProjectKey] = cfg.Project.Name
 	out[managedRootKey] = cfg.Root
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
-	// Only meaningful at creation: an existing instance keeps the image it was
-	// made from, and reapplyInstance leaves this key as it found it.
-	out[managedImageKey] = cfg.Instance.Image
+	// Written at creation and never again: it is what the instance was made
+	// from, which up cannot change. Rewriting it on every run would erase the
+	// one record that can tell the user their edit had no effect. An instance
+	// created before this key existed keeps none, and is left alone.
+	if current == nil {
+		out[managedImageKey] = cfg.Instance.Image
+	}
 
 	// The raw strategy maps the invoking host user onto root in the container.
 	if v := plan.rawIDMap(); v != "" {
@@ -214,13 +222,16 @@ func volumeName(instance, key string) string {
 // using the shift strategy ends up able to write to the workspace but not to
 // anything else.
 //
-// It is set explicitly even when the user manages the mapping themselves,
-// because ApplyDevices merges: a key left out is never cleared, so a shift
-// idev had set would survive beside the user's own raw.idmap and map the
-// workspace twice.
+// Nothing is set when the user manages the mapping themselves: the spec has
+// idev stay out of it entirely (03-configuration.md 3.7.3). Leaving the key
+// out clears a shift idev set earlier, because ApplyDevices replaces a
+// declared device rather than merging into it.
 //
 // A shift the project set explicitly wins.
 func applyShift(dev incus.Device, plan idmapPlan) {
+	if !plan.Managed {
+		return
+	}
 	if _, explicit := dev["shift"]; explicit {
 		return
 	}
@@ -258,14 +269,14 @@ func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
 }
 
 // instanceSpec builds what to pass when creating an instance.
-func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.InstanceSpec {
+func instanceSpec(cfg *config.Config, name string, plan idmapPlan, current map[string]string) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
 	return incus.InstanceSpec{
 		Name:       name,
 		Image:      cfg.Instance.Image,
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg, plan, nil, name),
+		Config:     desiredConfig(cfg, plan, current, name),
 		Devices:    desiredDevices(cfg, plan, name),
 	}
 }

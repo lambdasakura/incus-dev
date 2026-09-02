@@ -180,16 +180,16 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		}
 	})
 
-	// When the user manages it, idev sets no raw.idmap of its own — but it
-	// still says shift is off, so one it set earlier does not survive.
+	// When the user manages it, idev touches neither the config nor the
+	// devices. A shift it set earlier goes with the device replacement.
 	t.Run("managed by the user", func(t *testing.T) {
 		plan := idmapPlan{Managed: false}
 
 		if _, ok := desiredConfig(cfg, plan, nil, "dev-example-project")[idmapConfigKey]; ok {
 			t.Error("want raw.idmap unset")
 		}
-		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
-			t.Errorf("shift = %q, want it explicitly false", got)
+		if got, ok := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; ok {
+			t.Errorf("shift = %q, want idev to set none", got)
 		}
 	})
 }

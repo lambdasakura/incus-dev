@@ -314,6 +314,36 @@ func TestNewAppConnects(t *testing.T) {
 	}
 }
 
+// validate and provision --list work where the instance name cannot be
+// derived; the commands that operate on the instance still fail.
+//
+// project.scope: branch needs git, which a CI job running from a source
+// tarball may not have — and the declaration is not what is wrong there
+// (spec 04-cli.md 4.7, 4.2).
+func TestOfflineAppToleratesAnUnderivableName(t *testing.T) {
+	root := testProject(t, `
+schema: 1
+project:
+  name: example-project
+  scope: branch
+instance:
+  image: images:ubuntu/24.04
+`)
+
+	app, err := newOfflineApp(&globalFlags{directory: root})
+	if err != nil {
+		t.Fatalf("newOfflineApp() error = %v", err)
+	}
+	if err := app.Validate(); err != nil {
+		t.Errorf("Validate() error = %v", err)
+	}
+
+	noIncus(t)
+	if _, err := newApp(&globalFlags{directory: root}); err == nil {
+		t.Error("newApp() = nil error, want the commands that need the instance to fail")
+	}
+}
+
 func TestNewAppErrors(t *testing.T) {
 	t.Run("no project", func(t *testing.T) {
 		if _, err := newOfflineApp(&globalFlags{directory: t.TempDir()}); err == nil {
@@ -583,6 +613,25 @@ func TestShellAndExecDoNotClaimTheCommandsFlags(t *testing.T) {
 				t.Errorf("calls = %v, want it to contain %q", client.Calls, tt.want)
 			}
 		})
+	}
+}
+
+// exec without a command says so before it reaches Incus.
+//
+// It is the one condition the user can fix from what they typed, so an
+// unreachable daemon must not be reported ahead of it (spec 04-cli.md 4.3.1).
+func TestExecRequiresACommand(t *testing.T) {
+	never := func(*globalFlags) (*App, error) {
+		t.Fatal("built the App before the arguments were checked")
+		return nil, nil
+	}
+	root := newRootCommand("test", never, never)
+	root.SetArgs([]string{"exec"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	if err := root.ExecuteContext(context.Background()); err == nil {
+		t.Error("error = nil, want the missing command reported")
 	}
 }
 

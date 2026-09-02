@@ -3,7 +3,9 @@ package test
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -136,5 +138,49 @@ func TestOnlySchemasAreEmbedded(t *testing.T) {
 	if len(files) != len(want) || files[0] != want[0] {
 		t.Errorf("files using go:embed = %v, want %v\n"+
 			"the JSON Schema is the only thing idev may embed (REQ-007)", files, want)
+	}
+}
+
+// The packages depend on each other only in the directions CLAUDE.md and spec
+// 07-implementation.md 7.1 declare.
+//
+// Nothing checked this, although 02-repository-layout.md says this file does:
+// internal/provision had grown an edge to internal/project for one constant.
+func TestPackageDependencyDirections(t *testing.T) {
+	const mod = "github.com/lambdasakura/incus-dev/"
+
+	allowed := map[string][]string{
+		"cmd/idev":                   {"internal/cli"},
+		"internal/cli":               {"internal/project", "internal/config", "internal/incus", "internal/provision", "internal/runner"},
+		"internal/provision":         {"internal/config", "internal/incus", "internal/runner"},
+		"internal/incus":             {},
+		"internal/config":            {"schemas"},
+		"internal/project":           {},
+		"internal/runner":            {},
+		"schemas":                    {},
+		"internal/incus/incustest":   {"internal/incus"},
+		"internal/runner/runnertest": {"internal/runner"},
+	}
+
+	for pkg, want := range allowed {
+		t.Run(pkg, func(t *testing.T) {
+			// The implementation's own direct imports. A transitive one is
+			// the business of the package that imports it, and a test may
+			// reach for a fake the implementation must not.
+			out, err := exec.Command("go", "list", "-f",
+				"{{range .Imports}}{{.}} {{end}}", "../"+pkg).Output()
+			if err != nil {
+				t.Fatalf("go list: %v", err)
+			}
+			for _, dep := range strings.Fields(string(out)) {
+				rel, ok := strings.CutPrefix(dep, mod)
+				if !ok || rel == pkg {
+					continue
+				}
+				if !slices.Contains(want, rel) {
+					t.Errorf("%s depends on %s, which the layout does not allow", pkg, rel)
+				}
+			}
+		})
 	}
 }

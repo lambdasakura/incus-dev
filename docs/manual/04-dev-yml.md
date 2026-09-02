@@ -376,6 +376,10 @@ The contents survive `idev rebuild`. They also survive `idev destroy`; use
 Good for build caches, database files — anything you want to keep while the
 environment around it is thrown away.
 
+`size` and `pool` are read when the volume is created and never again:
+changing them later has no effect, and idev does not resize. Remove the volume
+with `incus storage volume delete` and let the next `idev up` create it anew.
+
 **Removing or renaming an entry does not delete the data.** idev remembers the
 volumes it created, so `idev up` says which ones have left the declaration and
 `idev destroy --volumes` still removes them.

@@ -49,7 +49,19 @@ func (a *App) Plan(ctx context.Context) error {
 		return err
 	}
 
-	for _, action := range planActions(a.cfg, a.instance, current, plan) {
+	if current != nil {
+		// The same warnings up gives. A preflight that stays quiet about what
+		// up would refuse to apply is not a preflight (spec 04-cli.md 4.8).
+		a.pruneVolumeRecord(ctx, current)
+		a.warnChanges(current)
+	}
+
+	existing, err := a.existingVolumes(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, action := range planActions(a.cfg, a.instance, current, plan, existing) {
 		if _, err := fmt.Fprintln(a.out, action); err != nil {
 			return err
 		}
@@ -61,7 +73,7 @@ func (a *App) Plan(ctx context.Context) error {
 //
 // Building it as a pure function with no side effects is what lets it show the
 // same result the applying path (desiredConfig, desiredDevices) computes.
-func planActions(cfg *config.Config, name string, current *incus.Instance, idmap idmapPlan) []string {
+func planActions(cfg *config.Config, name string, current *incus.Instance, idmap idmapPlan, existingVolumes map[string]bool) []string {
 	var out []string
 
 	var currentCfg map[string]string
@@ -70,6 +82,8 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 	}
 	desiredCfg := desiredConfig(cfg, idmap, currentCfg, name)
 	desiredDev := desiredDevices(cfg, idmap, name)
+
+	out = append(out, volumeActions(cfg, name, existingVolumes)...)
 
 	if current == nil {
 		out = append(out, fmt.Sprintf("Create instance %s (%s)", name, cfg.Instance.Image))
@@ -96,6 +110,39 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 	}
 
 	return append(out, provisionActions(cfg)...)
+}
+
+// existingVolumes reports which of the declared volumes are already there.
+func (a *App) existingVolumes(ctx context.Context) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, key := range slices.Sorted(maps.Keys(a.cfg.Volumes)) {
+		vol := a.cfg.Volumes[key]
+		pool, name := vol.PoolOrDefault(), volumeName(a.instance, key)
+
+		exists, err := a.client.VolumeExists(ctx, pool, name)
+		if err != nil {
+			return nil, err
+		}
+		out[pool+"/"+name] = exists
+	}
+	return out, nil
+}
+
+// volumeActions lists the volumes that would be created.
+//
+// Allocating storage is the one thing up does that consumes space on the host,
+// so the preview has to say it will happen.
+func volumeActions(cfg *config.Config, name string, existing map[string]bool) []string {
+	var out []string
+	for _, key := range slices.Sorted(maps.Keys(cfg.Volumes)) {
+		vol := cfg.Volumes[key]
+		pool, volume := vol.PoolOrDefault(), volumeName(name, key)
+		if existing[pool+"/"+volume] {
+			continue
+		}
+		out = append(out, fmt.Sprintf("Create volume %s on pool %s", volume, pool))
+	}
+	return out
 }
 
 // configActions lists the changes to the instance config.

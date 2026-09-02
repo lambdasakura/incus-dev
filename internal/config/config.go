@@ -29,6 +29,12 @@ const (
 // There is no migration: nothing was ever released under the old name.
 const ReservedConfigPrefix = "user.incus-dev."
 
+// ConfigDir is the name of the project's configuration directory. It is
+// declared here as well as in internal/project so that the packages reading
+// dev.yml do not have to depend on the one that finds it
+// (spec 07-implementation.md 7.1).
+const ConfigDir = ".incus-dev"
+
 // WorkspaceDeviceName is the reserved name of the workspace disk device.
 const WorkspaceDeviceName = "workspace"
 

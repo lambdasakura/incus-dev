@@ -23,7 +23,7 @@ func TestPlanActionsForNewInstance(t *testing.T) {
 	cfg := mustParse(t, dryRunYAML)
 	plan := idmapPlan{Mode: config.IDMapShift, Managed: true}
 
-	got := strings.Join(planActions(cfg, "dev-example-project", nil, plan), "\n")
+	got := strings.Join(planActions(cfg, "dev-example-project", nil, plan, nil), "\n")
 
 	for _, want := range []string{
 		"Create instance dev-example-project (images:ubuntu/24.04)",
@@ -59,7 +59,7 @@ func TestPlanActionsForExistingInstance(t *testing.T) {
 		},
 	}
 
-	got := strings.Join(planActions(cfg, "dev-example-project", current, plan), "\n")
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan, nil), "\n")
 
 	for _, want := range []string{
 		"Use existing instance dev-example-project (Running)",
@@ -103,7 +103,7 @@ func TestPlanActionsShowsRemovals(t *testing.T) {
 		},
 	}
 
-	got := strings.Join(planActions(cfg, "dev-example-project", current, plan), "\n")
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan, nil), "\n")
 
 	for _, want := range []string{
 		"Unset config limits.memory",
@@ -135,7 +135,7 @@ func TestPlanActionsLeavesUnrecordedConfigAlone(t *testing.T) {
 		},
 	}
 
-	got := strings.Join(planActions(cfg, "dev-example-project", current, plan), "\n")
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan, nil), "\n")
 
 	if strings.Contains(got, "Unset config "+idmapConfigKey) {
 		t.Errorf("plan =\n%s\nwant a key idev did not set left alone", got)
@@ -146,7 +146,7 @@ func TestPlanActionsStartsStoppedInstance(t *testing.T) {
 	cfg := mustParse(t, planBase)
 	current := &incus.Instance{Name: "dev-example-project", Status: "Stopped"}
 
-	got := strings.Join(planActions(cfg, "dev-example-project", current, idmapPlan{}), "\n")
+	got := strings.Join(planActions(cfg, "dev-example-project", current, idmapPlan{}, nil), "\n")
 
 	if !strings.Contains(got, "Start instance") {
 		t.Errorf("plan =\n%s\nwant it to show a start when it is stopped", got)
@@ -167,7 +167,7 @@ func TestPlanActionsBootstrapSource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := strings.Join(planActions(mustParse(t, tt.yaml), "dev-x", nil, idmapPlan{}), "\n")
+			got := strings.Join(planActions(mustParse(t, tt.yaml), "dev-x", nil, idmapPlan{}, nil), "\n")
 
 			if !strings.Contains(got, tt.want) {
 				t.Errorf("plan =\n%s\nwant it to contain %q", got, tt.want)
@@ -185,7 +185,7 @@ func TestPlanActionsNoProfiles(t *testing.T) {
       pool: default
       path: /
 `)
-	got := strings.Join(planActions(cfg, "dev-x", nil, idmapPlan{}), "\n")
+	got := strings.Join(planActions(cfg, "dev-x", nil, idmapPlan{}, nil), "\n")
 
 	if !strings.Contains(got, "Apply no profiles") {
 		t.Errorf("plan =\n%s", got)

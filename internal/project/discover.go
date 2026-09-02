@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	// ConfigDir is the name of the project's configuration directory.
+	// ConfigDir is the name of the project's configuration directory. It
+	// matches config.ConfigDir, which the packages reading dev.yml use so
+	// they need not depend on this one.
 	ConfigDir = ".incus-dev"
 	// ConfigFile is the name of the environment definition file.
 	ConfigFile = "dev.yml"

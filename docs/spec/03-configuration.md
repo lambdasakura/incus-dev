@@ -293,6 +293,10 @@ limits.cpu: 8         # "8" として渡される
 `no` は真偽値として解釈されるため、それぞれ `"432"` `"false"` になる。
 元の表記はJSONへの変換時点で失われており、実装側で区別できない。
 
+同じことがマッピングの**キー**にも起きる。`n` は `false` へ、
+`y` / `on` / `off` は真偽値へ変換されるため、`instance.config` や
+run ステップの `env` でこれらをキーにすると別の名前になる。
+
 意図した文字列をそのまま渡したい場合は引用符で囲む。
 
 ```yaml
@@ -418,8 +422,12 @@ workspaceのdisk deviceに `shift=true` を設定し、idmapped mountを使う�
 
 #### `none`
 
-何も設定しない。プロジェクトが `instance.config` で自前に対応付ける場合や、
+対応付けを行わない。プロジェクトが `instance.config` で自前に対応付ける場合や、
 workspaceへの書き込みが不要な場合に使う。
+
+disk deviceへは `shift: "false"` を明示的に書く。deviceの適用は宣言で
+置き換えるため（[05-incus.md](05-incus.md) 5.4.4）、キーを省くのではなく
+明示することで、以前 `auto` / `shift` で付いた `shift: "true"` が確実に消える。
 
 #### 適用範囲
 

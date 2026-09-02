@@ -633,6 +633,20 @@ func TestUpWarnsWhenTheDeclaredImageChanged(t *testing.T) {
 			t.Errorf("warning = %q, want it to mention %q", errOut.String(), want)
 		}
 	}
+
+	// The record is what the instance was made from, so up must not rewrite
+	// it: doing so would silence the warning after one run and leave status
+	// reporting an image the instance never had.
+	if got := client.Instances["dev-example-project"].Config[managedImageKey]; got != "images:debian/12" {
+		t.Errorf("recorded image = %q, want it left as the instance was made", got)
+	}
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "images:debian/12") {
+		t.Errorf("second run = %q, want it to warn again", errOut.String())
+	}
 }
 
 // profiles: [] and an instance with none is not a change.
@@ -742,6 +756,381 @@ func TestVolumeDroppedFromTheDeclaration(t *testing.T) {
 	}
 }
 
+// rebuild checks the host before it destroys anything.
+//
+// Otherwise a condition up refuses to start on — an unresolvable secret, a
+// missing profile — is discovered after the environment is already gone, and
+// the user cannot get it back until the host is fixed
+// (spec 03-configuration.md 3.12).
+func TestRebuildChecksBeforeDestroying(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"secrets:\n  API_TOKEN:\n    env: NOT_SET_ANYWHERE\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{},
+		CheckIDMap: func(int, int) error { return nil },
+		LookupEnv:  func(string) (string, bool) { return "", false },
+	})
+
+	if err := app.Rebuild(context.Background()); err == nil {
+		t.Fatal("Rebuild() = nil error, want the unresolvable secret reported")
+	}
+	if _, ok := client.Instances["dev-example-project"]; !ok {
+		t.Error("the instance was destroyed before the host was checked")
+	}
+}
+
+// A rebuild whose provisioning fails still records the carried volumes.
+//
+// The record is part of the creation request, not something written after the
+// run succeeds: a failing step would otherwise strand the volume, and a step
+// failing during a rebuild is the ordinary case.
+func TestRebuildKeepsTheRecordWhenProvisioningFails(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"provision:\n  - run: \"false\"\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-old",
+		},
+	})
+	client.Volumes["default/dev-example-project-old"] = true
+	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, nil }
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Rebuild(context.Background()); err == nil {
+		t.Fatal("Rebuild() = nil error, want the failing step reported")
+	}
+
+	got := client.Instances["dev-example-project"].Config[managedVolumesKey]
+	if !strings.Contains(got, "dev-example-project-old") {
+		t.Errorf("record = %q, want the carried volume recorded despite the failure", got)
+	}
+}
+
+// up --dry-run says everything up would say.
+//
+// The preview is the preflight (spec 04-cli.md 4.8), so the warnings about
+// what up cannot apply have to appear in it — they are the whole point of the
+// markers.
+func TestPlanReportsTheSameWarningsAsUp(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedImageKey:   "images:debian/12",
+			managedRootKey:    "/home/u/other-checkout",
+		},
+	})
+
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+
+	for _, want := range []string{"images:debian/12", "other-checkout"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("plan warnings = %q, want them to mention %q", errOut.String(), want)
+		}
+	}
+	if !strings.Contains(out.String(), "Create volume dev-example-project-cache") {
+		t.Errorf("plan =\n%s\nwant the volume it would allocate", out.String())
+	}
+	// A preview changes nothing.
+	if client.Volumes["default/dev-example-project-cache"] {
+		t.Error("the dry run created the volume")
+	}
+
+	// A volume that is already there is not offered again.
+	client.Volumes["default/dev-example-project-cache"] = true
+	out.Reset()
+	if err := app.Plan(context.Background()); err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if strings.Contains(out.String(), "Create volume") {
+		t.Errorf("plan =\n%s\nwant no creation for a volume that exists", out.String())
+	}
+
+	// A pool that cannot be read is reported rather than guessed at.
+	client.Hook = func(call string) error {
+		if strings.HasPrefix(call, "volume exists") {
+			return errBoom
+		}
+		return nil
+	}
+	if err := app.Plan(context.Background()); !errors.Is(err, errBoom) {
+		t.Errorf("error = %v, want %v", err, errBoom)
+	}
+}
+
+// A volume added to dev.yml is created for an instance that already exists.
+func TestUpCreatesVolumesForAnExistingInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !client.Volumes["default/dev-example-project-cache"] {
+		t.Errorf("volumes = %v, want the newly declared one created", client.Volumes)
+	}
+}
+
+// A volume the user deleted by hand leaves the record, so up stops mentioning
+// it.
+//
+// The record only ever grew, so a warning about a volume outlived the volume:
+// the offered remedy, destroy --volumes, also destroys the instance, so
+// deleting one by hand is what a user would do.
+func TestVolumeRecordDropsWhatIsGone(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,malformed",
+		},
+	})
+	// The volume is not on the pool: the user removed it themselves.
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "no longer declared") {
+		t.Errorf("warning = %q, want none for a volume that is gone", errOut.String())
+	}
+	if got := client.Instances["dev-example-project"].Config[managedVolumesKey]; got != "" {
+		t.Errorf("record = %q, want the gone and the malformed entries dropped", got)
+	}
+}
+
+// rebuild carries the volume record across, since the record lives on the
+// instance it destroys.
+func TestRebuildKeepsTheVolumeRecord(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.Volumes["default/dev-example-project-cache"] = true
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	got := client.Instances["dev-example-project"].Config[managedVolumesKey]
+	if !strings.Contains(got, "dev-example-project-cache") {
+		t.Errorf("record = %q, want the volume still reachable after a rebuild", got)
+	}
+
+	// And it can still be deleted.
+	if err := app.Destroy(context.Background(), DestroyOptions{Volumes: true}); err != nil {
+		t.Fatalf("Destroy() error = %v", err)
+	}
+	if client.Volumes["default/dev-example-project-cache"] {
+		t.Error("the carried volume was not deleted")
+	}
+}
+
+// Taking the idmap over removes the shift idev had set.
+//
+// idev sets no shift of its own then, and replacing the device is what clears
+// the one from before: left in place beside the user's raw.idmap it would map
+// the workspace twice, with no edit to dev.yml able to undo it.
+func TestUpClearsShiftWhenTheUserTakesOverTheIDMap(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"  config:\n    raw.idmap: \"both 1000 0\"\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+		Devices: map[string]incus.Device{
+			"workspace": {"type": "disk", "path": "/workspace", "source": "/old", "shift": "true"},
+		},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if got := client.Instances["dev-example-project"].Devices["workspace"]; got["shift"] != "" {
+		t.Errorf("workspace = %v, want the shift idev set to be gone", got)
+	}
+}
+
+// Failures reading the pool while pruning, and writing the carried record,
+// reach the caller.
+func TestVolumeRecordErrors(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	newFake := func() *incustest.Fake {
+		client := incustest.New()
+		client.AddInstance(&incus.Instance{
+			Name:     "dev-example-project",
+			Status:   "Running",
+			Profiles: []string{"default"},
+			Config: map[string]string{
+				managedProjectKey: "example-project",
+				managedVolumesKey: "default/dev-example-project-cache",
+			},
+		})
+		client.Volumes["default/dev-example-project-cache"] = true
+		return client
+	}
+
+	newApp := func(client *incustest.Fake) *App {
+		return NewApp(AppOptions{
+			Config: cfg, Client: client, Runner: &runnertest.Fake{},
+			Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+		})
+	}
+
+	// A pool that cannot be reached must not stop up: nothing declared needs
+	// the recorded volume, and the record is only there to be tidied.
+	t.Run("reading the pool while pruning", func(t *testing.T) {
+		client := newFake()
+		client.Hook = func(call string) error {
+			if strings.HasPrefix(call, "volume exists gone ") {
+				return errBoom
+			}
+			return nil
+		}
+		client.Instances["dev-example-project"].Config[managedVolumesKey] = "gone/dev-example-project-old"
+
+		if err := newApp(client).Up(context.Background(), UpOptions{}); err != nil {
+			t.Errorf("Up() error = %v, want an unreachable pool not to stop the run", err)
+		}
+		if got := client.Instances["dev-example-project"].Config[managedVolumesKey]; got == "" {
+			t.Error("the record was dropped although it could not be checked")
+		}
+	})
+
+	t.Run("deleting a volume", func(t *testing.T) {
+		client := newFake()
+		client.Hook = func(call string) error {
+			if strings.HasPrefix(call, "volume delete") {
+				return errBoom
+			}
+			return nil
+		}
+
+		err := newApp(client).Destroy(context.Background(), DestroyOptions{Volumes: true})
+		if !errors.Is(err, errBoom) {
+			t.Errorf("error = %v, want %v", err, errBoom)
+		}
+	})
+
+}
+
+// An instance last used from another checkout is said out loud.
+//
+// With the default scope two checkouts share one instance, and up repoints the
+// workspace at whichever ran last, so the other one quietly builds this tree.
+func TestUpWarnsWhenTheCheckoutChanged(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedRootKey:    "/home/u/other-checkout",
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	for _, want := range []string{"/home/u/other-checkout", "project.scope"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("warning = %q, want it to mention %q", errOut.String(), want)
+		}
+	}
+
+	// The same checkout says nothing.
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "last used from") {
+		t.Errorf("second run = %q, want no warning for the same checkout", errOut.String())
+	}
+}
+
 // status reports the image the instance was made from, not the declaration.
 func TestStatusReportsTheInstanceImage(t *testing.T) {
 	cfg := mustParse(t, rootYAML)
@@ -767,6 +1156,11 @@ func TestStatusReportsTheInstanceImage(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "images:debian/12") {
 		t.Errorf("status =\n%s\nwant the image the instance was made from", out.String())
+	}
+	// And the declaration beside it, so the row is not quietly one or the
+	// other.
+	if !strings.Contains(out.String(), "images:ubuntu/24.04") {
+		t.Errorf("status =\n%s\nwant the declared image shown as differing", out.String())
 	}
 }
 
@@ -1034,6 +1428,87 @@ func lineContaining(out, sub string) string {
 		}
 	}
 	return ""
+}
+
+// up --restart restarts the instance when run in answer to the warning.
+//
+// The warning is emitted by the run that writes the key, so by the time the
+// user acts on it the config already matches the declaration and there is
+// nothing left to compare. Remembering that a restart is owed is what makes
+// the advice work (spec 05-incus.md 5.4.5).
+func TestRestartIsOwedUntilItHappens(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"  config:\n    security.nesting: \"true\"\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "restart it to apply") {
+		t.Fatalf("first run = %q, want the warning", errOut.String())
+	}
+
+	// A plain run keeps saying it.
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "security.nesting") {
+		t.Errorf("second run = %q, want the restart still owed", errOut.String())
+	}
+
+	// And --restart does it.
+	client.Calls = nil
+	if err := app.Up(context.Background(), UpOptions{Restart: true}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !client.Called("stop dev-example-project") || !client.Called("start dev-example-project") {
+		t.Errorf("calls = %v, want the instance restarted", client.Calls)
+	}
+
+	// A stopped instance owes nothing: starting it applies everything.
+	client.Instances["dev-example-project"].Status = "Stopped"
+	client.Instances["dev-example-project"].Config[managedRestartKey] = "security.nesting"
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart it to apply") {
+		t.Errorf("stopped run = %q, want no restart owed when it is about to start", errOut.String())
+	}
+	if got := client.Instances["dev-example-project"].Config[managedRestartKey]; got != "" {
+		t.Errorf("record = %q, want it cleared by the start", got)
+	}
+
+	// --restart on a run with nothing to apply restarts nothing.
+	client.Calls = nil
+	if err := app.Up(context.Background(), UpOptions{Restart: true}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if client.Called("stop dev-example-project") {
+		t.Errorf("calls = %v, want no restart when nothing needs one", client.Calls)
+	}
+
+	// Once restarted, nothing is owed.
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart it to apply") {
+		t.Errorf("fourth run = %q, want no warning once it has been restarted", errOut.String())
+	}
 }
 
 func TestRestartRequiredKeys(t *testing.T) {

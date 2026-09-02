@@ -106,6 +106,11 @@ func newOfflineApp(g *globalFlags) (*App, error) {
 	return buildApp(g, nil)
 }
 
+// offlineOptions marks the App as one that does not operate on the instance.
+func offlineOptions(connect func(incus.Target) (*incus.API, error)) bool {
+	return connect == nil
+}
+
 // buildApp discovers the project, loads the configuration and builds the App.
 // It connects to Incus when connect is non-nil.
 func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*App, error) {
@@ -145,17 +150,18 @@ func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*
 	}
 
 	return NewAppFor(AppOptions{
-		Config:       cfg,
-		Branch:       gitBranch(context.Background(), cmdRunner, proj.Root),
-		Client:       client,
-		Runner:       cmdRunner,
-		In:           os.Stdin,
-		Out:          os.Stdout,
-		ErrOut:       os.Stderr,
-		Verbose:      g.verbose,
-		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
-		Term:         os.Getenv("TERM"),
-		IncusProject: target.Project,
+		InstanceNameOptional: offlineOptions(connect),
+		Config:               cfg,
+		Branch:               gitBranch(context.Background(), cmdRunner, proj.Root),
+		Client:               client,
+		Runner:               cmdRunner,
+		In:                   os.Stdin,
+		Out:                  os.Stdout,
+		ErrOut:               os.Stderr,
+		Verbose:              g.verbose,
+		Interactive:          isTerminal(os.Stdin) && isTerminal(os.Stdout),
+		Term:                 os.Getenv("TERM"),
+		IncusProject:         target.Project,
 	})
 }
 
@@ -266,6 +272,9 @@ func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "exec -- <command>",
 		Short: "Run a command in the container without allocating a terminal",
+		// Checked before the App is built, so the missing command is what the
+		// user is told about rather than an unreachable Incus.
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
 			if err != nil {

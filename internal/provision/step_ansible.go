@@ -11,7 +11,6 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/project"
 	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
@@ -227,7 +226,7 @@ func writeJSON(path string, v any) error {
 // ansibleEnv points Ansible at the project's ansible.cfg when it has one
 // (spec 6.5.3).
 func ansibleEnv(root string) []string {
-	cfg := filepath.Join(root, project.ConfigDir, "ansible", "ansible.cfg")
+	cfg := filepath.Join(root, config.ConfigDir, "ansible", "ansible.cfg")
 	if _, err := os.Stat(cfg); err != nil {
 		return nil
 	}

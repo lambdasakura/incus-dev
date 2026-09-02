@@ -281,3 +281,16 @@ func TestWaitExecIsBoundedByTheTimeout(t *testing.T) {
 		t.Fatal("waitExec() ignored its own timeout")
 	}
 }
+
+// The timeout says why the last attempt failed, in both of its forms.
+//
+// Reaching them through waitExec depends on whether the deadline lands during
+// an attempt or between two, so they are checked here directly.
+func TestNotReadyError(t *testing.T) {
+	if got := notReadyError("dev-x", time.Second, 1, nil).Error(); !strings.Contains(got, "last exit code 1") {
+		t.Errorf("error = %q, want the exit code of the last attempt", got)
+	}
+	if got := notReadyError("dev-x", time.Second, 0, errAPI).Error(); !strings.Contains(got, "api failed") {
+		t.Errorf("error = %q, want the error of the last attempt", got)
+	}
+}

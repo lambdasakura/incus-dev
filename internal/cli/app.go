@@ -26,6 +26,10 @@ type AppOptions struct {
 	Config *config.Config
 	Client incus.Client
 	Runner runner.Runner
+	// InstanceNameOptional keeps a name that cannot be derived from being an
+	// error. validate and provision --list do not operate on the instance, and
+	// project.scope: branch needs a git this host may not have.
+	InstanceNameOptional bool
 	// In is the standard input handed to the shell.
 	In io.Reader
 	// Out is where results go, such as the output of status.
@@ -62,14 +66,21 @@ type HostIDs struct {
 
 // App holds what the commands actually do.
 type App struct {
-	cfg         *config.Config
-	client      incus.Client
-	exec        *provision.Executor
-	in          io.Reader
-	out         io.Writer
-	errOut      io.Writer
-	log         *slog.Logger
-	instance    string
+	cfg      *config.Config
+	client   incus.Client
+	exec     *provision.Executor
+	in       io.Reader
+	out      io.Writer
+	errOut   io.Writer
+	log      *slog.Logger
+	instance string
+	// instanceErr says why the instance name could not be derived, for the
+	// commands that do not need it.
+	instanceErr error
+	// carried is the volume record of an instance rebuild is replacing. The
+	// record lives on the instance, so it has to survive the one being
+	// destroyed.
+	carried     []string
 	interactive bool
 	term        string
 
@@ -117,9 +128,9 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		host = &HostIDs{UID: os.Getuid(), GID: os.Getgid()}
 	}
 
-	name, err := instanceNameFor(opt.Config, opt.Branch)
-	if err != nil {
-		return nil, err
+	name, nameErr := instanceNameFor(opt.Config, opt.Branch)
+	if nameErr != nil && !opt.InstanceNameOptional {
+		return nil, nameErr
 	}
 
 	lookupEnv := opt.LookupEnv
@@ -144,6 +155,7 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		interactive:  opt.Interactive,
 		term:         opt.Term,
 		instance:     name,
+		instanceErr:  nameErr,
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
 		host:         *host,
@@ -183,27 +195,19 @@ type UpOptions struct {
 func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
-	// Check every host-side prerequisite before creating anything, so a
-	// failure part way through does not leave a half-built instance.
-	plan, err := a.idmapPlan()
+	plan, env, err := a.preflight(ctx)
 	if err != nil {
-		return err
-	}
-	env, err := a.env()
-	if err != nil {
-		return err
-	}
-	if plan.Warning != "" {
-		a.log.Warn(plan.Warning)
-	}
-	if err := a.checkProfiles(ctx); err != nil {
-		return err
-	}
-	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Provision); err != nil {
 		return err
 	}
 
 	created := false
+
+	// Before the instance either way: a new one mounts them at creation, and
+	// an existing one gets whatever the declaration has since added
+	// (spec 03-configuration.md 3.13).
+	if err := a.ensureVolumes(ctx); err != nil {
+		return err
+	}
 
 	inst, err := a.client.Instance(ctx, a.instance)
 	switch {
@@ -212,27 +216,19 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
-		a.warnImageChanged(inst)
-		a.warnProfilesChanged(inst)
-		a.warnVolumesDropped(inst)
+		a.pruneVolumeRecord(ctx, inst)
+		a.warnChanges(inst)
 		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.log.Info("Creating instance " + a.instance)
-		if err := a.ensureVolumes(ctx); err != nil {
-			return err
-		}
-		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, plan)); err != nil {
+		if err := a.client.CreateInstance(ctx, a.instanceSpec(plan)); err != nil {
 			return err
 		}
 		// The devices were set at creation time, so there is nothing to re-apply.
 		created = true
 	default:
-		return err
-	}
-
-	if err := a.ensureVolumes(ctx); err != nil {
 		return err
 	}
 
@@ -330,6 +326,8 @@ func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
 	// that have since left the declaration, which nothing else names.
 	volumes := recordedVolumes(inst.Config, a.cfg, a.instance)
 
+	// The instance goes first: Incus refuses to delete a volume while it is
+	// attached to one.
 	a.log.Info("Deleting instance " + a.instance)
 	if err := a.client.DeleteInstance(ctx, a.instance); err != nil {
 		return err
@@ -340,7 +338,10 @@ func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
 			return err
 		}
 	} else if len(volumes) > 0 {
-		a.log.Info(fmt.Sprintf("Kept %d volume(s). Use --volumes to delete them", len(volumes)))
+		// Named, because the record that names them goes with the instance:
+		// after this they can only be reached with incus.
+		a.log.Info(fmt.Sprintf("Kept volume(s) %s. Use --volumes to delete them",
+			strings.Join(volumes, ", ")))
 	}
 
 	a.log.Info("Instance deleted. Source tree on the host is untouched")
@@ -404,9 +405,21 @@ func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
 
 // Rebuild destroys the instance and creates it again.
 func (a *App) Rebuild(ctx context.Context) error {
-	_, err := a.client.Instance(ctx, a.instance)
+	// Everything up would refuse to start on, found before the instance is
+	// destroyed rather than after (spec 03-configuration.md 3.12).
+	if _, _, err := a.preflight(ctx); err != nil {
+		return err
+	}
+
+	inst, err := a.client.Instance(ctx, a.instance)
 	switch {
 	case err == nil:
+		// The record of which volumes are idev's lives on the instance, and
+		// the instance is about to go. Carry it over, or a volume that has
+		// left the declaration becomes unreachable — which is what rebuild is
+		// recommended for in the first place.
+		a.carried = recordedVolumes(inst.Config, a.cfg, a.instance)
+
 		// rebuild keeps the persistent volumes, since surviving a rebuild is
 		// exactly what they are for.
 		if err := a.Destroy(ctx, DestroyOptions{}); err != nil {
@@ -507,20 +520,23 @@ func shellCommand(argv []string) string {
 
 // statusReport is what status prints.
 type statusReport struct {
-	Project      string            `json:"project"`
-	Instance     string            `json:"instance"`
-	Status       string            `json:"status"`
-	Image        string            `json:"image"`
-	Workspace    string            `json:"workspace"`
-	Source       string            `json:"workspace_source"`
-	Exists       bool              `json:"exists"`
-	Managed      bool              `json:"managed"`
-	Profiles     []string          `json:"profiles,omitempty"`
-	Config       map[string]string `json:"config,omitempty"`
-	Devices      []string          `json:"devices,omitempty"`
-	Steps        int               `json:"provision_steps"`
-	Runtime      string            `json:"runtime,omitempty"`
-	IncusProject string            `json:"incus_project"`
+	Project  string `json:"project"`
+	Instance string `json:"instance"`
+	Status   string `json:"status"`
+	Image    string `json:"image"`
+	// ImageDeclared is what dev.yml asks for, set only when the instance was
+	// made from something else.
+	ImageDeclared string            `json:"image_declared,omitempty"`
+	Workspace     string            `json:"workspace"`
+	Source        string            `json:"workspace_source"`
+	Exists        bool              `json:"exists"`
+	Managed       bool              `json:"managed"`
+	Profiles      []string          `json:"profiles,omitempty"`
+	Config        map[string]string `json:"config,omitempty"`
+	Devices       []string          `json:"devices,omitempty"`
+	Steps         int               `json:"provision_steps"`
+	Runtime       string            `json:"runtime,omitempty"`
+	IncusProject  string            `json:"incus_project"`
 }
 
 // Status prints the state of the instance.
@@ -545,9 +561,14 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 	case err == nil:
 		report.Exists = true
 		report.Status = inst.Status
-		// What the instance was made from, which up does not change.
+		// What the instance was made from, which up does not change. The
+		// declaration is shown beside it when the two disagree, so the row
+		// never quietly means one thing or the other.
 		if was := inst.Config[managedImageKey]; was != "" {
 			report.Image = was
+			if was != a.cfg.Instance.Image {
+				report.ImageDeclared = a.cfg.Instance.Image
+			}
 		}
 		report.Managed = isManagedBy(inst.Config, a.cfg.Project.Name)
 		report.Profiles = inst.Profiles
@@ -570,7 +591,7 @@ func (a *App) printStatus(r statusReport) error {
 		{"Project", r.Project},
 		{"Instance", r.Instance},
 		{"Status", r.Status},
-		{"Image", r.Image},
+		{"Image", imageRow(r)},
 		{"Workspace", r.Source + " -> " + r.Workspace},
 	}
 	if r.Exists {
@@ -602,8 +623,14 @@ func (a *App) printStatus(r statusReport) error {
 
 // Validate reports that the configuration is valid. Loading already checked it.
 func (a *App) Validate() error {
+	instance := a.instance
+	if a.instanceErr != nil {
+		// The declaration is fine; deriving the name needs something this host
+		// cannot answer. Say which, rather than failing on a valid dev.yml.
+		instance = "(not derived: " + a.instanceErr.Error() + ")"
+	}
 	_, err := fmt.Fprintf(a.out, "configuration is valid\nProject:    %s\nInstance:   %s\nProvision:  %d step(s)\n",
-		a.cfg.Project.Name, a.instance, len(a.cfg.Provision))
+		a.cfg.Project.Name, instance, len(a.cfg.Provision))
 	return err
 }
 
@@ -640,7 +667,22 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 // By default it only warns. Restarting happens only when asked for explicitly,
 // so nothing the user was running is stopped unexpectedly.
 func (a *App) settleRestart(ctx context.Context, running bool, before, desired map[string]string, unset []string, opt UpOptions) error {
+	if !running {
+		// It is about to be started, which applies everything. Nothing is
+		// owed, including anything an earlier run left owed.
+		return a.clearRestartPending(ctx, before)
+	}
+
+	// What this run changed, plus what an earlier run changed and never got
+	// to apply.
 	changed := restartRequiredChanges(running, before, desired, unset)
+	for _, k := range splitList(before[managedRestartKey]) {
+		if !slices.Contains(changed, k) {
+			changed = append(changed, k)
+		}
+	}
+	slices.Sort(changed)
+
 	if len(changed) == 0 {
 		return nil
 	}
@@ -649,14 +691,26 @@ func (a *App) settleRestart(ctx context.Context, running bool, before, desired m
 		a.log.Warn(fmt.Sprintf(
 			"%s changed but the instance is running; restart it to apply (idev up --restart)",
 			strings.Join(changed, ", ")))
-		return nil
+		return a.client.ApplyConfig(ctx, a.instance,
+			map[string]string{managedRestartKey: strings.Join(changed, ",")})
 	}
 
 	a.log.Info("Restarting instance to apply " + strings.Join(changed, ", "))
 	if err := a.client.StopInstance(ctx, a.instance); err != nil {
 		return err
 	}
-	return a.client.StartInstance(ctx, a.instance)
+	if err := a.client.StartInstance(ctx, a.instance); err != nil {
+		return err
+	}
+	return a.clearRestartPending(ctx, before)
+}
+
+// clearRestartPending drops the record that a restart is owed.
+func (a *App) clearRestartPending(ctx context.Context, before map[string]string) error {
+	if _, ok := before[managedRestartKey]; !ok {
+		return nil
+	}
+	return a.client.UnsetConfig(ctx, a.instance, []string{managedRestartKey})
 }
 
 // restartRequiredKeys are the config keys whose changes need a restart.
@@ -712,6 +766,66 @@ func (a *App) warnImageChanged(inst *incus.Instance) {
 		a.cfg.Instance.Image, was))
 }
 
+// warnChanges says what up cannot apply to an existing instance.
+func (a *App) warnChanges(inst *incus.Instance) {
+	a.warnDifferentCheckout(inst)
+	a.warnImageChanged(inst)
+	a.warnProfilesChanged(inst)
+	a.warnVolumesDropped(inst)
+}
+
+// warnDifferentCheckout says so when the instance was last used from another
+// directory.
+//
+// user.incus-dev.root is recorded for exactly this (spec 05-incus.md 5.2).
+// With the default scope two checkouts of one project share an instance by
+// design, and up repoints the workspace at whichever ran last — so the other
+// one is quietly building this tree.
+func (a *App) warnDifferentCheckout(inst *incus.Instance) {
+	was := inst.Config[managedRootKey]
+	if was == "" || was == a.cfg.Root {
+		return
+	}
+	a.log.Warn(fmt.Sprintf(
+		"this instance was last used from %s; the workspace now points here instead.\n"+
+			"        Set project.scope to path or branch to give each checkout its own instance",
+		was))
+}
+
+// pruneVolumeRecord drops from the record the volumes that are no longer on
+// the pool, and anything not in the pool/name form.
+//
+// Without it the record only ever grows, so a warning about a volume outlives
+// the volume: deleting one by hand would leave up complaining about it for
+// good.
+func (a *App) pruneVolumeRecord(ctx context.Context, inst *incus.Instance) {
+	recorded, ok := inst.Config[managedVolumesKey]
+	if !ok {
+		return
+	}
+
+	var kept []string
+	for _, ref := range splitList(recorded) {
+		pool, name, ok := splitVolume(ref)
+		if !ok {
+			continue
+		}
+		exists, err := a.client.VolumeExists(ctx, pool, name)
+		if err != nil {
+			// The pool may be gone or unreachable. Nothing declared needs this
+			// volume, so refusing to run would block up over a record that is
+			// only there to be tidied.
+			a.log.Debug("could not check " + ref + ": " + err.Error())
+			kept = append(kept, ref)
+			continue
+		}
+		if exists {
+			kept = append(kept, ref)
+		}
+	}
+	inst.Config[managedVolumesKey] = strings.Join(kept, ",")
+}
+
 // warnVolumesDropped says so when a volume idev created has left the
 // declaration.
 //
@@ -751,6 +865,40 @@ func (a *App) warnProfilesChanged(inst *incus.Instance) {
 		"instance.profiles is [%s] but this instance has [%s]; "+
 			"profiles are set when the instance is created, so run 'idev rebuild' to change them",
 		strings.Join(want, ", "), strings.Join(inst.Profiles, ", ")))
+}
+
+// preflight checks every host-side prerequisite, so a failure part way through
+// does not leave a half-built instance — and so rebuild does not destroy one
+// over a condition it could have found first.
+func (a *App) preflight(ctx context.Context) (idmapPlan, provision.Env, error) {
+	plan, err := a.idmapPlan()
+	if err != nil {
+		return idmapPlan{}, provision.Env{}, err
+	}
+	env, err := a.env()
+	if err != nil {
+		return idmapPlan{}, provision.Env{}, err
+	}
+	if plan.Warning != "" {
+		a.log.Warn(plan.Warning)
+	}
+	if err := a.checkProfiles(ctx); err != nil {
+		return idmapPlan{}, provision.Env{}, err
+	}
+	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Provision); err != nil {
+		return idmapPlan{}, provision.Env{}, err
+	}
+	return plan, env, nil
+}
+
+// instanceSpec builds what to pass when creating the instance, carrying over
+// the volume record of an instance being replaced.
+func (a *App) instanceSpec(plan idmapPlan) incus.InstanceSpec {
+	var current map[string]string
+	if len(a.carried) > 0 {
+		current = map[string]string{managedVolumesKey: strings.Join(a.carried, ",")}
+	}
+	return instanceSpec(a.cfg, a.instance, plan, current)
 }
 
 // checkProfiles verifies the named profiles exist. idev never creates one.
@@ -847,6 +995,14 @@ func orDefault(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// imageRow shows the image, and the declaration when it asks for another one.
+func imageRow(r statusReport) string {
+	if r.ImageDeclared == "" {
+		return r.Image
+	}
+	return r.Image + " (dev.yml declares " + r.ImageDeclared + "; idev rebuild to recreate)"
 }
 
 // limitsOf picks out the config keys worth displaying.
