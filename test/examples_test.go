@@ -122,3 +122,40 @@ func writeUnder(t *testing.T, root, rel, body string) {
 		t.Fatal(err)
 	}
 }
+
+// removedAnsibleSettings are ansible.cfg settings that current Ansible
+// refuses outright, keyed to what replaced them.
+//
+// idev hands the example's ansible.cfg to ansible-playbook as ANSIBLE_CONFIG,
+// so one of these in a shipped example fails the run with a message about a
+// callback plugin -- nothing a reader would trace back to the example.
+var removedAnsibleSettings = map[string]string{
+	// Removed in community.general 12.0.0.
+	"stdout_callback = yaml": "result_format = yaml",
+}
+
+func TestExamplesAvoidRemovedAnsibleSettings(t *testing.T) {
+	roots := []string{"../examples", "../docs/manual", "../docs/spec"}
+
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for removed, replacement := range removedAnsibleSettings {
+				if strings.Contains(string(body), removed) {
+					t.Errorf("%s uses %q, which current Ansible rejects; use %q",
+						path, removed, replacement)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

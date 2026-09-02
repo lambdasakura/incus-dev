@@ -171,15 +171,24 @@ func NewAppFor(opt AppOptions) (*App, error) {
 // instance recorded, including ones dev.yml has since dropped — which is the
 // case the flag exists for, and the one where a mild prompt is worst.
 func (a *App) HasVolumes(ctx context.Context) bool {
-	if len(a.cfg.Volumes) > 0 {
-		return true
-	}
 	inst, err := a.client.Instance(ctx, a.instance)
 	if err != nil {
 		// Nothing to confirm about yet; destroy itself reports why.
 		return false
 	}
-	return len(recordedVolumes(inst.Config, a.cfg, a.instance)) > 0
+	// The record is not proof: destroy never prunes it, so it outlives a
+	// volume someone removed by hand. Ask what destroy would actually find,
+	// the same way deleteVolumes does.
+	for _, ref := range recordedVolumes(inst.Config, a.cfg, a.instance) {
+		pool, name, ok := splitVolume(ref)
+		if !ok {
+			continue
+		}
+		if exists, err := a.client.VolumeExists(ctx, pool, name); err == nil && exists {
+			return true
+		}
+	}
+	return false
 }
 
 // InstanceName returns the instance being operated on.
@@ -388,12 +397,16 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 		}
 	} else if len(volumes) > 0 {
 		a.log.Info("Kept volume(s) " + strings.Join(volumes, ", "))
-		if !carrying {
+		// "any other" is the ones up will not adopt. Naming a declared volume
+		// here would hand the user a command that deletes the data this line
+		// just promised to keep.
+		others := undeclaredVolumes(a.cfg, a.instance, volumes)
+		if !carrying && len(others) > 0 {
 			// The record naming them went with the instance, so "use
 			// --volumes" would be advice that stopped working the moment it
 			// was printed.
 			a.log.Info("The next 'idev up' adopts the declared ones again; " +
-				"remove any other with " + volumeDeleteHint(volumes))
+				"remove any other with " + volumeDeleteHint(others))
 		}
 	}
 
@@ -451,7 +464,7 @@ func (a *App) ensureVolumes(ctx context.Context) error {
 // The list comes from what the instance recorded, not from the declaration, so
 // a volume dropped from dev.yml is still reachable.
 func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
-	for _, ref := range refs {
+	for i, ref := range refs {
 		pool, name, ok := splitVolume(ref)
 		if !ok {
 			continue
@@ -459,7 +472,7 @@ func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
 
 		exists, err := a.client.VolumeExists(ctx, pool, name)
 		if err != nil {
-			return err
+			return remainingVolumes(err, refs[i:])
 		}
 		if !exists {
 			continue
@@ -467,10 +480,22 @@ func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
 
 		a.log.Info("Deleting volume " + name)
 		if err := a.client.DeleteVolume(ctx, pool, name); err != nil {
-			return err
+			return remainingVolumes(err, refs[i:])
 		}
 	}
 	return nil
+}
+
+// remainingVolumes names what is left on the pool when the cleanup stops
+// partway.
+//
+// The instance is deleted before its volumes, and the instance carried the
+// only record naming them. Once it is gone, an error that does not list them
+// leaves storage no idev command can name again.
+func remainingVolumes(err error, refs []string) error {
+	return fmt.Errorf("%w\nthese volume(s) are still on the pool, and the instance "+
+		"that recorded them is gone: %s\nremove them with 'incus storage volume delete <pool> <volume>'",
+		err, strings.Join(refs, ", "))
 }
 
 // Rebuild destroys the instance and creates it again.
@@ -938,6 +963,9 @@ const (
 	actsOnMountedTree checkoutEffect = iota
 	// remountsHere covers up and rebuild, which repoint the workspace here.
 	remountsHere
+	// wouldRemountHere is the preview's: up --dry-run changes nothing, so it
+	// says what up would do rather than what is happening.
+	wouldRemountHere
 	// sharedEnvironment covers destroy and snapshot: no tree is touched, but
 	// the environment the other checkout works in is.
 	sharedEnvironment
@@ -959,6 +987,7 @@ func (a *App) warnDifferentCheckout(inst *incus.Instance, eff checkoutEffect) {
 	effect := map[checkoutEffect]string{
 		actsOnMountedTree: "the workspace stays mounted from there, so this acts on that tree",
 		remountsHere:      "the workspace is being remounted from this one",
+		wouldRemountHere:  "'idev up' would remount the workspace from this one",
 		sharedEnvironment: "this environment is in use from there",
 	}[eff]
 	a.log.Warn(fmt.Sprintf(

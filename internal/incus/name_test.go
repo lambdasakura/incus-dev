@@ -82,6 +82,7 @@ func TestInstanceNameWithSuffixStaysValid(t *testing.T) {
 	for _, tt := range []struct{ name, project, suffix string }{
 		{"a long branch", "proj", longBranch},
 		{"a long project and a long branch", strings.Repeat("p", 60), longBranch},
+		{"a branch ending in a separator", "proj", "feature/x/"},
 		{"a suffix with nothing to keep", "my-project", "_"},
 		{"a suffix of hyphens", "my-project", "..."},
 		{"a suffix exactly at the limit", "my-project", strings.Repeat("b", 63)},

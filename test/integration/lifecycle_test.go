@@ -311,7 +311,13 @@ provision:
     run: command -v jq >/dev/null 2>&1 || apk add --no-cache jq
 `)
 
-	f.mustRun("up")
+	// The only test here that reaches outside the host. Say so: a failure is
+	// otherwise indistinguishable from a defect in the wait.
+	if out, err := f.run("up"); err != nil {
+		t.Fatalf("idev up failed: %v\nthis is the one test that needs outbound "+
+			"network (apk add), so check that before suspecting the IPv4 wait\n%s",
+			err, out)
+	}
 
 	if got := f.mustRun("shell", "--", "sh", "-c", "command -v jq"); !strings.Contains(got, "jq") {
 		t.Errorf("the package was not installed: %q", got)

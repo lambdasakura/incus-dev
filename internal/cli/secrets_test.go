@@ -75,20 +75,30 @@ secrets:
 	}
 }
 
-// An optional secret that cannot be read is not a failure.
+// An optional secret that cannot be read is not a failure -- and one that can
+// be read is still injected. Asserting only the absent half would let an
+// optional secret be dropped whether or not the host set it.
 func TestResolveSecretsOptional(t *testing.T) {
 	cfg := mustParse(t, planBase+`
 secrets:
   MAYBE:
     env: NOT_SET
     optional: true
+  PRESENT:
+    env: IS_SET
+    optional: true
 `)
-	got, err := resolveSecrets(cfg, func(string) (string, bool) { return "", false })
+	got, err := resolveSecrets(cfg, func(name string) (string, bool) {
+		return "value", name == "IS_SET"
+	})
 	if err != nil {
 		t.Fatalf("resolveSecrets() error = %v", err)
 	}
 	if _, ok := got["MAYBE"]; ok {
 		t.Errorf("resolveSecrets() = %v, want it left out when it cannot be read", got)
+	}
+	if got["PRESENT"] != "value" {
+		t.Errorf("resolveSecrets()[PRESENT] = %q, want the value the host set", got["PRESENT"])
 	}
 }
 

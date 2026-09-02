@@ -987,6 +987,38 @@ provision:
 	}
 }
 
+// A galaxy step that runs first still excuses the check when a second one
+// follows the ansible step. Deciding on the last galaxy step instead of the
+// first would refuse a dev.yml that installs everything it needs.
+func TestPluginCheckLooksAtTheFirstGalaxyStep(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "site.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+  - name: more collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The plugin is not there yet; the first galaxy step is what installs it.
+	f := &runnertest.Fake{Err: map[string]error{"ansible-doc": errors.New("not found")}}
+
+	if err := newExecutor(f).CheckPrerequisites(context.Background(), cfg.Provision); err != nil {
+		t.Fatalf("CheckPrerequisites() error = %v, want the first galaxy step to excuse the check", err)
+	}
+}
+
 // A galaxy step only excuses the plugin check when it runs first.
 //
 // Ordered the other way round it cannot install anything in time, so the check

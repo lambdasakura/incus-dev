@@ -219,9 +219,14 @@ func (a *API) forceStop(ctx context.Context, name string) error {
 	return a.changeState(ctx, name, "stop", true)
 }
 
+// changeState starts or stops the instance.
+//
+// It is the one mutation that refuses to run once the context is cancelled.
+// The others must not: destroy deletes the instance before its volumes, and
+// the instance carries the only record naming them, so a cleanup that stops
+// halfway leaves storage nothing can name again. Starting or stopping has no
+// such second half.
 func (a *API) changeState(ctx context.Context, name, action string, force bool) error {
-	// UpdateInstanceState is a plain synchronous call, so nothing else stops
-	// an already-cancelled run from changing the instance.
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%s instance %s: %w", action, name, err)
 	}

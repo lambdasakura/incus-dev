@@ -244,6 +244,8 @@ idev status --json
 ```
 
 `profiles` / `config` / `devices` は、instanceが存在しない場合は出力されない。
+`config` に出るのは `limits.*` のキーのみである。それ以外はIncusが報告すべきもので、
+`incus config show` が全て表示する。
 `image` と `workspace_source` はinstanceが実際に持っている値である。
 dev.yml が別のものを求めている場合に限り、`image_declared` と
 `workspace_source_declared` が併記される。

@@ -89,6 +89,20 @@ func declaredVolumes(cfg *config.Config, instance string) []string {
 	return out
 }
 
+// undeclaredVolumes returns the recorded volumes dev.yml no longer asks for,
+// which are the only ones the user has to remove by hand.
+func undeclaredVolumes(cfg *config.Config, instance string, recorded []string) []string {
+	declared := declaredVolumes(cfg, instance)
+
+	var out []string
+	for _, ref := range recorded {
+		if !slices.Contains(declared, ref) {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
 // splitVolume splits a recorded pool/name back apart.
 func splitVolume(ref string) (pool, name string, ok bool) {
 	pool, name, ok = strings.Cut(ref, "/")

@@ -134,7 +134,7 @@ provision:
 # .incus-dev/ansible/ansible.cfg
 [defaults]
 roles_path = .incus-dev/ansible/roles
-stdout_callback = yaml
+result_format = yaml
 ```
 
 ```yaml

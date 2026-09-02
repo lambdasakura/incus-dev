@@ -53,7 +53,7 @@ func (a *App) Plan(ctx context.Context) error {
 		// The same warnings up gives. A preflight that stays quiet about what
 		// up would refuse to apply is not a preflight (spec 04-cli.md 4.8).
 		a.pruneVolumeRecord(ctx, current)
-		a.warnChanges(current, remountsHere)
+		a.warnChanges(current, wouldRemountHere)
 		a.warnRestartNeeded(current, plan)
 	}
 
@@ -203,7 +203,7 @@ func deviceActions(current, desired map[string]incus.Device, stale []string) []s
 func changedKeys(have, want incus.Device) []string {
 	var out []string
 	for _, k := range slices.Sorted(maps.Keys(want)) {
-		if k != "type" && have[k] != want[k] {
+		if have[k] != want[k] {
 			out = append(out, k+"="+want[k])
 		}
 	}

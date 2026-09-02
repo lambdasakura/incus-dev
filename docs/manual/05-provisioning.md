@@ -23,7 +23,7 @@ failure it stops, and no later step runs.
 A failed step is identified by its position and its name.
 
 ```text
-[idev] error: provision step 2/3: install deps: exec in dev-my-project: ... (exit code 1)
+[idev] error: provision step 2/3 in dev-my-project: install deps: exit 1: exited with code 1
 ```
 
 ---
@@ -151,10 +151,14 @@ Roles belong to the project. idev does not inject a role path, so set it in
 # .incus-dev/ansible/ansible.cfg
 [defaults]
 roles_path = .incus-dev/ansible/roles
-stdout_callback = yaml
+result_format = yaml
 ```
 
 If that file exists, idev passes it as `ANSIBLE_CONFIG`.
+
+`result_format` needs ansible-core 2.13 or newer. Setting `stdout_callback`
+to the old `yaml` callback instead does not work: that plugin was removed in
+community.general 12.0.0, and naming it fails the run outright.
 
 For external collections, keep a `requirements.yml` and install it with a
 `galaxy` step (below), so nothing outside `.incus-dev/` has to be arranged

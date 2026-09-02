@@ -362,3 +362,21 @@ func TestFakeApplyDevicesReplaces(t *testing.T) {
 		t.Errorf("data = %v, want the key that left the declaration gone", got)
 	}
 }
+
+// Incus answers 404 for a volume that is not there, and so does the fake:
+// succeeding would hide a caller that deletes straight from a stale record.
+func TestFakeDeleteVolumeRejectsWhatIsNotThere(t *testing.T) {
+	f := incustest.New()
+
+	if err := f.DeleteVolume(context.Background(), "default", "missing"); err == nil {
+		t.Error("DeleteVolume() = nil error, want it refused for an unknown volume")
+	}
+
+	f.Volumes["default/there"] = true
+	if err := f.DeleteVolume(context.Background(), "default", "there"); err != nil {
+		t.Errorf("DeleteVolume() error = %v", err)
+	}
+	if f.Volumes["default/there"] {
+		t.Error("the volume was not removed")
+	}
+}

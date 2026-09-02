@@ -41,6 +41,9 @@ func fastWait() WaitOptions {
 }
 
 // With commands runnable and IPv4 assigned, it does not wait.
+//
+// The count is the assertion: without it the test passes even when every
+// idev up sits through the whole IPv4 grace period before provisioning.
 func TestWaitReadyReturnsWhenReady(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv4)
@@ -48,6 +51,15 @@ func TestWaitReadyReturnsWhenReady(t *testing.T) {
 
 	if err := a.WaitReady(context.Background(), "dev-x", fastWait()); err != nil {
 		t.Errorf("WaitReady() error = %v", err)
+	}
+	var polls int
+	for _, c := range f.calls {
+		if c == "GetInstanceFull" {
+			polls++
+		}
+	}
+	if polls != 1 {
+		t.Errorf("polled the instance %d times, want it to return on the first look", polls)
 	}
 }
 
@@ -177,8 +189,14 @@ func TestWaitReadyGivesUpWaitingForIPv4(t *testing.T) {
 	if err := a.WaitReady(context.Background(), "dev-x", fastWait()); err != nil {
 		t.Fatalf("WaitReady() error = %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
+	elapsed := time.Since(start)
+	if elapsed > 150*time.Millisecond {
 		t.Errorf("waited %v, want it not to exceed the IPv4 grace period", elapsed)
+	}
+	// The lower bound is the point of the grace period: a first-run apt-get
+	// fails if provisioning starts before IPv4 is up.
+	if elapsed < fastWait().IPv4Grace {
+		t.Errorf("waited %v, want it to wait out the %v grace period", elapsed, fastWait().IPv4Grace)
 	}
 }
 

@@ -23,7 +23,7 @@ provision[0] → provision[1] → ...
 失敗したステップは位置と名前で特定できる。
 
 ```text
-[idev] error: provision step 2/3: install deps: exec in dev-my-project: ... (exit code 1)
+[idev] error: provision step 2/3 in dev-my-project: install deps: exit 1: exited with code 1
 ```
 
 ---
@@ -150,10 +150,15 @@ Roleはプロジェクトの所有物である。idev は role path を注入し
 # .incus-dev/ansible/ansible.cfg
 [defaults]
 roles_path = .incus-dev/ansible/roles
-stdout_callback = yaml
+result_format = yaml
 ```
 
 このファイルが存在すれば、idev は `ANSIBLE_CONFIG` として使用する。
+
+`result_format` は ansible-core 2.13 以降が必要。同じ働きの古い書き方で
+`stdout_callback` に `yaml` callback を指定する方法は使えない。
+このpluginは community.general 12.0.0 で削除されており、
+名前を書いた時点で実行そのものが失敗する。
 
 外部のcollectionが必要な場合は `requirements.yml` を置き、
 `galaxy` ステップ（後述）で導入する。`.incus-dev/` の外に段取りを

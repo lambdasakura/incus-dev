@@ -275,9 +275,12 @@ func TestParseErrors(t *testing.T) {
 			want: "schema",
 		},
 		{
+			// The tailored message, not just "schema": the version is checked
+			// before the rest, so a dev.yml from a future idev gets one clear
+			// error instead of a pile of unknown-field ones (spec 3.2).
 			name: "unknown schema version",
 			yaml: "schema: 99\nproject:\n  name: p\ninstance:\n  image: i\n",
-			want: "schema",
+			want: "unsupported schema version 99 (supported: 1)",
 		},
 		{
 			name: "project.name missing",
@@ -323,6 +326,24 @@ func TestParseErrors(t *testing.T) {
 			name: "a run-only field on an ansible step",
 			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    cwd: /workspace\n",
 			want: "cwd",
+		},
+		// The schema allows these beside any step kind, so this is the only
+		// gate. Accepted and ignored, the step would run as someone else than
+		// the file says.
+		{
+			name: "user on an ansible step",
+			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    user: root\n",
+			want: "user can only be used with run steps",
+		},
+		{
+			name: "shell on a galaxy step",
+			yaml: minimal + "provision:\n  - galaxy:\n      requirements: r.yml\n    shell: /bin/bash\n",
+			want: "shell can only be used with run steps",
+		},
+		{
+			name: "env on an ansible step",
+			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    env:\n      A: b\n",
+			want: "env can only be used with run steps",
 		},
 		{
 			name: "reserved config key",

@@ -100,6 +100,25 @@ provision:
 	}
 }
 
+// --from starts at the first step of that name. Starting at the last would
+// silently skip everything between, which is the opposite of what "from"
+// asks for (spec 04-cli.md 4.2).
+func TestSelectFromStartsAtTheFirstMatch(t *testing.T) {
+	got := selectSteps(t, base+`
+provision:
+  - name: setup
+    run: "true"
+  - name: other
+    run: "true"
+  - name: setup
+    run: "true"
+`, provision.Selection{From: "setup"})
+
+	if diff := cmp.Diff([]int{0, 1, 2}, got); diff != "" {
+		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestSelectErrors(t *testing.T) {
 	tests := []struct {
 		name string

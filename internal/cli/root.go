@@ -326,16 +326,20 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// --volumes takes the data with it, and the data is the half a
-			// user is not expecting to lose.
-			prompt := fmt.Sprintf("Delete instance %s?", app.InstanceName())
-			if volumes && app.HasVolumes(cmd.Context()) {
-				prompt = fmt.Sprintf(
-					"Delete instance %s AND its persistent volumes, with everything in them?",
-					app.InstanceName())
-			}
-			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(), prompt) {
-				return errAborted
+			// --force asks nothing, so it must not pay for the lookup that
+			// decides how the question is worded.
+			if !force {
+				// --volumes takes the data with it, and the data is the half a
+				// user is not expecting to lose.
+				prompt := fmt.Sprintf("Delete instance %s?", app.InstanceName())
+				if volumes && app.HasVolumes(cmd.Context()) {
+					prompt = fmt.Sprintf(
+						"Delete instance %s AND its persistent volumes, with everything in them?",
+						app.InstanceName())
+				}
+				if !confirm(cmd.InOrStdin(), cmd.OutOrStdout(), prompt) {
+					return errAborted
+				}
 			}
 			return app.Destroy(cmd.Context(), DestroyOptions{Volumes: volumes})
 		},

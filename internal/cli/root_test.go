@@ -655,7 +655,11 @@ func TestDestroyVolumesPromptNamesTheData(t *testing.T) {
 			out := &bytes.Buffer{}
 			app, client := fakeAppWith(t, tt.yaml, out)
 			config := map[string]string{managedProjectKey: "example-project"}
-			if tt.name == "dropped from the declaration" {
+			switch tt.name {
+			case "with volumes":
+				// up created it; the prompt asks about data that is there.
+				client.Volumes["default/dev-example-project-cache"] = true
+			case "dropped from the declaration":
 				config[managedVolumesKey] = "default/dev-example-project-cache"
 				client.Volumes["default/dev-example-project-cache"] = true
 			}

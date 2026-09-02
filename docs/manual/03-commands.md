@@ -255,7 +255,8 @@ idev status --json
 ```
 
 `profiles`, `config` and `devices` are omitted when the instance does not
-exist. `image` and `workspace_source` are what the instance actually has;
+exist. `config` lists the `limits.*` keys only -- the rest of an instance's
+config is Incus's to report, and `incus config show` shows all of it. `image` and `workspace_source` are what the instance actually has;
 `image_declared` and `workspace_source_declared` appear beside them only when
 dev.yml asks for something else. `runtime` is what `runtime.version` in dev.yml
 declares, and is omitted when it declares none.

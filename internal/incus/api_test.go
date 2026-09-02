@@ -933,6 +933,7 @@ func TestAPIOperationsHonorCancellation(t *testing.T) {
 		"snapshot": func(a *API) error {
 			return a.CreateSnapshot(ctx, "dev-x", "s1")
 		},
+		"restore": func(a *API) error { return a.RestoreSnapshot(ctx, "dev-x", "s1") },
 	}
 
 	for name, fn := range ops {
@@ -945,6 +946,27 @@ func TestAPIOperationsHonorCancellation(t *testing.T) {
 				t.Errorf("error = %v, want context.Canceled", err)
 			}
 		})
+	}
+}
+
+// Starting is refused outright once the context is cancelled, rather than
+// sent and then reported as cancelled.
+//
+// The other mutations deliberately go ahead: they are the second half of a
+// cleanup, and stopping between the halves loses more than it saves.
+func TestStartIsNotSentAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{}).Status = "Stopped"
+	a, _ := newAPI(f)
+
+	if err := a.StartInstance(ctx, "dev-x"); !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("calls = %v, want the request never sent", f.calls)
 	}
 }
 

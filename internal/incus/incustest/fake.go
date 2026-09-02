@@ -287,7 +287,13 @@ func (f *Fake) DeleteVolume(_ context.Context, pool, name string) error {
 	if err := f.record("volume delete %s %s", pool, name); err != nil {
 		return err
 	}
-	delete(f.Volumes, pool+"/"+name)
+	ref := pool + "/" + name
+	if !f.Volumes[ref] {
+		// Incus answers 404. Succeeding here would hide a caller that deletes
+		// from a record without checking the volume is still there.
+		return fmt.Errorf("storage volume %q not found on pool %q", name, pool)
+	}
+	delete(f.Volumes, ref)
 	return nil
 }
 

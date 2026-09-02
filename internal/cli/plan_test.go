@@ -386,3 +386,62 @@ func TestDesiredDevicesClearsShiftWhenTheUserTakesOver(t *testing.T) {
 		t.Errorf("workspace shift = %q, want idev to set none", shift)
 	}
 }
+
+// A recorded key the instance does not actually have is not stale: unsetting
+// it would make up report a change on a run that changed nothing.
+func TestStaleConfigKeysIgnoresWhatIsAlreadyGone(t *testing.T) {
+	current := map[string]string{
+		managedProjectKey: "example-project",
+		managedKeysKey:    "limits.memory,security.nesting",
+		"limits.memory":   "8GiB",
+		// security.nesting is recorded but no longer on the instance.
+	}
+
+	got := staleConfigKeys(current, map[string]string{}, idmapPlan{})
+
+	if diff := cmp.Diff([]string{"limits.memory"}, got); diff != "" {
+		t.Errorf("staleConfigKeys() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Unsetting a key the instance never had changes nothing, so it must not be
+// reported as needing a restart.
+func TestRestartRequiredChangesIgnoresUnsettingWhatIsAbsent(t *testing.T) {
+	got := restartRequiredChanges(true, map[string]string{}, map[string]string{},
+		[]string{"security.nesting"})
+
+	if len(got) != 0 {
+		t.Errorf("restartRequiredChanges() = %v, want none for a key that was not set", got)
+	}
+}
+
+// The record is written by idev but can be edited by hand. An entry that is
+// not pool/name names no volume, and acting on it would delete the wrong
+// thing.
+func TestSplitVolumeRejectsAHalfReference(t *testing.T) {
+	for _, ref := range []string{"/x", "x/", "/", "plain"} {
+		if _, _, ok := splitVolume(ref); ok {
+			t.Errorf("splitVolume(%q) = ok, want it rejected", ref)
+		}
+	}
+	pool, name, ok := splitVolume("default/cache")
+	if !ok || pool != "default" || name != "cache" {
+		t.Errorf("splitVolume(default/cache) = %q, %q, %v", pool, name, ok)
+	}
+}
+
+// shift belongs on a mount of a host path. A disk with neither source nor
+// pool mounts nothing, so writing it there would be meaningless.
+func TestDesiredDevicesLeavesASourcelessDiskAlone(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    root:
+      type: disk
+      path: /mnt
+`)
+	devices := desiredDevices(cfg, idmapPlan{Mode: config.IDMapShift, Managed: true}, "dev-example-project")
+
+	if _, ok := devices["root"]["shift"]; ok {
+		t.Errorf("root device = %v, want no shift on a disk that mounts no host path", devices["root"])
+	}
+}

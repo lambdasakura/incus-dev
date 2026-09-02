@@ -76,6 +76,32 @@ func TestPlanActionsForExistingInstance(t *testing.T) {
 			t.Errorf("plan =\n%s\nwant it not to contain %q", got, unwanted)
 		}
 	}
+	// A preflight that lists work it will not do is as misleading as one that
+	// hides work it will: the device above is the only one that changes.
+	if n := strings.Count(got, "Update device"); n != 1 {
+		t.Errorf("plan =\n%s\nwant exactly one device update, got %d", got, n)
+	}
+}
+
+// A device whose values already match is not reported as an update.
+func TestPlanActionsLeavesAnUnchangedDeviceAlone(t *testing.T) {
+	cfg := mustParse(t, planBase)
+	plan := idmapPlan{Mode: config.IDMapShift, Managed: true}
+
+	current := &incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+		Devices: map[string]incus.Device{
+			config.WorkspaceDeviceName: desiredDevices(cfg, plan, "dev-example-project")[config.WorkspaceDeviceName],
+		},
+	}
+
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan, nil), "\n")
+
+	if strings.Contains(got, "Update device") {
+		t.Errorf("plan =\n%s\nwant no update for a device that already matches", got)
+	}
 }
 
 // The plan shows what up would remove, not only what it would set.
@@ -189,5 +215,35 @@ func TestPlanActionsNoProfiles(t *testing.T) {
 
 	if !strings.Contains(got, "Apply no profiles") {
 		t.Errorf("plan =\n%s", got)
+	}
+}
+
+// A device whose type changes is replaced wholesale by up, so the preview has
+// to say so. Excluding type reported nothing at all when it was the only
+// difference.
+func TestPlanActionsReportsAChangedDeviceType(t *testing.T) {
+	cfg := mustParse(t, planBase+`
+  devices:
+    extra:
+      type: disk
+      source: /srv/data
+      path: /data
+`)
+	plan := idmapPlan{Mode: config.IDMapNone}
+
+	current := &incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+		Devices: map[string]incus.Device{
+			config.WorkspaceDeviceName: desiredDevices(cfg, plan, "dev-example-project")[config.WorkspaceDeviceName],
+			"extra":                    {"type": "none", "source": "/srv/data", "path": "/data"},
+		},
+	}
+
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan, nil), "\n")
+
+	if !strings.Contains(got, "Update device extra (type=disk)") {
+		t.Errorf("plan =\n%s\nwant the type change reported", got)
 	}
 }
