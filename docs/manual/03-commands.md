@@ -259,13 +259,17 @@ idev status --json
   "profiles": ["default"],
   "config": { "limits.cpu": "4" },
   "devices": ["workspace(disk)"],
+  "addresses": [
+    { "interface": "eth0", "family": "inet", "address": "10.216.13.42" }
+  ],
   "provision_steps": 1,
   "runtime": "1.0",
   "incus_project": "default"
 }
 ```
 
-`profiles`, `config` and `devices` are omitted whenever they would be empty,
+`profiles`, `config`, `devices` and `addresses` are omitted whenever they would
+be empty,
 which includes the instance not existing. `config` lists the `limits.*` keys
 only, so it is absent from an instance that sets none -- the rest of an
 instance's config is Incus's to report, and `incus config show` shows all of
@@ -274,10 +278,45 @@ it. `image` and `workspace_source` are what the instance actually has;
 dev.yml asks for something else. `runtime` is what `runtime.version` in dev.yml
 declares, and is omitted when it declares none.
 
+`addresses` lists every global address the instance has, in the order
+`idev ip` chooses (3.6.1). A stopped instance has none, so the field and the
+`Addresses:` row are both absent -- there is no "none" to mistake for a running
+instance whose address has not arrived yet.
+
 ```bash
 # branch on whether it is running
 [ "$(idev status --json | jq -r .status)" = "Running" ] || idev up
 ```
+
+---
+
+## 3.6.1 `idev ip`
+
+Prints the address to reach the instance on, and nothing else, so it can be
+substituted into another command.
+
+```bash
+ssh user@$(idev ip)
+```
+
+IPv4 is preferred over IPv6. An instance with several interfaces answers with
+the same one every run: the lowest interface name of the preferred family.
+
+Nothing is written to standard output when there is no address to give; the
+reason goes to standard error and the exit code is non-zero. That matters for
+the shape above: an empty substitution would leave `ssh` connecting to your
+local user.
+
+| Situation | What it says |
+| --- | --- |
+| The instance does not exist | run `idev up` |
+| It is not running | an address exists only while it runs |
+| It is running with no address | it has no NIC, or the address has not been assigned |
+
+It does not wait. `idev up` already waits for an address at start, and a read
+that blocks is indistinguishable from a hang once it is inside `$(...)`.
+
+For every address, use `idev status --json`.
 
 ---
 

@@ -1237,3 +1237,150 @@ workspace:
 		t.Errorf("devices = %v, want shift on both mounts", devices)
 	}
 }
+
+// idev ip prints one address and nothing else, because it is written to be
+// substituted (spec 04-cli.md 4.4.1).
+func TestIPPrintsOneAddress(t *testing.T) {
+	app, client, out := newApp(t, baseYAML)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
+		State: &incus.InstanceState{Network: map[string]incus.NetworkState{
+			"eth0": {Addresses: []incus.NetworkAddress{
+				{Family: "inet6", Address: "fd42::1", Scope: "global"},
+				{Family: "inet", Address: "10.0.0.2", Scope: "global"},
+			}},
+		}},
+	})
+
+	if err := app.IP(context.Background()); err != nil {
+		t.Fatalf("IP() error = %v", err)
+	}
+	if got := out.String(); got != "10.0.0.2\n" {
+		t.Errorf("stdout = %q, want just the address and a newline: anything else "+
+			"lands in ssh user@...", got)
+	}
+}
+
+// What it says when there is no address to give, and that it says none of it
+// on stdout (spec 04-cli.md 4.4.1).
+func TestIPSaysWhyItHasNoAddress(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		inst *incus.Instance
+		want string
+	}{
+		{"no instance", nil, "idev up"},
+		{
+			"not running",
+			&incus.Instance{
+				Name: "dev-example-project", Status: "Stopped",
+				Config: map[string]string{"user.incus-dev.project": "example-project"},
+			},
+			"not running",
+		},
+		{
+			"running with no address",
+			&incus.Instance{
+				Name: "dev-example-project", Status: "Running",
+				Config: map[string]string{"user.incus-dev.project": "example-project"},
+			},
+			"no address",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, client, out := newApp(t, baseYAML)
+			if tt.inst != nil {
+				client.AddInstance(tt.inst)
+			}
+
+			err := app.IP(context.Background())
+			if err == nil {
+				t.Fatal("IP() = nil error, want a failure rather than an empty address")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to say %q", err, tt.want)
+			}
+			if out.String() != "" {
+				t.Errorf("stdout = %q, want nothing: an empty substitution leaves "+
+					"ssh connecting to the local user", out)
+			}
+		})
+	}
+}
+
+// status shows the addresses, and shows the row only when there are any (spec
+// 04-cli.md 4.4).
+func TestStatusShowsAddresses(t *testing.T) {
+	running := &incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
+		State: &incus.InstanceState{Network: map[string]incus.NetworkState{
+			"eth0": {Addresses: []incus.NetworkAddress{
+				{Family: "inet6", Address: "fd42::1", Scope: "global"},
+				{Family: "inet", Address: "10.0.0.2", Scope: "global"},
+			}},
+		}},
+	}
+
+	t.Run("text", func(t *testing.T) {
+		app, client, out := newApp(t, baseYAML)
+		client.AddInstance(running)
+
+		if err := app.Status(context.Background(), false); err != nil {
+			t.Fatalf("Status() error = %v", err)
+		}
+		if !strings.Contains(out.String(), "10.0.0.2, fd42::1") {
+			t.Errorf("status = %q, want both addresses, the first being what "+
+				"'idev ip' returns", out)
+		}
+	})
+
+	t.Run("json carries the interface and family", func(t *testing.T) {
+		app, client, out := newApp(t, baseYAML)
+		client.AddInstance(running)
+
+		if err := app.Status(context.Background(), true); err != nil {
+			t.Fatalf("Status() error = %v", err)
+		}
+		var report struct {
+			Addresses []struct {
+				Interface string `json:"interface"`
+				Family    string `json:"family"`
+				Address   string `json:"address"`
+			} `json:"addresses"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+			t.Fatalf("the status JSON does not parse: %v\n%s", err, out)
+		}
+		if len(report.Addresses) != 2 {
+			t.Fatalf("addresses = %+v, want both", report.Addresses)
+		}
+		if report.Addresses[0].Interface != "eth0" || report.Addresses[0].Family != "inet" {
+			t.Errorf("addresses[0] = %+v, want the interface and family alongside", report.Addresses[0])
+		}
+	})
+
+	t.Run("a stopped instance has no row", func(t *testing.T) {
+		app, client, out := newApp(t, baseYAML)
+		client.AddInstance(&incus.Instance{
+			Name:   "dev-example-project",
+			Status: "Stopped",
+			Config: map[string]string{"user.incus-dev.project": "example-project"},
+		})
+
+		if err := app.Status(context.Background(), false); err != nil {
+			t.Fatalf("Status() error = %v", err)
+		}
+		// By row label, not by substring: the workspace row carries the
+		// temp directory, whose name is built from this test's own.
+		for _, line := range strings.Split(out.String(), "\n") {
+			if strings.HasPrefix(line, "Addresses:") {
+				t.Errorf("status = %q, want no address row: %q cannot tell a "+
+					"stopped instance from a running one with no address", out, "none")
+			}
+		}
+	})
+}

@@ -3,7 +3,9 @@
 package integration_test
 
 import (
+	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -452,5 +454,96 @@ provision:
 
 	if got := f.mustRun("shell", "--", "cat", "/etc/idev-secret"); got != "from-host-env" {
 		t.Errorf("the value inside the container = %q", got)
+	}
+}
+
+// idev ip returns the address the daemon says the instance has, on stdout and
+// alone (spec 04-cli.md 4.4.1).
+//
+// The unit tests build the network state themselves, so they prove only that
+// idev picks correctly from what it is handed. What the daemon actually
+// reports -- which interfaces exist, which scope each address carries -- is
+// the part a fake cannot settle.
+func TestIPReturnsTheAddressTheDaemonReports(t *testing.T) {
+	f := newFixture(t, minimalYAML)
+
+	stdout, stderr, err := f.runSplit("ip")
+	if err == nil {
+		t.Errorf("idev ip = %q before the instance exists, want a failure", stdout)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q with no instance; an empty substitution would leave "+
+			"ssh connecting to the local user", stdout)
+	}
+	if !strings.Contains(stderr, "idev up") {
+		t.Errorf("stderr = %q, want it to say what to do", stderr)
+	}
+
+	f.mustRun("up")
+
+	stdout, stderr, err = f.runSplit("ip")
+	if err != nil {
+		t.Fatalf("idev ip failed: %v\n%s", err, stderr)
+	}
+	address := strings.TrimSuffix(stdout, "\n")
+	if strings.Contains(address, "\n") {
+		t.Fatalf("idev ip printed more than one line (%q); $(...) would hand all "+
+			"of it to ssh", stdout)
+	}
+	if net.ParseIP(address) == nil {
+		t.Fatalf("idev ip = %q, which is not an address", address)
+	}
+
+	// The daemon's own answer for the same instance.
+	var reported []struct {
+		Address string `json:"address"`
+		Scope   string `json:"scope"`
+	}
+	raw := incusOut(t, "query", "/1.0/instances/"+f.instance+"/state")
+	var state struct {
+		Network map[string]struct {
+			Addresses []struct {
+				Address string `json:"address"`
+				Scope   string `json:"scope"`
+			} `json:"addresses"`
+		} `json:"network"`
+	}
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		t.Fatalf("the daemon's state does not parse: %v", err)
+	}
+	for name, iface := range state.Network {
+		if name == "lo" {
+			continue
+		}
+		for _, addr := range iface.Addresses {
+			if addr.Scope == "global" {
+				reported = append(reported, addr)
+			}
+		}
+	}
+	if len(reported) == 0 {
+		t.Skip("this host gave the instance no global address")
+	}
+
+	var found bool
+	for _, addr := range reported {
+		if addr.Address == address {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("idev ip = %q, which the daemon does not report for %s: %+v",
+			address, f.instance, reported)
+	}
+
+	// And status shows it, in the row that says so.
+	var shown bool
+	for _, line := range strings.Split(f.mustRun("status"), "\n") {
+		if strings.HasPrefix(line, "Addresses:") && strings.Contains(line, address) {
+			shown = true
+		}
+	}
+	if !shown {
+		t.Errorf("status does not show %q in its address row:\n%s", address, f.mustRun("status"))
 	}
 }

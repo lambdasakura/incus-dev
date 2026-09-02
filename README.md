@@ -110,6 +110,7 @@ provision:
 idev validate      # check dev.yml; changes nothing in Incus
 idev up            # create the instance, then bootstrap and provision
 idev status        # show the state (--json for machine-readable output)
+idev ip            # print its address: ssh user@$(idev ip)
 idev shell         # open a shell in the container
 idev exec -- make test   # run a command; no terminal is allocated
 idev provision     # re-run provisioning without recreating the instance

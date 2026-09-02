@@ -108,6 +108,7 @@ provision:
 idev validate      # dev.ymlを検証する（Incusへは変更を加えない）
 idev up            # instanceを用意し、bootstrapとprovisionを実行する
 idev status        # 状態を表示する（--json でmachine-readable）
+idev ip            # アドレスを表示する: ssh user@$(idev ip)
 idev shell         # コンテナ内でshellを開く
 idev exec -- make test   # コンテナ内でコマンドを実行する（端末は割り当てない）
 idev provision     # instanceを作り直さずprovisionのみ再実行する

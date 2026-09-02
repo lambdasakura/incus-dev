@@ -80,6 +80,7 @@ func newRootCommand(version string, factory, offline appFactory) *cobra.Command 
 		newShellCommand(g, factory),
 		newExecCommand(g, factory),
 		newStatusCommand(g, factory),
+		newIPCommand(g, factory),
 		newDestroyCommand(g, factory),
 		newRebuildCommand(g, factory),
 		newValidateCommand(g, offline),
@@ -337,6 +338,26 @@ func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	}
 	c.Flags().BoolVar(&asJSON, "json", false, "print machine-readable JSON")
 	return c
+}
+
+func newIPCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "ip",
+		Short: "Print the address to reach the instance on",
+		Long: "Print the address to reach the instance on, and nothing else, so it " +
+			"can be substituted into a command:\n\n  ssh user@$(idev ip)\n\n" +
+			"IPv4 is preferred over IPv6, and an instance with several interfaces " +
+			"answers with the same one every run. Use 'idev status --json' for all " +
+			"of its addresses.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			app, err := newApp(cmd.Context(), g)
+			if err != nil {
+				return err
+			}
+			return app.IP(cmd.Context())
+		},
+	}
 }
 
 func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {

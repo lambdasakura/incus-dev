@@ -35,9 +35,12 @@ type statusReport struct {
 	Profiles       []string          `json:"profiles,omitempty"`
 	Config         map[string]string `json:"config,omitempty"`
 	Devices        []string          `json:"devices,omitempty"`
-	Steps          int               `json:"provision_steps"`
-	Runtime        string            `json:"runtime,omitempty"`
-	IncusProject   string            `json:"incus_project"`
+	// Addresses are every global address, the first being what `idev ip`
+	// returns (spec 04-cli.md 4.4.1).
+	Addresses    []incus.InterfaceAddress `json:"addresses,omitempty"`
+	Steps        int                      `json:"provision_steps"`
+	Runtime      string                   `json:"runtime,omitempty"`
+	IncusProject string                   `json:"incus_project"`
 }
 
 // Status prints the state of the instance.
@@ -90,6 +93,9 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 		report.Profiles = inst.Profiles
 		report.Config = limitsOf(inst.Config)
 		report.Devices = deviceSummary(inst.Devices)
+		// Only what the instance has. A stopped one has none, and saying so
+		// would read the same as a running one whose address has not arrived.
+		report.Addresses = inst.Addresses()
 	case !errors.Is(err, incus.ErrInstanceNotFound):
 		return err
 	}
@@ -102,6 +108,32 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 	return a.printStatus(report)
 }
 
+// IP prints the address to reach the instance on (spec 04-cli.md 4.4.1).
+//
+// One address, on stdout, with nothing around it: what this exists for is
+// ssh user@$(idev ip). Every failure writes to stderr and returns, so the
+// substitution is either an address or nothing -- an empty one leaves ssh
+// connecting to the local user.
+func (a *App) IP(ctx context.Context) error {
+	inst, err := a.managedInstance(ctx, sharedEnvironment, adviseUp)
+	if err != nil {
+		return err
+	}
+	if !inst.IsRunning() {
+		return fmt.Errorf("instance %s is not running (%s); an address exists only "+
+			"while it runs, so start it with 'idev up'", a.instance, inst.Status)
+	}
+
+	address := inst.PrimaryAddress()
+	if address == "" {
+		return fmt.Errorf("instance %s has no address yet; it has no network "+
+			"device, or its address has not been assigned", a.instance)
+	}
+
+	_, err = fmt.Fprintln(a.out, address)
+	return err
+}
+
 func (a *App) printStatus(r statusReport) error {
 	rows := [][2]string{
 		{"Project", r.Project},
@@ -112,6 +144,7 @@ func (a *App) printStatus(r statusReport) error {
 	}
 	if r.Exists {
 		rows = append(rows,
+			[2]string{"Addresses", addressRow(r)},
 			[2]string{"Profiles", strings.Join(r.Profiles, ", ")},
 			[2]string{"Devices", strings.Join(r.Devices, ", ")},
 			[2]string{"Managed", yesNo(r.Managed)},
@@ -138,6 +171,19 @@ func (a *App) printStatus(r statusReport) error {
 }
 
 // deviceSummary renders devices as a list of "name(type)".
+// addressRow lists the addresses, the first being what `idev ip` returns.
+//
+// Empty when there are none, which drops the row: an instance that is not
+// running has no address, and printing "none" would read the same as a running
+// one whose address has not arrived (spec 04-cli.md 4.4).
+func addressRow(r statusReport) string {
+	out := make([]string, 0, len(r.Addresses))
+	for _, addr := range r.Addresses {
+		out = append(out, addr.Address)
+	}
+	return strings.Join(out, ", ")
+}
+
 func deviceSummary(devices map[string]incus.Device) []string {
 	out := make([]string, 0, len(devices))
 	for _, name := range slices.Sorted(maps.Keys(devices)) {

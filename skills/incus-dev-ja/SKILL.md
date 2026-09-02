@@ -36,9 +36,15 @@ idev exec -- make test
 | provisionだけ流し直す | `idev provision` |
 | 何が起きるか先に見る | `idev up --dry-run` |
 | 状態を機械可読に取る | `idev status --json` |
+| ネットワーク越しに繋ぐ | `ssh user@$(idev ip)` |
 | `dev.yml` の妥当性だけ確認する（Incusに触れない） | `idev validate` |
 | 作り直す | `idev rebuild --force` |
 | 消す（ホストのソースは残る） | `idev destroy --force` |
+
+`idev ip` はアドレスを1つだけ、それ以外は何も出さない（コマンド置換に入れるため）。
+IPv4をIPv6より優先し、毎回同じものを返す。アドレスが無い場合は標準出力へ
+何も書かない。空文字を返すと `ssh` がローカルユーザーへ繋ごうとするためである。
+全アドレスとそのinterfaceは `idev status --json` にある。
 
 `idev exec` と `idev shell -- <cmd>` の違いは擬似端末の有無だけ。
 **スクリプトやCIからは `idev exec` を使う**（端末の有無で挙動が変わらない）。

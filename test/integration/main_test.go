@@ -6,6 +6,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,6 +123,25 @@ func (f *fixture) run(args ...string) (string, error) {
 
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// runSplit runs idev with the two streams kept apart.
+//
+// run merges them, which is right for asserting on a message but cannot say
+// which stream carried it. `idev ip` exists to be substituted, so what is on
+// stdout and only stdout is the whole point (spec 04-cli.md 4.4.1).
+func (f *fixture) runSplit(args ...string) (stdout, stderr string, err error) {
+	f.t.Helper()
+
+	cmd := exec.Command(idevBin, args...)
+	cmd.Dir = f.root
+	cmd.Env = os.Environ()
+
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err = cmd.Run()
+	return out.String(), errOut.String(), err
 }
 
 // mustRun requires the idev run to succeed.

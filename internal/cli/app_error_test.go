@@ -4015,3 +4015,47 @@ func TestSettledAnswersForEveryPartOfAChange(t *testing.T) {
 		})
 	}
 }
+
+// idev ip puts the address on stdout and nothing beside it (spec 04-cli.md
+// 4.4.1, 4.12).
+//
+// The whole shape it is written for is ssh user@$(idev ip), and $(...) takes
+// every byte of stdout. A warning that landed there would be handed to ssh as
+// part of the host name.
+func TestIPWritesOnlyTheAddressToStdout(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			// Enough to warn about: the tree that ran up last is not this one.
+			managedRootKey: "/somewhere/else",
+		},
+		State: &incus.InstanceState{Network: map[string]incus.NetworkState{
+			"eth0": {Addresses: []incus.NetworkAddress{
+				{Family: "inet", Address: "10.0.0.2", Scope: "global"},
+			}},
+		}},
+	})
+
+	a := MustNewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+	if err := a.IP(context.Background()); err != nil {
+		t.Fatalf("IP() error = %v", err)
+	}
+
+	if out.String() != "10.0.0.2\n" {
+		t.Errorf("stdout = %q, want the address alone", out)
+	}
+	if errOut.Len() == 0 {
+		t.Fatal("the fixture no longer warns, so this proves nothing about where " +
+			"warnings go")
+	}
+}

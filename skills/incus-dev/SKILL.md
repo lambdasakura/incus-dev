@@ -39,9 +39,15 @@ expressible in `dev.yml` yet.
 | Re-run provisioning only | `idev provision` |
 | See what would happen first | `idev up --dry-run` |
 | Read the state machine-readably | `idev status --json` |
+| Reach it over the network | `ssh user@$(idev ip)` |
 | Check `dev.yml` alone (touches no Incus) | `idev validate` |
 | Start over | `idev rebuild --force` |
 | Remove it (host sources stay) | `idev destroy --force` |
+
+`idev ip` prints one address and nothing else, so it can be substituted.
+IPv4 before IPv6, the same one every run, and nothing at all on stdout when
+there is no address -- an empty substitution would leave `ssh` connecting to
+the local user. Every address, with its interface, is in `idev status --json`.
 
 The only difference between `idev exec` and `idev shell -- <cmd>` is the
 pseudo-terminal. **From scripts and CI, use `idev exec`** — its behaviour does

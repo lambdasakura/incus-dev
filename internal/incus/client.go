@@ -5,9 +5,11 @@
 package incus
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"time"
 )
 
@@ -145,17 +147,81 @@ func (i *Instance) GlobalAddresses() []NetworkAddress {
 
 	var out []NetworkAddress
 	for name, net := range i.State.Network {
-		if name == "lo" {
+		if name == loopbackInterface {
 			continue
 		}
 		for _, addr := range net.Addresses {
-			if addr.Scope == "global" {
+			if addr.Scope == globalScope {
 				out = append(out, addr)
 			}
 		}
 	}
 	return out
 }
+
+// Addresses returns every global address, in the order idev hands them out
+// (spec 04-cli.md 4.4.1).
+//
+// IPv4 first, then interface name. The state arrives as a map, so without an
+// order two runs can answer differently -- and the caller of `idev ip` is a
+// command substitution that cannot see it happen.
+func (i *Instance) Addresses() []InterfaceAddress {
+	if i.State == nil {
+		return nil
+	}
+
+	var out []InterfaceAddress
+	for name, net := range i.State.Network {
+		if name == loopbackInterface {
+			continue
+		}
+		for _, addr := range net.Addresses {
+			if addr.Scope == globalScope {
+				out = append(out, InterfaceAddress{Interface: name, NetworkAddress: addr})
+			}
+		}
+	}
+
+	slices.SortFunc(out, func(a, b InterfaceAddress) int {
+		if a.Family != b.Family {
+			// inet before inet6: on the default Incus bridge the IPv6 address
+			// arrives first and nothing reaches the outside until IPv4 is up.
+			if a.Family == familyIPv4 {
+				return -1
+			}
+			if b.Family == familyIPv4 {
+				return 1
+			}
+		}
+		if c := cmp.Compare(a.Interface, b.Interface); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Address, b.Address)
+	})
+	return out
+}
+
+// PrimaryAddress is the address to reach the instance on, or "" when it has
+// none.
+func (i *Instance) PrimaryAddress() string {
+	addrs := i.Addresses()
+	if len(addrs) == 0 {
+		return ""
+	}
+	return addrs[0].Address
+}
+
+// InterfaceAddress is an address together with the interface carrying it.
+type InterfaceAddress struct {
+	Interface string `json:"interface"`
+	NetworkAddress
+}
+
+const (
+	loopbackInterface = "lo"
+	globalScope       = "global"
+	familyIPv4        = "inet"
+)
 
 // HasGlobalAddress reports whether any global address was assigned.
 func (i *Instance) HasGlobalAddress() bool {
@@ -169,7 +235,7 @@ func (i *Instance) HasGlobalAddress() bool {
 // IPv4 is up, so this is what readiness is judged by.
 func (i *Instance) HasIPv4Address() bool {
 	for _, addr := range i.GlobalAddresses() {
-		if addr.Family == "inet" {
+		if addr.Family == familyIPv4 {
 			return true
 		}
 	}

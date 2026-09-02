@@ -249,13 +249,16 @@ idev status --json
   "profiles": ["default"],
   "config": { "limits.cpu": "4" },
   "devices": ["workspace(disk)"],
+  "addresses": [
+    { "interface": "eth0", "family": "inet", "address": "10.216.13.42" }
+  ],
   "provision_steps": 1,
   "runtime": "1.0",
   "incus_project": "default"
 }
 ```
 
-`profiles` / `config` / `devices` は、空になる場合は出力されない。
+`profiles` / `config` / `devices` / `addresses` は、空になる場合は出力されない。
 instanceが存在しない場合もこれに含まれる。
 `config` に出るのは `limits.*` のキーのみであり、それを1つも設定していない
 instanceでは項目ごと現れない。それ以外はIncusが報告すべきもので、
@@ -265,10 +268,44 @@ dev.yml が別のものを求めている場合に限り、`image_declared` と
 `workspace_source_declared` が併記される。
 `runtime` は dev.yml の `runtime.version` の値であり、宣言が無ければ出力されない。
 
+`addresses` はinstanceが持つglobalアドレスの一覧で、順序は `idev ip` が
+選ぶ順である（3.6.1）。止まっているinstanceにアドレスは無いため、
+この項目も `Addresses:` の行も現れない。「なし」と書くと、
+動いていないのか、動いていてアドレスがまだ付いていないのかの区別がつかない。
+
 ```bash
 # 実行中かどうかで分岐する例
 [ "$(idev status --json | jq -r .status)" = "Running" ] || idev up
 ```
+
+---
+
+## 3.6.1 `idev ip`
+
+instanceへ到達するためのアドレスを1つ、それだけを標準出力へ出す。
+他のコマンドへ埋め込むための出力である。
+
+```bash
+ssh user@$(idev ip)
+```
+
+IPv4をIPv6より優先する。interfaceが複数あるinstanceでも、
+毎回同じものを返す（優先するfamilyのうち、interface名が辞書順で最初のもの）。
+
+返せるアドレスが無い場合、標準出力へは何も書かず、理由を標準エラー出力へ出して
+非0で終了する。上の書き方では、これが重要になる。
+空文字を返すと `ssh user@` がローカルユーザーへ繋ごうとする。
+
+| 状況 | 言うこと |
+| --- | --- |
+| instanceが無い | `idev up` を実行する |
+| 動いていない | アドレスは動いている間だけ存在する |
+| 動いているがアドレスが無い | NICが無いか、アドレスがまだ割り当てられていない |
+
+待たない。`idev up` が起動時にアドレスを待つ。
+また `$(...)` の中では、待つ読み取りは固まったのと区別がつかない。
+
+全アドレスが要る場合は `idev status --json` を使う。
 
 ---
 
