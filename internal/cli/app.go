@@ -265,6 +265,10 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 		if err := a.client.CreateInstance(ctx, a.instanceSpec(plan)); err != nil {
 			return err
 		}
+		// The carried record went into the creation request, so it is durable
+		// again. Holding it after this would have rebuild report it lost when
+		// a later step fails, and offer to delete volumes it still names.
+		a.carried = nil
 		// The devices were set at creation time, so there is nothing to re-apply.
 		created = true
 	default:
@@ -308,7 +312,7 @@ func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
 	if err != nil {
 		return err
 	}
-	if err := a.exec.CheckPrerequisites(ctx, stepsAt(a.cfg.Provision, selected)); err != nil {
+	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Root, stepsAt(a.cfg.Provision, selected)); err != nil {
 		return err
 	}
 	env, err := a.env()
@@ -393,10 +397,18 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 		if opt.Volumes {
 			return volumesUntouched(err, volumes)
 		}
-		// Waiting for the operation can fail after the daemon has carried it
-		// out, so the instance may be gone -- and with it the record naming
-		// the volumes that left the declaration. The declared ones the next
-		// up adopts; these nothing else will ever name.
+		// Only the interrupted wait can leave the instance gone, and with it
+		// the record naming the volumes that left the declaration. Every
+		// other way DeleteInstance fails leaves it where it was, and telling
+		// a user to delete volumes whose record is intact is telling them to
+		// lose data for no reason.
+		//
+		// The failure says which it was. Looking afterwards cannot: the
+		// daemon is still deleting when the answer comes back, so the check
+		// would say "still there" in precisely the case this is written for.
+		if !errors.Is(err, incus.ErrOutcomeUnknown) {
+			return err
+		}
 		return volumesLeftUnnameable(err, undeclaredVolumes(a.cfg, a.instance, volumes))
 	}
 
@@ -550,17 +562,18 @@ func volumesUntouched(err error, refs []string) error {
 }
 
 // volumesLeftUnnameable names the volumes that only the instance's own record
-// knew about, for a destroy that may have deleted the instance anyway.
+// knew about, for a destroy whose wait failed while the daemon went on and
+// deleted the instance.
 //
-// It says "if", because the failure does not tell us: a rejected request
-// leaves everything in place, while a wait cut short by Ctrl-C does not stop
-// the daemon finishing the delete.
+// The caller has looked: this is said only when the instance is provably
+// gone, never on the failures that leave it, its record and its volumes where
+// they were.
 func volumesLeftUnnameable(err error, refs []string) error {
 	named := namedVolumes(refs)
 	if len(named) == 0 {
 		return err
 	}
-	return fmt.Errorf("%w\nif the instance was deleted anyway, nothing names these again: %s\n"+
+	return fmt.Errorf("%w\nthe instance was deleted anyway, so nothing names these again: %s\n"+
 		"remove them with %s",
 		err, strings.Join(named, ", "), volumeDeleteHint(named))
 }
@@ -599,9 +612,10 @@ func (a *App) Rebuild(ctx context.Context) error {
 	}
 
 	if err := a.up(ctx, UpOptions{}, plan, env); err != nil {
-		// a.carried lives only in this process, and the instance that held
-		// the durable copy is already gone. Whatever the next run does, this
-		// error is the last time these names exist.
+		// up clears the carried record once the instance holding it exists,
+		// so this names volumes only while they really are unnameable. The
+		// ordinary rebuild failure -- a provision step -- happens after that
+		// and reports nothing extra.
 		return a.recordLostWith(err)
 	}
 	return nil
@@ -830,6 +844,14 @@ func (a *App) printStatus(r statusReport) error {
 
 // Validate reports that the configuration is valid. Loading already checked it.
 func (a *App) Validate() error {
+	// Only once the instance name is known: the volume name is built from it,
+	// so a dev.yml that is fine for one project.name is not for a longer one.
+	if a.instanceErr == nil {
+		if err := checkVolumeNames(a.cfg, a.instance); err != nil {
+			return err
+		}
+	}
+
 	instance := a.instance
 	if a.instanceErr != nil {
 		// The declaration is fine; deriving the name needs something this host
@@ -1383,7 +1405,7 @@ func (a *App) preflight(ctx context.Context) (idmapPlan, provision.Env, error) {
 	if err := a.checkProfiles(ctx); err != nil {
 		return idmapPlan{}, provision.Env{}, err
 	}
-	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Provision); err != nil {
+	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Root, a.cfg.Provision); err != nil {
 		return idmapPlan{}, provision.Env{}, err
 	}
 	return plan, env, nil
@@ -1454,6 +1476,25 @@ func (a *App) managedInstance(ctx context.Context, eff checkoutEffect, advice mi
 }
 
 func (a *App) unmanagedError(inst *incus.Instance) error {
+	// project.name may hold dots, underscores and capitals, none of which
+	// survive into the instance name, so several names the schema treats as
+	// distinct claim one instance. Saying the instance is unmanaged there
+	// reads as someone having made it by hand, and sends the user to delete
+	// another project's live environment.
+	if owner := inst.Config[managedProjectKey]; owner != "" {
+		why := "two projects cannot share one instance"
+		// Compare the names, not the instances: under project.scope both
+		// carry the same suffix, so comparing those would never match and
+		// the explanation would be dead exactly where scope is in use.
+		if incus.InstanceName(owner) == incus.InstanceName(a.cfg.Project.Name) {
+			// The usual cause, and worth naming: nothing in dev.yml hints
+			// that a dot or a capital is dropped on the way to the instance.
+			why = fmt.Sprintf("%q and %q differ only in characters the instance "+
+				"name drops, so both ask for %s", a.cfg.Project.Name, owner, inst.Name)
+		}
+		return fmt.Errorf("instance %s already belongs to project %q\n%s; rename one of them",
+			inst.Name, owner, why)
+	}
 	return fmt.Errorf("instance %s exists but is not managed by idev for project %q\n"+
 		"refusing to touch it; rename the project or remove the instance manually",
 		inst.Name, a.cfg.Project.Name)

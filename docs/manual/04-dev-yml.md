@@ -102,6 +102,12 @@ and may then contain letters, digits, dots, hyphens and underscores (up to 55
 characters). It is normalised to letters, digits and hyphens for the instance
 name.
 
+That normalisation lower-cases the name and turns `.` and `_` into `-`, so
+`My.Project`, `my_project` and `my-project` all ask for `dev-my-project`. Only
+the first to run gets it; the others are refused, because two projects cannot
+share one instance. Writing the name in the form it will take avoids the
+surprise.
+
 If you work on several projects on one machine, keep the names distinct.
 
 ### `scope`
@@ -380,9 +386,15 @@ The contents survive `idev rebuild`. They also survive `idev destroy`; use
 Good for build caches, database files — anything you want to keep while the
 environment around it is thrown away.
 
-`size` and `pool` are read when the volume is created and never again:
-changing them later has no effect, and idev does not resize. Remove the volume
-with `incus storage volume delete` and let the next `idev up` create it anew.
+`size` is read when the volume is created and never again: changing it later
+has no effect, and idev does not resize. Remove the volume with `incus storage
+volume delete` and let the next `idev up` create it anew.
+
+`pool` is different: it is read on every run. Changing it does not move
+anything — the next `idev up` creates a new, empty volume on the new pool and
+mounts that at the same container path, and the volume holding your data stays
+on the old pool under its old name. If you meant to move the data, copy it with
+`incus storage volume copy` before you edit `pool`.
 
 `idev destroy --volumes` deletes the data along with the instance, and asks
 about both before it does.
@@ -411,7 +423,8 @@ secrets:
 
 - `run` steps receive them as environment variables
 - `ansible` steps receive them as `--extra-vars` (through a mode 0600 temporary
-  file)
+  file), tagged `!unsafe` so a value containing `{{ ... }}` is delivered as
+  written rather than evaluated as a template
 - If any of them cannot be resolved, idev stops **before touching the
   instance** and tells you which are missing
 - Values are masked in logs and error messages

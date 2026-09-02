@@ -1297,3 +1297,279 @@ func TestRuntimeVersionUnparseableStaysUnparseable(t *testing.T) {
 		t.Errorf("error = %v, want the format reported", err)
 	}
 }
+
+// YAMLToJSONStrict reads only the first document, so everything after a `---`
+// was discarded without a word -- the same silent loss the Strict mode above
+// it exists to prevent for a duplicated key.
+func TestParseRefusesASecondDocument(t *testing.T) {
+	body := `schema: 1
+project:
+  name: real-project
+instance:
+  image: images:ubuntu/24.04
+---
+volumes:
+  cache:
+    path: /cache
+`
+	_, err := config.Parse([]byte(body), config.Options{})
+	if err == nil {
+		t.Fatal("Parse() = nil error, want the second document reported")
+	}
+	if !strings.Contains(err.Error(), "document") {
+		t.Errorf("Parse() error = %q, want it to say the file holds more than one document", err)
+	}
+}
+
+// A leading `---` introduces the first document rather than adding one, and a
+// trailing one closes it. Neither is a second document.
+func TestParseAcceptsDocumentMarkersAroundOneDocument(t *testing.T) {
+	for _, body := range []string{
+		"---\nschema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n",
+		"schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n---\n",
+		"---\nschema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n...\n",
+	} {
+		if _, err := config.Parse([]byte(body), config.Options{}); err != nil {
+			t.Errorf("Parse(%q) error = %v, want none", body, err)
+		}
+	}
+}
+
+// Incus refuses an instance whose disk devices share a container path, and
+// idev builds one device map out of volumes, instance.devices and the
+// workspace. up creates the volumes before the instance, so the refusal left
+// them allocated and orphaned.
+func TestParseRefusesTwoDisksOnOnePath(t *testing.T) {
+	for _, tt := range []struct{ name, body string }{
+		{"two volumes", `schema: 1
+project:
+  name: p
+instance:
+  image: images:ubuntu/24.04
+volumes:
+  a:
+    path: /data
+  b:
+    path: /data
+`},
+		{"a device on the workspace target", `schema: 1
+project:
+  name: p
+instance:
+  image: images:ubuntu/24.04
+  devices:
+    d1:
+      type: disk
+      source: /srv
+      path: /workspace
+`},
+		{"a device on a volume's path", `schema: 1
+project:
+  name: p
+instance:
+  image: images:ubuntu/24.04
+  devices:
+    d1:
+      type: disk
+      source: /srv
+      path: /cache
+volumes:
+  cache:
+    path: /cache
+`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := tt.body
+			_, err := config.Parse([]byte(body), config.Options{})
+			if err == nil {
+				t.Fatal("Parse() = nil error, want the shared path reported")
+			}
+			if !strings.Contains(err.Error(), "path") {
+				t.Errorf("Parse() error = %q, want it to name the path", err)
+			}
+		})
+	}
+}
+
+// The message the profiles: [] check prints names three keys; Incus requires
+// all three, and the check enforced two.
+func TestParseRequiresAPoolOnADeclaredRootDisk(t *testing.T) {
+	body := `schema: 1
+project:
+  name: p
+instance:
+  image: images:ubuntu/24.04
+  profiles: []
+  devices:
+    root:
+      type: disk
+      path: /
+`
+	_, err := config.Parse([]byte(body), config.Options{})
+	if err == nil {
+		t.Fatal("Parse() = nil error, want the root disk without a pool reported")
+	}
+	if !strings.Contains(err.Error(), "pool") {
+		t.Errorf("Parse() error = %q, want it to say the pool is missing", err)
+	}
+}
+
+// idev always sets source on the disks it builds, and Incus refuses a root
+// disk that has one -- so / is the one absolute path these cannot take.
+func TestParseRefusesRootAsAMountTarget(t *testing.T) {
+	for _, tt := range []struct{ name, body string }{
+		{"workspace", "workspace:\n  target: /\n"},
+		{"volume", "volumes:\n  cache:\n    path: /\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n" + tt.body
+			_, err := config.Parse([]byte(body), config.Options{})
+			if err == nil {
+				t.Fatal("Parse() = nil error, want / refused as a mount target")
+			}
+		})
+	}
+}
+
+// A volume key becomes an Incus device name verbatim, and Incus caps a device
+// name at 64 characters ("The maximum device name length is 64 characters").
+func TestParseRefusesADeviceNameIncusCannotHold(t *testing.T) {
+	// Incus checks the device name twice: drivers/load.go rejects over 64, and
+	// device.Validate immediately after rejects over 63. The second wins.
+	long := strings.Repeat("a", 64)
+	const head = "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n"
+	for _, tt := range []struct{ name, body string }{
+		{"volume", head + "volumes:\n  " + long + ":\n    path: /cache\n"},
+		{"device", head + "  devices:\n    " + long + ":\n      type: disk\n      path: /d\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			// It must be the length that is refused, so the same file with a
+			// short name has to pass.
+			short := strings.Replace(tt.body, long, "short", 1)
+			if _, err := config.Parse([]byte(short), config.Options{}); err != nil {
+				t.Fatalf("Parse() with a short name error = %v, want none", err)
+			}
+			if _, err := config.Parse([]byte(tt.body), config.Options{}); err == nil {
+				t.Error("Parse() = nil error, want the name refused as too long")
+			}
+		})
+	}
+
+	// 63 is the limit, not one less than it.
+	ok := "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n" +
+		"volumes:\n  " + strings.Repeat("a", 63) + ":\n    path: /cache\n"
+	if _, err := config.Parse([]byte(ok), config.Options{}); err != nil {
+		t.Errorf("Parse() error = %v, want a 63-character name accepted", err)
+	}
+}
+
+// Only disks claim a container path. A proxy's `path` names nothing that can
+// clash, and a disk with no path mounts nothing.
+func TestMountPathsIgnoreWhatIsNotADisk(t *testing.T) {
+	head := "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n"
+	for _, tt := range []struct{ name, body string }{
+		{"a proxy beside a volume", head + `  devices:
+    p1:
+      type: proxy
+      path: /data
+volumes:
+  cache:
+    path: /data
+`},
+		{"a disk with no path", head + `  devices:
+    d1:
+      type: disk
+      source: /srv
+    d2:
+      type: disk
+      source: /srv2
+`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := config.Parse([]byte(tt.body), config.Options{}); err != nil {
+				t.Errorf("Parse() error = %v, want none", err)
+			}
+		})
+	}
+}
+
+// Two spellings of one container path are one path, and Incus compares the
+// strings, so idev has to be the one that notices.
+func TestMountPathsCompareCleanedPaths(t *testing.T) {
+	body := `schema: 1
+project:
+  name: p
+instance:
+  image: images:ubuntu/24.04
+volumes:
+  a:
+    path: /data
+  b:
+    path: /data/
+`
+	_, err := config.Parse([]byte(body), config.Options{})
+	if err == nil {
+		t.Fatal("Parse() = nil error, want /data and /data/ seen as one path")
+	}
+	if !strings.Contains(err.Error(), "/data") {
+		t.Errorf("Parse() error = %q, want it to name the path", err)
+	}
+}
+
+// The workspace has a default target, so a volume declared at /workspace is
+// the entry the user has to edit -- naming workspace.target sends them to a
+// field they never wrote.
+func TestMountPathClashNamesTheDeclaredField(t *testing.T) {
+	body := `schema: 1
+project:
+  name: p
+instance:
+  image: images:ubuntu/24.04
+volumes:
+  cache:
+    path: /workspace
+`
+	_, err := config.Parse([]byte(body), config.Options{})
+	if err == nil {
+		t.Fatal("Parse() = nil error, want the clash with the workspace reported")
+	}
+	// The field the problem is filed under is the field to edit.
+	if !strings.Contains(err.Error(), "- volumes.cache.path:") {
+		t.Errorf("Parse() error = %q, want the problem filed under volumes.cache.path", err)
+	}
+}
+
+// tags and skip_tags are passed to ansible-playbook as their own argv word, so
+// one starting with "-" is read as a flag. run.user, run.shell, shell.user and
+// the device keys are all checked for this; these were not, and the user got
+// an argparse usage dump from inside a provisioning step.
+func TestParseRefusesAnsibleTagsThatLookLikeFlags(t *testing.T) {
+	head := "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n"
+	for _, tt := range []struct{ name, field, body string }{
+		{"tags", "tags", "tags: [\"-x\", \"a\"]"},
+		{"skip_tags", "skip_tags", "skip_tags: [\"a\", \"-x\"]"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := head + "provision:\n  - name: play\n    ansible:\n      playbook: site.yml\n      " + tt.body + "\n"
+			_, err := config.Parse([]byte(body), config.Options{})
+			if err == nil {
+				t.Fatal("Parse() = nil error, want the leading dash refused")
+			}
+			if !strings.Contains(err.Error(), tt.field) {
+				t.Errorf("Parse() error = %q, want it to name %s", err, tt.field)
+			}
+		})
+	}
+
+	// A tag holding a comma becomes two tags, since they are joined with one.
+	body := head + "provision:\n  - name: play\n    ansible:\n      playbook: site.yml\n      tags: [\"a,b\"]\n"
+	if _, err := config.Parse([]byte(body), config.Options{}); err == nil {
+		t.Error("Parse() = nil error, want a comma in a tag refused")
+	}
+
+	// An ordinary tag still passes.
+	ok := head + "provision:\n  - name: play\n    ansible:\n      playbook: site.yml\n      tags: [\"setup\", \"db\"]\n"
+	if _, err := config.Parse([]byte(ok), config.Options{}); err != nil {
+		t.Errorf("Parse() error = %v, want ordinary tags accepted", err)
+	}
+}

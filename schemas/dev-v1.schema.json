@@ -46,7 +46,7 @@
         },
         "devices": {
           "type": "object",
-          "propertyNames": { "minLength": 1 },
+          "propertyNames": { "minLength": 1, "maxLength": 63 },
           "additionalProperties": {
             "type": "object",
             "required": ["type"],
@@ -96,7 +96,7 @@
     },
     "volumes": {
       "type": "object",
-      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 63 },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,

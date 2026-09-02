@@ -342,6 +342,12 @@ func (a *API) DeleteInstance(ctx context.Context, name string) error {
 		return fmt.Errorf("delete instance %s: %w", name, err)
 	}
 	if err := op.WaitContext(ctx); err != nil {
+		if ctx.Err() != nil {
+			// The wait was cut short, and the daemon goes on deleting. This
+			// is the only step here whose outcome is unknown: everything
+			// above leaves the instance exactly where it was.
+			return fmt.Errorf("delete instance %s: %w: %w", name, err, ErrOutcomeUnknown)
+		}
 		return fmt.Errorf("delete instance %s: %w", name, err)
 	}
 	return nil

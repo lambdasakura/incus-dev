@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -221,6 +222,27 @@ func desiredDevices(cfg *config.Config, plan idmapPlan, instance string) map[str
 // volume.
 func volumeName(instance, key string) string {
 	return instance + "-" + key
+}
+
+// maxVolumeNameLength is Incus's cap on a storage volume name
+// (shared/validate.IsAPIName). The device name a volume key also becomes has
+// its own, shorter cap, which the schema carries.
+const maxVolumeNameLength = 64
+
+// checkVolumeNames refuses a volume whose derived name Incus will not take.
+//
+// The schema caps the key, but the name is the key with the instance in front
+// of it, and the instance name is not known until the project and its scope
+// are resolved -- so this is the one part of the limit only the CLI can check.
+func checkVolumeNames(cfg *config.Config, instance string) error {
+	for _, key := range slices.Sorted(maps.Keys(cfg.Volumes)) {
+		if name := volumeName(instance, key); len(name) > maxVolumeNameLength {
+			return fmt.Errorf("volumes.%s: the volume would be named %s, "+
+				"which is %d characters; Incus takes at most %d, so shorten the key",
+				key, name, len(name), maxVolumeNameLength)
+		}
+	}
+	return nil
 }
 
 // applyShift puts the idmap strategy onto a disk that mounts a host directory.

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	yamlv2 "go.yaml.in/yaml/v2"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
 	"github.com/lambdasakura/incus-dev/internal/incus"
@@ -35,7 +38,24 @@ func newExecutor(f *runnertest.Fake) *provision.Executor {
 }
 
 func newExecutorWith(f *runnertest.Fake, client *fakeIncus) *provision.Executor {
+	installedPlugin(f)
 	return &provision.Executor{Incus: client, Runner: f}
+}
+
+// pluginDoc stands in for what ansible-doc prints for an installed plugin.
+const pluginDoc = "> COMMUNITY.GENERAL.INCUS    (connection plugin)\n"
+
+// installedPlugin makes ansible-doc answer the way it does when the
+// connection plugin is there: real ansible-doc exits 0 either way and prints
+// the documentation only when it found something, so a fake that says nothing
+// is a fake of a host without the plugin.
+func installedPlugin(f *runnertest.Fake) {
+	if f.Stdout == nil {
+		f.Stdout = map[string]string{}
+	}
+	if _, set := f.Stdout["ansible-doc"]; !set {
+		f.Stdout["ansible-doc"] = pluginDoc
+	}
 }
 
 // execCall is what a run step executed.
@@ -441,6 +461,9 @@ func captureAnsible(t *testing.T, f *runnertest.Fake) *ansibleCall {
 	t.Helper()
 	call := &ansibleCall{}
 	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Name == "ansible-doc" {
+			return runner.Result{Stdout: []byte(pluginDoc)}, nil
+		}
 		if c.Name != "ansible-playbook" {
 			return runner.Result{}, nil
 		}
@@ -626,6 +649,9 @@ func TestAnsibleTempFilesAreRemoved(t *testing.T) {
 
 	var inventoryPath string
 	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Name == "ansible-doc" {
+			return runner.Result{Stdout: []byte(pluginDoc)}, nil
+		}
 		for i, a := range c.Args {
 			if a == "-i" && i+1 < len(c.Args) {
 				inventoryPath = c.Args[i+1]
@@ -869,6 +895,26 @@ func TestProvisionRejectsUnknownStep(t *testing.T) {
 
 // Without the prerequisites for an ansible step, it stops and says what to do
 // (spec 06-provisioning.md 6.5.1).
+// ansible-doc exits 0 for a plugin it cannot find and writes its warning to
+// standard error, so an absent plugin looks exactly like a present one to
+// anything reading the exit code. Empty output is the difference.
+func TestAnsibleGuidanceWhenThePluginIsAbsent(t *testing.T) {
+	root, cfg := ansibleProject(t)
+	f := &runnertest.Fake{Stdout: map[string]string{"ansible-doc": ""}}
+
+	env := testEnv()
+	env.ProjectRoot = root
+	err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{})
+	if err == nil {
+		t.Fatal("Provision() = nil error, want the missing plugin reported")
+	}
+	for _, want := range []string{"community.general", "ansible-galaxy collection install"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
 func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 	root, cfg := ansibleProject(t)
 
@@ -883,15 +929,18 @@ func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 			wantAny: []string{"ansible-playbook", "install"},
 		},
 		{
-			name:    "community.general is missing",
+			// ansible-doc cannot be run at all -- a different failure from
+			// the plugin being absent, and a different thing to say.
+			name:    "ansible-doc is missing",
 			failOn:  "ansible-doc",
-			wantAny: []string{"community.general", "ansible-galaxy collection install"},
+			wantAny: []string{"ansible-doc", "install Ansible"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &runnertest.Fake{Err: map[string]error{tt.failOn: errors.New("not found")}}
+			installedPlugin(f)
 
 			env := testEnv()
 			env.ProjectRoot = root
@@ -968,6 +1017,9 @@ provision:
 	installed := false
 	f := &runnertest.Fake{}
 	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Name == "ansible-doc" {
+			return runner.Result{Stdout: []byte(pluginDoc)}, nil
+		}
 		cmd := c.String()
 		switch {
 		case strings.HasPrefix(cmd, "ansible-galaxy install"):
@@ -982,7 +1034,7 @@ provision:
 	env := testEnv()
 	env.ProjectRoot = root
 
-	if err := e.CheckPrerequisites(context.Background(), cfg.Provision); err != nil {
+	if err := e.CheckPrerequisites(context.Background(), "", cfg.Provision); err != nil {
 		t.Fatalf("CheckPrerequisites() error = %v, want the galaxy step left to install it", err)
 	}
 	if err := e.Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
@@ -1020,7 +1072,7 @@ provision:
 	// The plugin is not there yet; the first galaxy step is what installs it.
 	f := &runnertest.Fake{Err: map[string]error{"ansible-doc": errors.New("not found")}}
 
-	if err := newExecutor(f).CheckPrerequisites(context.Background(), cfg.Provision); err != nil {
+	if err := newExecutor(f).CheckPrerequisites(context.Background(), "", cfg.Provision); err != nil {
 		t.Fatalf("CheckPrerequisites() error = %v, want the first galaxy step to excuse the check", err)
 	}
 }
@@ -1050,7 +1102,7 @@ provision:
 
 	f := &runnertest.Fake{Err: map[string]error{"ansible-doc": errors.New("not found")}}
 
-	err = newExecutor(f).CheckPrerequisites(context.Background(), cfg.Provision)
+	err = newExecutor(f).CheckPrerequisites(context.Background(), "", cfg.Provision)
 	if err == nil || !strings.Contains(err.Error(), "community.general") {
 		t.Errorf("error = %v, want the missing plugin reported up front", err)
 	}
@@ -1072,7 +1124,7 @@ provision:
 
 	f := &runnertest.Fake{Err: map[string]error{"ansible-galaxy --version": errors.New("not found")}}
 
-	err = newExecutor(f).CheckPrerequisites(context.Background(), cfg.Provision)
+	err = newExecutor(f).CheckPrerequisites(context.Background(), "", cfg.Provision)
 	if err == nil || !strings.Contains(err.Error(), "ansible-galaxy") {
 		t.Errorf("error = %v, want the missing ansible-galaxy reported", err)
 	}
@@ -1182,11 +1234,14 @@ func TestSecretsArePassedToAnsible(t *testing.T) {
 	f := &runnertest.Fake{}
 	var secretsFile string
 	f.Handler = func(c runner.Command) (runner.Result, error) {
+		if c.Name == "ansible-doc" {
+			return runner.Result{Stdout: []byte(pluginDoc)}, nil
+		}
 		if c.Name != "ansible-playbook" {
 			return runner.Result{}, nil
 		}
 		for _, a := range c.Args {
-			if strings.HasSuffix(a, "secrets.json") {
+			if strings.HasSuffix(a, "secrets.yml") {
 				secretsFile = strings.TrimPrefix(a, "--extra-vars=@")
 				data, err := os.ReadFile(secretsFile)
 				if err != nil {
@@ -1194,11 +1249,17 @@ func TestSecretsArePassedToAnsible(t *testing.T) {
 					continue
 				}
 				var got map[string]string
-				if err := json.Unmarshal(data, &got); err != nil {
+				if err := yamlv2.Unmarshal(data, &got); err != nil {
 					t.Errorf("parse secrets: %v", err)
 				}
 				if got["API_TOKEN"] != "s3cret" {
 					t.Errorf("secrets = %v", got)
+				}
+				// JSON is valid YAML, so parsing it back proves nothing about
+				// templating. The tag is what stops Ansible evaluating the
+				// value, and only the file itself shows it.
+				if !strings.Contains(string(data), "!unsafe") {
+					t.Errorf("secrets file is templatable:\n%s", data)
 				}
 
 				info, err := os.Stat(secretsFile)
@@ -1256,5 +1317,49 @@ func TestStepEnvOverridesSecret(t *testing.T) {
 	}
 	if got := client.last(t).Opt.Env["API_TOKEN"]; got != "from-step" {
 		t.Errorf("API_TOKEN = %q, want from-step", got)
+	}
+}
+
+// Every ansible command idev runs has to see the project's ansible.cfg.
+//
+// The playbook step set ANSIBLE_CONFIG and nothing else did, so a galaxy step
+// installed roles where Ansible's default puts them while the playbook looked
+// where the project's config says -- the galaxy step reported success and the
+// next step failed with a role that was not found. The prerequisite probes had
+// the same gap, and once the plugin check could fail, probing a different
+// configuration would have refused a project that installs the plugin into its
+// own collections_path.
+func TestEveryAnsibleCommandSeesTheProjectConfig(t *testing.T) {
+	root, cfg := ansibleProject(t)
+	cfgPath := filepath.Join(root, ".incus-dev", "ansible", "ansible.cfg")
+	if err := os.WriteFile(cfgPath, []byte("[defaults]\nroles_path = roles\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requirements := filepath.Join(root, ".incus-dev", "ansible", "requirements.yml")
+	if err := os.WriteFile(requirements, []byte("roles: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Provision = append([]config.Step{{
+		Name:   "roles",
+		Galaxy: &config.GalaxyStep{Requirements: ".incus-dev/ansible/requirements.yml"},
+	}}, cfg.Provision...)
+
+	f := &runnertest.Fake{}
+	installedPlugin(f)
+
+	env := testEnv()
+	env.ProjectRoot = root
+	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+
+	want := "ANSIBLE_CONFIG=" + cfgPath
+	for _, c := range f.Calls {
+		if !strings.HasPrefix(c.Name, "ansible") {
+			continue
+		}
+		if !slices.Contains(c.Env, want) {
+			t.Errorf("%s ran with Env %v, want it to include %q", c.Name, c.Env, want)
+		}
 	}
 }

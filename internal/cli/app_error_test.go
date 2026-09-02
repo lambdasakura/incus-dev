@@ -499,9 +499,13 @@ provision:
 	client := incustest.New()
 	managed(client, "Running")
 
-	// The playbook run itself, not the prerequisite check, which runs
-	// ansible-playbook --version.
-	cmdRunner := &runnertest.Fake{Err: map[string]error{"ansible-playbook -i": errBoom}}
+	// The playbook run itself, not the prerequisite checks: ansible-playbook
+	// --version has to succeed, and ansible-doc has to print documentation,
+	// which is how a present connection plugin is told from an absent one.
+	cmdRunner := &runnertest.Fake{
+		Err:    map[string]error{"ansible-playbook -i": errBoom},
+		Stdout: map[string]string{"ansible-doc": "> COMMUNITY.GENERAL.INCUS    (connection plugin)\n"},
+	}
 	app := NewApp(AppOptions{
 		Config: cfg, Client: client, Runner: cmdRunner,
 		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
@@ -1114,6 +1118,40 @@ func TestRebuildKeepsTheRecordWhenProvisioningFails(t *testing.T) {
 	got := client.Instances["dev-example-project"].Config[managedVolumesKey]
 	if !strings.Contains(got, "dev-example-project-old") {
 		t.Errorf("record = %q, want the carried volume recorded despite the failure", got)
+	}
+}
+
+// The record is written into the creation request, so once the instance
+// exists it is durable and the advice about a lost record must not appear.
+// Following it would delete a volume the record still names, on the ordinary
+// way for a rebuild to fail.
+func TestRebuildDoesNotOfferToDeleteARecordedVolume(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"provision:\n  - run: \"false\"\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-old",
+		},
+	})
+	client.Volumes["default/dev-example-project-old"] = true
+	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, nil }
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Rebuild(context.Background())
+	if err == nil {
+		t.Fatal("Rebuild() = nil error, want the failing step reported")
+	}
+	if strings.Contains(err.Error(), "storage volume delete") {
+		t.Errorf("Rebuild() error = %q, want no advice to delete a volume the record still names", err)
 	}
 }
 
@@ -2792,14 +2830,18 @@ func TestDestroyNamesTheUnnameableVolumesWhenItFails(t *testing.T) {
 			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
 		},
 	})
-	client.FailOn = map[string]error{"delete dev-example-project": context.Canceled}
-
 	app := NewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	err := app.Destroy(context.Background(), DestroyOptions{})
+	// The one ambiguous case: the wait is cut short and the daemon goes on
+	// deleting. The instance is still there when anything asks, which is why
+	// this cannot be settled by looking.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := app.Destroy(ctx, DestroyOptions{})
 	if err == nil {
 		t.Fatal("Destroy() = nil error, want the failure reported")
 	}
@@ -2884,5 +2926,219 @@ func TestRebuildAddsNothingWhenEveryVolumeIsDeclared(t *testing.T) {
 	}
 	if got := err.Error(); got != context.Canceled.Error() {
 		t.Errorf("Rebuild() error = %q, want just the cause", got)
+	}
+}
+
+// DeleteInstance fails at the lookup, at the force-stop, at a rejected
+// request and at the wait; only the last leaves the instance possibly gone.
+// On the others the record and the volumes are provably where they were, so
+// advice to delete them by hand is advice to lose data for no reason.
+func TestDestroyDoesNotOfferToDeleteWhileTheInstanceIsThere(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+	client.FailOn = map[string]error{"delete dev-example-project": errBoom}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the failure reported")
+	}
+	if strings.Contains(err.Error(), "storage volume delete") {
+		t.Errorf("Destroy() error = %q, want no delete advice while the instance is still there", err)
+	}
+}
+
+// project.name accepts dots, underscores and capitals, all of which the
+// instance name drops, so several names the schema treats as distinct claim
+// one instance. The loser was told the instance "is not managed by idev",
+// which reads as someone having made it by hand.
+func TestUnmanagedErrorExplainsANameCollision(t *testing.T) {
+	cfg := mustParse(t, "schema: 1\nproject:\n  name: My.Project\n"+
+		"instance:\n  image: images:ubuntu/24.04\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-my-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "my_project"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Shell(context.Background(), []string{"true"})
+	if err == nil {
+		t.Fatal("Shell() = nil error, want the collision reported")
+	}
+	if !strings.Contains(err.Error(), "my_project") {
+		t.Errorf("error = %q, want it to name the project that owns the instance", err)
+	}
+	if strings.Contains(err.Error(), "remove the instance manually") {
+		t.Errorf("error = %q, want it not to suggest deleting another project's environment", err)
+	}
+}
+
+// project.scope puts a suffix on the instance name, which both projects share,
+// so the explanation has to compare the names rather than the instances.
+func TestUnmanagedErrorExplainsACollisionUnderScope(t *testing.T) {
+	cfg := mustParse(t, "schema: 1\nproject:\n  name: My.Project\n  scope: branch\n"+
+		"instance:\n  image: images:ubuntu/24.04\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-my-project-main",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "my_project"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Branch: func() (string, error) { return "main", nil },
+		Out:    &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Shell(context.Background(), []string{"true"})
+	if err == nil {
+		t.Fatal("Shell() = nil error, want the collision reported")
+	}
+	if !strings.Contains(err.Error(), "differ only in characters") {
+		t.Errorf("error = %q, want the normalisation explained under scope too", err)
+	}
+}
+
+// An instance idev owns whose recorded project does not derive this name --
+// renamed by hand, say -- is still two projects claiming one instance, but
+// the normalisation explanation would be false, so it is not given.
+func TestUnmanagedErrorWithoutANormalisationExplanation(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "totally-different"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Shell(context.Background(), []string{"true"})
+	if err == nil {
+		t.Fatal("Shell() = nil error, want the clash reported")
+	}
+	if !strings.Contains(err.Error(), "totally-different") {
+		t.Errorf("error = %q, want it to name the project that owns the instance", err)
+	}
+	if strings.Contains(err.Error(), "differ only in characters") {
+		t.Errorf("error = %q, want no normalisation explanation: these names do not collide that way", err)
+	}
+}
+
+// An instance genuinely made by hand still gets the original advice.
+func TestUnmanagedErrorForAnInstanceIdevDidNotMake(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Shell(context.Background(), []string{"true"})
+	if err == nil {
+		t.Fatal("Shell() = nil error, want the unmanaged instance reported")
+	}
+	if !strings.Contains(err.Error(), "not managed by idev") {
+		t.Errorf("error = %q, want the unmanaged-instance wording", err)
+	}
+}
+
+// The instance is still present when the wait is cut short -- the daemon has
+// not finished -- so a check that looks would answer "still there" in exactly
+// the case the advice exists for. The failure itself is what says so.
+func TestDestroyAdvisesWhileTheInstanceIsStillPresent(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := app.Destroy(ctx, DestroyOptions{})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the interrupted wait reported")
+	}
+	if _, present := client.Instances["dev-example-project"]; !present {
+		t.Fatal("the fake deleted the instance; this test needs it still there")
+	}
+	if !strings.Contains(err.Error(), "dev-example-project-old") {
+		t.Errorf("Destroy() error = %q, want the volume named even though the instance is still there", err)
+	}
+}
+
+// A volume key becomes a device name (max 63) and, with the instance name in
+// front, a storage volume name (max 64). Only the second depends on the
+// instance, so only the second can be checked here rather than by the schema.
+func TestValidateRefusesAVolumeNameIncusCannotHold(t *testing.T) {
+	// dev-example-project is 19 characters, so 45 makes a 65-character name.
+	cfg := mustParse(t, rootYAML+"volumes:\n  "+strings.Repeat("a", 45)+":\n    path: /cache\n")
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil error, want the derived volume name refused")
+	}
+	if !strings.Contains(err.Error(), "64") {
+		t.Errorf("Validate() error = %q, want it to name the limit", err)
+	}
+}
+
+// One character shorter fits, so it is the length being refused.
+func TestValidateAcceptsTheLongestVolumeNameThatFits(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  "+strings.Repeat("a", 44)+":\n    path: /cache\n")
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want a 64-character volume name accepted", err)
 	}
 }

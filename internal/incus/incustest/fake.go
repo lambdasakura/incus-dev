@@ -185,12 +185,19 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 }
 
 // DeleteInstance removes an instance.
-func (f *Fake) DeleteInstance(_ context.Context, name string) error {
+func (f *Fake) DeleteInstance(ctx context.Context, name string) error {
 	if err := f.record("delete %s", name); err != nil {
 		return err
 	}
 	if _, ok := f.Instances[name]; !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
+	}
+	if err := ctx.Err(); err != nil {
+		// The request has reached the daemon by the time the wait can be cut
+		// short, and the daemon does not stop because idev did. Whether the
+		// instance survives is genuinely unknown, so this leaves it and says
+		// so (see incus.ErrOutcomeUnknown).
+		return fmt.Errorf("delete instance %s: %w: %w", name, err, incus.ErrOutcomeUnknown)
 	}
 	delete(f.Instances, name)
 	return nil

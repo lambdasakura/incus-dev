@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,7 @@ import (
 // An ansible step reaches the container without SSH (REQ-004).
 func TestAnsibleProvisioning(t *testing.T) {
 	requireCommand(t, "ansible-playbook")
-	if err := exec.Command("ansible-doc", "-t", "connection", "community.general.incus").Run(); err != nil {
-		t.Skip("skipping: the community.general collection is not installed")
-	}
+	requireConnectionPlugin(t)
 
 	f := newFixture(t, `
 schema: 1
@@ -80,9 +79,7 @@ provision:
 // (spec 06-provisioning.md 6.3.2; the sole exception to REQ-007).
 func TestDefaultBootstrapInstallsPython(t *testing.T) {
 	requireCommand(t, "ansible-playbook")
-	if err := exec.Command("ansible-doc", "-t", "connection", "community.general.incus").Run(); err != nil {
-		t.Skip("skipping: the community.general collection is not installed")
-	}
+	requireConnectionPlugin(t)
 
 	// Use a Debian-family image without python3.
 	f := newFixture(t, `
@@ -169,5 +166,21 @@ provision:
 	got := f.mustRun("shell", "--", "cat", "/etc/idev-order")
 	if !strings.Contains(got, "bootstrap") || !strings.Contains(got, "provision") {
 		t.Errorf("order = %q", got)
+	}
+}
+
+// requireConnectionPlugin skips unless the connection plugin idev uses is
+// installed.
+//
+// ansible-doc exits 0 for a plugin it cannot find, writing its warning to
+// standard error, so the exit code says only that ansible-doc ran. Reading it
+// alone made this guard never skip, and the test then built an instance and
+// failed late instead.
+func requireConnectionPlugin(t *testing.T) {
+	t.Helper()
+
+	out, err := exec.Command("ansible-doc", "-t", "connection", "community.general.incus").Output()
+	if err != nil || len(bytes.TrimSpace(out)) == 0 {
+		t.Skip("skipping: the community.general collection is not installed")
 	}
 }

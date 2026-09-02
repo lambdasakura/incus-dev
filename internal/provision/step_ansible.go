@@ -1,11 +1,14 @@
 package provision
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -30,7 +33,7 @@ const (
 // Left to the step itself, the check happens after the instance has been
 // created, started and bootstrapped, so the user waits through all of that to
 // be told Ansible is not installed (spec 06-provisioning.md 6.5.1).
-func (e *Executor) CheckPrerequisites(ctx context.Context, steps []config.Step) error {
+func (e *Executor) CheckPrerequisites(ctx context.Context, root string, steps []config.Step) error {
 	var hasAnsible, hasGalaxy, galaxyFirst bool
 	for _, step := range steps {
 		switch {
@@ -45,14 +48,14 @@ func (e *Executor) CheckPrerequisites(ctx context.Context, steps []config.Step) 
 	}
 
 	if hasGalaxy {
-		if err := e.checkGalaxy(ctx); err != nil {
+		if err := e.checkGalaxy(ctx, root); err != nil {
 			return err
 		}
 	}
 	if !hasAnsible {
 		return nil
 	}
-	if err := e.checkPlaybook(ctx); err != nil {
+	if err := e.checkPlaybook(ctx, root); err != nil {
 		return err
 	}
 	if galaxyFirst {
@@ -61,18 +64,19 @@ func (e *Executor) CheckPrerequisites(ctx context.Context, steps []config.Step) 
 		// that impossible, so leave it to the ansible step itself.
 		return nil
 	}
-	return e.checkPlugin(ctx)
+	return e.checkPlugin(ctx, root)
 }
 
 // checkPlaybook verifies, once, that ansible-playbook can be run.
 //
 // Without it, ansible's own output makes the cause hard to see, so stop early
 // and say what to do (spec 06-provisioning.md 6.5.1).
-func (e *Executor) checkPlaybook(ctx context.Context) error {
+func (e *Executor) checkPlaybook(ctx context.Context, root string) error {
 	e.playbookCheck.Do(func() {
 		if _, err := e.Runner.Run(ctx, runner.Command{
 			Name: "ansible-playbook",
 			Args: []string{"--version"},
+			Env:  ansibleEnv(root),
 		}); err != nil {
 			e.playbookErr = fmt.Errorf(
 				"ansible-playbook is required for ansible steps but could not be run: %w\n"+
@@ -83,26 +87,42 @@ func (e *Executor) checkPlaybook(ctx context.Context) error {
 }
 
 // checkPlugin verifies, once, that the connection plugin is installed.
-func (e *Executor) checkPlugin(ctx context.Context) error {
+//
+// ansible-doc exits 0 for a plugin it cannot find, writing its warning to
+// standard error, so the exit code says only whether ansible-doc itself ran.
+// What distinguishes the two is the documentation: none is printed for a
+// plugin that is not there.
+func (e *Executor) checkPlugin(ctx context.Context, root string) error {
 	e.pluginCheck.Do(func() {
-		if _, err := e.Runner.Run(ctx, runner.Command{
+		res, err := e.Runner.Run(ctx, runner.Command{
 			Name: "ansible-doc",
 			Args: []string{"-t", "connection", ConnectionPlugin},
-		}); err != nil {
+			// The configuration the step will use, so a plugin installed in
+			// the project's own collections_path is found where it lives.
+			Env: ansibleEnv(root),
+		})
+		switch {
+		case err != nil:
 			e.pluginErr = fmt.Errorf(
-				"the %s connection plugin is required but was not found: %w\n"+
-					"install it with: ansible-galaxy collection install community.general", ConnectionPlugin, err)
+				"ansible-doc is required to check for the %s connection plugin "+
+					"but could not be run: %w\ninstall Ansible on this host, or use run steps instead",
+				ConnectionPlugin, err)
+		case len(bytes.TrimSpace(res.Stdout)) == 0:
+			e.pluginErr = fmt.Errorf(
+				"the %s connection plugin is required but was not found\n"+
+					"install it with: ansible-galaxy collection install community.general", ConnectionPlugin)
 		}
 	})
 	return e.pluginErr
 }
 
 // checkGalaxy verifies, once, that ansible-galaxy can be run.
-func (e *Executor) checkGalaxy(ctx context.Context) error {
+func (e *Executor) checkGalaxy(ctx context.Context, root string) error {
 	e.galaxyCheck.Do(func() {
 		if _, err := e.Runner.Run(ctx, runner.Command{
 			Name: "ansible-galaxy",
 			Args: []string{"--version"},
+			Env:  ansibleEnv(root),
 		}); err != nil {
 			e.galaxyErr = fmt.Errorf(
 				"ansible-galaxy is required for galaxy steps but could not be run: %w\n"+
@@ -114,12 +134,12 @@ func (e *Executor) checkGalaxy(ctx context.Context) error {
 
 // execAnsible runs ansible-playbook on the host (spec 06-provisioning.md 6.5).
 func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, env Env) error {
-	if err := e.checkPlaybook(ctx); err != nil {
+	if err := e.checkPlaybook(ctx, env.ProjectRoot); err != nil {
 		return err
 	}
 	// Checked here rather than up front when a galaxy step may have installed
 	// it in the meantime.
-	if err := e.checkPlugin(ctx); err != nil {
+	if err := e.checkPlugin(ctx, env.ProjectRoot); err != nil {
 		return err
 	}
 
@@ -140,9 +160,9 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 
 	// Secrets go in a file of their own: a mode 0600 temporary file, deleted
 	// once the run is over.
-	secretsPath := filepath.Join(dir, "secrets.json")
+	secretsPath := filepath.Join(dir, "secrets.yml")
 	if len(env.Secrets) > 0 {
-		if err := writeJSON(secretsPath, env.Secrets); err != nil {
+		if err := writeSecrets(secretsPath, env.Secrets); err != nil {
 			return fmt.Errorf("write secrets: %w", err)
 		}
 	}
@@ -221,6 +241,29 @@ func writeJSON(path string, v any) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+// writeSecrets writes the secrets as YAML that Ansible will not template.
+//
+// Everything --extra-vars reads is a template, so a secret holding {{ was
+// evaluated rather than delivered: "abc{{ 1 + 1 }}def" arrived as "abc2def",
+// and one naming an undefined variable aborted the play with an error about a
+// name the user never wrote. The value may never be logged, which leaves
+// almost nothing to diagnose it by. !unsafe is Ansible's own way of saying a
+// scalar is data.
+//
+// The values are written as JSON strings, which are valid YAML double-quoted
+// scalars, so quotes, newlines and non-ASCII survive without a YAML library
+// deciding how to fold them.
+func writeSecrets(path string, secrets map[string]string) error {
+	var sb strings.Builder
+	for _, name := range slices.Sorted(maps.Keys(secrets)) {
+		// A string always marshals, and JSON's escaping is exactly what a
+		// YAML double-quoted scalar accepts.
+		quoted, _ := json.Marshal(secrets[name]) //nolint:errchkjson // a string cannot fail
+		sb.WriteString(name + ": !unsafe " + string(quoted) + "\n")
+	}
+	return os.WriteFile(path, []byte(sb.String()), 0o600)
 }
 
 // ansibleEnv points Ansible at the project's ansible.cfg when it has one

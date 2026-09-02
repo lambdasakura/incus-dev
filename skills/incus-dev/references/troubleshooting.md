@@ -22,14 +22,25 @@ does not say: persistent volumes outlive the instance, so if you passed
 
 ### `... nothing names these again: <pool>/<volume>`
 
-A `destroy` or a `rebuild` that failed after the instance was already gone --
+A `destroy` or a `rebuild` that failed while the instance was deleted anyway --
 usually Ctrl-C, since interrupting the wait does not stop the daemon finishing
 the delete. The record of which volumes are idev's lives on the instance, so a
 volume that had left `dev.yml` has nothing left to name it. This message is the
 last place those names appear: keep them for a later `idev up` by putting them
-back in `dev.yml`, or remove them with the command it prints. Volumes still
-declared in `dev.yml` are not listed, because the next `idev up` adopts those
-by name.
+back in `dev.yml`, or remove them with the command it prints.
+
+idev looks before it says this, so you will not see it while the instance is
+still there -- a `rebuild` that fails at a provision step keeps the record, and
+the fix is `idev provision`, not deleting anything. Volumes still declared in
+`dev.yml` are never listed either, because the next `idev up` adopts those by
+name.
+
+### The terminal is broken after interrupting `idev shell`
+
+Run `reset`. `idev shell` puts the terminal in raw mode and restores it when
+the session ends; a second Ctrl-C ends the process at once and skips that, the
+same as `kill -9` does. Prefer one interrupt and a moment's wait -- the first
+one unwinds properly.
 
 ### `no answer on standard input; pass --force to proceed without asking`
 
@@ -43,6 +54,14 @@ prompt, or give the answer on stdin (`printf y | idev destroy`).
 An instance of the same name was created by hand. idev does not destroy an
 instance without its mark (`user.incus-dev.project`). Either delete the
 existing one, or change `project.name` so the names no longer collide.
+
+### `instance <name> already belongs to project "<other>"`
+
+Another project's environment, not one made by hand -- so do **not** delete it.
+The instance name drops what an Incus name cannot hold: it is lower-cased, and
+`.` and `_` become `-`. So `My.Project`, `my_project` and `my-project` all ask
+for `dev-my-project`, and the message says so when that is the cause. Rename one
+of the two projects.
 
 ### `incus profile(s) not found on this host: <name>`
 

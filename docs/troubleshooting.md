@@ -13,7 +13,7 @@ None of these are about how you wrote `dev.yml`. They are all about
 | `apt-get` / `apk` fails during a provisioning step; the container cannot resolve names or download anything | [1](#1-no-network-access-from-the-container) |
 | Cannot write to the workspace; files end up owned by root on the host | [2](#2-workspace-is-owned-by-the-wrong-user--not-writable) |
 | `incus profile(s) not found on this host` | [3](#3-profile-not-found) |
-| `is not managed by idev` | [4](#4-instance-is-said-to-be-unmanaged) |
+| `is not managed by idev`, `already belongs to project` | [4](#4-instance-is-said-to-be-unmanaged) |
 | An `ansible` step fails | [5](#5-an-ansible-step-fails) |
 | Cannot reach Incus; API calls fail | [6](#6-incus-api-calls-fail) |
 
@@ -250,10 +250,16 @@ profile is the more portable choice.
 
 ```text
 instance dev-example exists but is not managed by idev for project "example"
+instance dev-example already belongs to project "Example"
 ```
 
 `idev` marks the instances it creates, and refuses to touch unmarked ones so it
 cannot destroy something it did not make.
+
+The second wording means the instance **is** idev's, for a different project.
+The instance name is lower-cased and turns `.` and `_` into `-`, so several
+project names ask for one instance. Do not delete that one -- it is another
+checkout's environment. Rename one of the projects.
 
 ```bash
 incus config get dev-<project> user.incus-dev.project

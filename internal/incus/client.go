@@ -22,6 +22,16 @@ var ErrInstanceExists = errors.New("instance already exists")
 // name.
 var ErrSnapshotExists = errors.New("snapshot already exists")
 
+// ErrOutcomeUnknown reports that a request reached the daemon and idev stopped
+// waiting before it finished, so whether it took effect is not known.
+//
+// The daemon does not stop because idev did: interrupting the wait for a
+// delete leaves it deleting. Callers that must know whether the instance
+// survived have to distinguish this from the failures that leave everything
+// in place -- a lookup, a force stop, a rejected request -- and a lookup made
+// afterwards cannot, because the operation is still running when it answers.
+var ErrOutcomeUnknown = errors.New("the daemon may carry it out anyway")
+
 // ErrPoolNotFound reports that the storage pool itself is not there.
 //
 // It is not the same as a missing volume: no volume can exist on a pool that

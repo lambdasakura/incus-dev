@@ -21,14 +21,24 @@
 
 ### `... nothing names these again: <pool>/<volume>`
 
-instanceが既に消えた後で `destroy` / `rebuild` が失敗した場合に出る。
+`destroy` / `rebuild` が失敗し、かつinstanceは削除されていた場合に出る。
 多くはCtrl-Cで、待機を中断してもdaemon側の削除は止まらないため起きる。
 どのvolumeがidevのものかという記録はinstance上にあるので、
 `dev.yml` から外れていたvolumeを指すものが何も残らない。
 このメッセージが、その名前が現れる最後の場所である。
 後で `idev up` に拾わせるなら `dev.yml` に書き戻し、
 不要なら表示されたコマンドで削除する。
-`dev.yml` に宣言されたままのvolumeは、次の `idev up` が名前で拾うため列挙しない。
+
+idevは表示前に実際に確認するため、instanceが残っている場合には出ない。
+provisionステップで失敗した `rebuild` は記録を保持しており、
+その場合の対処は `idev provision` であって、削除ではない。
+`dev.yml` に宣言されたままのvolumeも、次の `idev up` が名前で拾うため列挙しない。
+
+### `idev shell` を中断したあと端末の表示が壊れた
+
+`reset` を実行する。`idev shell` は端末をraw modeにし、セッション終了時に戻す。
+2回目のCtrl-Cはプロセスを即座に終了させるためこの復帰処理を飛ばす（`kill -9` と同じ）。
+1回目のCtrl-Cは正しく後始末をするので、まず一度だけ送って少し待つほうがよい。
 
 ### `no answer on standard input; pass --force to proceed without asking`
 
@@ -41,6 +51,13 @@ instanceが既に消えた後で `destroy` / `rebuild` が失敗した場合に�
 
 同名のinstanceが手動で作られている。idevは印（`user.incus-dev.project`）の
 無いinstanceを破壊しない。既存を消すか、`project.name` を変えて名前をずらす。
+
+### `instance <name> already belongs to project "<other>"`
+
+手動で作られたinstanceではなく、**別プロジェクトの環境**である。削除してはならない。
+instance名はIncusが扱えない文字を落とす。小文字化され、`.` と `_` は `-` になる。
+そのため `My.Project` / `my_project` / `my-project` はいずれも `dev-my-project` を
+要求する。原因がこれである場合、メッセージがそう述べる。どちらかのプロジェクト名を変える。
 
 ### `incus profile(s) not found on this host: <name>`
 

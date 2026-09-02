@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	yamlv2 "go.yaml.in/yaml/v2"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -58,8 +61,48 @@ func Load(configPath string) (*Config, error) {
 	return c, nil
 }
 
+// checkOneDocument refuses a dev.yml holding more than one YAML document.
+//
+// YAMLToJSONStrict reads the first and returns it, so everything after a `---`
+// was dropped without a word: validate called the file valid and up ran
+// without the volumes and provision steps the user had written. It is the same
+// silent loss Strict mode prevents for a duplicated key.
+func checkOneDocument(data []byte) error {
+	if count, parsed := documentCount(data); parsed && count > 1 {
+		return errors.New("parse yaml: dev.yml holds more than one YAML document; " +
+			"everything after the '---' would be ignored, so put it in one document")
+	}
+	return nil
+}
+
+// documentCount counts the YAML documents that carry content, asking the
+// parser rather than searching for `---`, which separates documents in one
+// place and is ordinary text in several others. A trailing `---` or `...`
+// opens a document with nothing in it and loses the user nothing.
+//
+// parsed is false when the file does not parse at all, which YAMLToJSONStrict
+// reports with a line number this has no way to improve on.
+func documentCount(data []byte) (count int, parsed bool) {
+	decoder := yamlv2.NewDecoder(bytes.NewReader(data))
+	for {
+		var document any
+		switch err := decoder.Decode(&document); {
+		case errors.Is(err, io.EOF):
+			return count, true
+		case err != nil:
+			return 0, false
+		case document != nil:
+			count++
+		}
+	}
+}
+
 // Parse interprets and validates the contents of dev.yml.
 func Parse(data []byte, opt Options) (*Config, error) {
+	if err := checkOneDocument(data); err != nil {
+		return nil, err
+	}
+
 	// Strict, so a key written twice is an error. YAML would let the last one
 	// win, and a duplicated section would then be discarded without a word.
 	jsonData, err := yaml.YAMLToJSONStrict(data)

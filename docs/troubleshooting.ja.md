@@ -11,7 +11,7 @@
 | provisionステップ中の `apt-get` / `apk` が失敗する、コンテナから名前解決やダウンロードができない | [1](#1-コンテナから外部へ通信できない) |
 | workspaceへ書き込めない、生成物がホスト側でrootの所有になる | [2](#2-workspaceの所有者がおかしい--書き込めない) |
 | `incus profile(s) not found on this host` | [3](#3-profileが見つからない) |
-| `is not managed by idev` | [4](#4-instanceがidev管理外と言われる) |
+| `is not managed by idev`, `already belongs to project` | [4](#4-instanceがidev管理外と言われる) |
 | ansibleステップが失敗する | [5](#5-ansibleステップが失敗する) |
 | Incusへ接続できない、API呼び出しが失敗する | [6](#6-incus-apiとの通信で失敗する) |
 
@@ -239,7 +239,13 @@ storage pool名やnetwork名はホストに依存するため、
 
 ```text
 instance dev-example exists but is not managed by idev for project "example"
+instance dev-example already belongs to project "Example"
 ```
+
+後者は、instanceが**別プロジェクトのidev管理下にある**という意味である。
+instance名は小文字化され `.` と `_` が `-` になるため、複数のプロジェクト名が
+1つのinstanceを要求しうる。そのinstanceは他のチェックアウトの環境なので削除しない。
+どちらかのプロジェクト名を変えること。
 
 `idev` は自分が作成したinstanceに印を付けており、印が無いinstanceは
 誤って壊さないよう触れない。

@@ -153,7 +153,7 @@ func Run(t *testing.T, env Env) []string {
 //
 // A check deleted and replaced in the same edit keeps the count, which no
 // cheap guard catches -- but that is a deliberate act, not an oversight.
-const Checks = 25
+const Checks = 26
 
 // Critical are the checks that exist because the fake once disagreed with
 // Incus and a defect reached a user through the gap.
@@ -162,6 +162,7 @@ var Critical = []string{
 	"CreateVolume refuses a name that is already taken",
 	"ApplyDevices replaces a device rather than merging",
 	"snapshots round-trip and a duplicate name is refused",
+	"a delete cut short reports that the outcome is unknown",
 	"Exec refuses an instance that is not there",
 	"RestoreSnapshot puts back what the snapshot held",
 }
@@ -516,6 +517,26 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		}
 		if err := env.Client.DeleteInstance(ctx, env.Instance); err == nil {
 			t.Error("DeleteInstance() = nil error for an instance that is already gone")
+		}
+	})
+
+	// Last, and on an instance of its own: the daemon may finish the delete
+	// after the wait is abandoned, so this consumes whatever it runs against.
+	check("a delete cut short reports that the outcome is unknown", func(t *testing.T) {
+		cut := spec
+		cut.Name = env.Instance + "-cut"
+		if err := env.Client.CreateInstance(ctx, cut); err != nil {
+			t.Fatalf("CreateInstance() error = %v", err)
+		}
+		t.Cleanup(func() { _ = env.Client.DeleteInstance(ctx, cut.Name) })
+
+		// A lookup afterwards cannot answer this -- the daemon is still
+		// deleting when it replies -- so the failure has to say so itself.
+		done, cancel := context.WithCancel(ctx)
+		cancel()
+
+		if err := env.Client.DeleteInstance(done, cut.Name); !errors.Is(err, incus.ErrOutcomeUnknown) {
+			t.Errorf("DeleteInstance() with a done context = %v, want ErrOutcomeUnknown", err)
 		}
 	})
 

@@ -58,6 +58,7 @@ func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateSecrets(c, ps)
 	validateStepValues(c, ps)
 	validateWorkspace(c, ps)
+	validateMountPaths(c, ps)
 
 	if c.Root != "" {
 		validatePaths(c, ps)
@@ -196,9 +197,39 @@ func validateShell(c *Config, ps *problems) {
 
 // validateStepValues rejects values that would be taken for options when the
 // command runs inside the container.
+// checkAnsibleTags refuses a tag ansible-playbook would not read as a tag.
+//
+// Each list is joined with a comma and passed as one argv word, so a tag that
+// starts with "-" is read as a flag and a tag containing a comma silently
+// becomes two. Every comparable field -- run.user, run.shell, shell.user, the
+// device keys -- is checked for the first of those, and the user who writes
+// this one got an argparse usage dump from inside a provisioning step.
+func checkAnsibleTags(path string, step *AnsibleStep, ps *problems) {
+	for _, list := range []struct {
+		field string
+		tags  []string
+	}{
+		{"tags", step.Tags},
+		{"skip_tags", step.SkipTags},
+	} {
+		for i, tag := range list.tags {
+			where := fmt.Sprintf("%s.%s[%d]", path, list.field, i)
+			if strings.HasPrefix(tag, "-") {
+				ps.add(where, "must not start with %q", "-")
+			}
+			if strings.Contains(tag, ",") {
+				ps.add(where, "must not contain %q, which separates tags", ",")
+			}
+		}
+	}
+}
+
 func validateStepValues(c *Config, ps *problems) {
 	check := func(steps []Step, kind string) {
 		for i, s := range steps {
+			if s.Ansible != nil {
+				checkAnsibleTags(fmt.Sprintf("%s[%d].ansible", kind, i), s.Ansible, ps)
+			}
 			if s.Run == nil {
 				continue
 			}
@@ -367,9 +398,14 @@ func isVolumeSource(dev StringMap) bool {
 }
 
 // hasRootDisk reports whether a disk provides the container's root.
+//
+// The pool counts: Incus refuses a root disk without one ("Root disk entry
+// must have a \"pool\" property set"), and the message this guards names all
+// three keys. Accepting two of them let a half-declared profiles: [] setup
+// through the one check written to catch it.
 func hasRootDisk(devices map[string]StringMap) bool {
 	for _, dev := range devices {
-		if dev["type"] == "disk" && dev["path"] == "/" {
+		if dev["type"] == "disk" && dev["path"] == "/" && dev["pool"] != "" {
 			return true
 		}
 	}
@@ -380,6 +416,66 @@ func validateWorkspace(c *Config, ps *problems) {
 	ws := c.WorkspaceOrDefault()
 	if !filepath.IsAbs(ws.Target) {
 		ps.add("workspace.target", "must be an absolute path in the container, got %q", ws.Target)
+	} else if isContainerRoot(ws.Target) {
+		ps.add("workspace.target", "%s", rootIsNotAMountTarget)
+	}
+}
+
+// rootIsNotAMountTarget explains the one absolute path these cannot take.
+//
+// idev always sets source on the disks it builds, and Incus refuses a root
+// disk that has one ("Root disk entry may not have a \"source\" property
+// set"), so / passed both offline checks and failed at create.
+const rootIsNotAMountTarget = "must not be \"/\": the container's root comes " +
+	"from the image or a profile, and a mount cannot replace it"
+
+// isContainerRoot reports whether a container path is the root.
+func isContainerRoot(path string) bool {
+	return filepath.Clean(path) == "/"
+}
+
+// validateMountPaths collects every container path the instance would mount,
+// so a second disk on the same one is refused here rather than by Incus after
+// the volumes have been created.
+//
+// The workspace goes first because it is the one entry with a default: a
+// volume declared at /workspace is the line the user wrote, so that is the
+// line the problem belongs to. Order decides nothing else -- desiredDevices
+// merges the same three sources, and a name shared between a volume and a
+// device is already refused by validateVolumes.
+func validateMountPaths(c *Config, ps *problems) {
+	claimed := map[string]string{}
+	claim := func(field, path string) {
+		if path == "" || !filepath.IsAbs(path) {
+			return // reported already, by whoever owns the field
+		}
+		// Incus compares device paths as written, so two spellings of one
+		// path reach it as two disks on the same mount point.
+		path = filepath.Clean(path)
+		if first, taken := claimed[path]; taken {
+			ps.add(field, "container path %s is already used by %s; "+
+				"Incus refuses an instance with two disks on one path", path, first)
+			return
+		}
+		claimed[path] = field
+	}
+
+	claim("workspace.target", c.WorkspaceOrDefault().Target)
+
+	for _, name := range sortedKeys(c.Volumes) {
+		path := c.Volumes[name].Path
+		if filepath.IsAbs(path) && isContainerRoot(path) {
+			ps.add("volumes."+name+".path", "%s", rootIsNotAMountTarget)
+			continue
+		}
+		claim("volumes."+name+".path", path)
+	}
+	for _, name := range sortedKeys(c.Instance.Devices) {
+		// Only a disk mounts a container path; a proxy's path is a socket it
+		// forwards, and cannot clash with one.
+		if dev := c.Instance.Devices[name]; dev["type"] == "disk" {
+			claim("instance.devices."+name+".path", dev["path"])
+		}
 	}
 }
 

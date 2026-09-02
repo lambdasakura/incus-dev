@@ -38,8 +38,15 @@ func run(args []string, stderr io.Writer) int {
 // behind it delivers only the first signal; every later one lands in a channel
 // nobody reads. Several Incus calls take no context -- the client waits an
 // hour on a daemon that accepts and never answers -- so without this the
-// second Ctrl-C does nothing and the only way out is SIGKILL, which skips
-// every defer and can leave the terminal in raw mode.
+// second Ctrl-C does nothing and the only way out is SIGKILL from another
+// terminal, after finding the process.
+//
+// What it does not do is save the cleanup. os.Exit skips every deferred
+// function exactly as SIGKILL does, so a second interrupt still leaves
+// ansible's temporary directory in /tmp and, after idev shell, the terminal
+// in raw mode. It ends a process the user could not otherwise end; the first
+// interrupt is the one that unwinds, and everything reachable by a context is
+// bound to it so that the first one is usually enough.
 //
 // It catches the next signal rather than handing it back: neither
 // signal.Stop nor signal.Reset restores the terminating disposition once the

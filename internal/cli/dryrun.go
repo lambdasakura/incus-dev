@@ -33,7 +33,7 @@ func (a *App) Plan(ctx context.Context) error {
 	}
 	// The same host-side checks up makes, so the preflight does not pass while
 	// up fails on one of them (spec 04-cli.md 4.7).
-	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Provision); err != nil {
+	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Root, a.cfg.Provision); err != nil {
 		return err
 	}
 
