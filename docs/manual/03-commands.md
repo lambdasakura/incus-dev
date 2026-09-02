@@ -248,13 +248,14 @@ idev status --json
   "config": { "limits.cpu": "4" },
   "devices": ["workspace(disk)"],
   "provision_steps": 1,
-  "runtime": "container",
+  "runtime": "1.0",
   "incus_project": "default"
 }
 ```
 
-`profiles`, `config`, `devices` and `runtime` are omitted when the instance
-does not exist.
+`profiles`, `config` and `devices` are omitted when the instance does not
+exist. `runtime` is what `runtime.version` in dev.yml declares, and is omitted
+when it declares none.
 
 ```bash
 # branch on whether it is running

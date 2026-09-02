@@ -156,11 +156,8 @@ stdout_callback = yaml
 このファイルが存在すれば、idev は `ANSIBLE_CONFIG` として使用する。
 
 外部のcollectionが必要な場合は `requirements.yml` を置き、
-セットアップ手順やCIで導入する（idev は自動導入しない）。
-
-```bash
-ansible-galaxy install -r .incus-dev/ansible/requirements.yml
-```
+`galaxy` ステップ（後述）で導入する。`.incus-dev/` の外に段取りを
+用意しなくて済む。
 
 ### コンテナ内のPython
 
@@ -188,7 +185,31 @@ Pythonが最初から入っているイメージ（`images:ubuntu/noble` など�
 
 ---
 
-## 5.4 idevが渡す変数
+## 5.4 `galaxy` ステップ
+
+ホスト側で `ansible-galaxy install` を実行する。
+playbookが必要とするRoleやcollectionを、プロジェクトの中から導入できる。
+
+```yaml
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+```
+
+| フィールド | 必須 | 説明 |
+| --- | --- | --- |
+| `requirements` | ○ | requirements.ymlのパス（project root相対） |
+| `extra_args` | | `ansible-galaxy` へそのまま渡す引数 |
+
+導入先はAnsibleの既定に従い、idev は指定しない。
+`ansible` ステップと同じく、ホストにAnsibleが必要である。
+
+## 5.5 idevが渡す変数
 
 instance名やパスをハードコードしなくて済むよう、実行時の情報が渡される。
 
@@ -233,7 +254,7 @@ idev_incus_project: default
 
 ---
 
-## 5.5 再実行できるように書く
+## 5.6 再実行できるように書く
 
 `idev provision` は繰り返し実行される。冪等性を保つのはプロジェクトの責任である。
 
@@ -263,7 +284,7 @@ idev provision && idev provision
 
 ---
 
-## 5.6 どちらを使うか
+## 5.7 どちらを使うか
 
 | | `run` | `ansible` |
 | --- | --- | --- |

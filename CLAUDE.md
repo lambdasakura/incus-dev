@@ -49,7 +49,7 @@ frontmatterの `name` がディレクトリ名と一致し重複しないこと�
 | `.go` のコメント、`t.Run` のサブテスト名、テストの失敗メッセージ | 仕様書への参照は `spec 04-cli.md 4.10` の形式 |
 | CLIのusage（Short / Long / フラグ説明）、確認プロンプト、ログ、エラー | `internal/cli` の `TestUserFacingTextIsASCII` が非ASCIIの混入を検査する |
 | `examples/` 配下の `dev.yml` やスクリプトのコメント | サンプルは1組しか無く英日に分けられない。`test/examples_test.go` の `TestExamplesAreASCII` が検査する |
-| ビルド・CI設定のコメント | `Makefile`、`.golangci.yml`、`.github/`、`.gitlab-ci.yml`、`.goreleaser.yaml` |
+| ビルド・CI設定のコメント | `Makefile`、`.golangci.yml`、`.github/`、`.goreleaser.yaml` |
 
 CLIの日本語での説明はマニュアルの日本語版が担う。
 

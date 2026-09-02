@@ -961,7 +961,7 @@ provision:
 	}
 }
 
-// volumes (spec 03-configuration.md 3.16).
+// volumes (spec 03-configuration.md 3.13).
 func TestVolumes(t *testing.T) {
 	c := parse(t, minimal+`
 volumes:

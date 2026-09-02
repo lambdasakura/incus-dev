@@ -9,7 +9,11 @@ COVER   := cover.out
 # the developer's machine from hiding a test that needs one.
 NO_INCUS := INCUS_SOCKET=/nonexistent/incus.socket
 
-.PHONY: build test test-integration cover cover-html lint fmt check clean install tools
+# One place for the linter version, so make lint, GitHub CI and GitLab CI
+# cannot end up running three different linters.
+LINT_VERSION := $(shell cat .golangci-lint-version)
+
+.PHONY: build test test-integration cover cover-html lint fmt check tidy clean install tools
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
@@ -47,12 +51,16 @@ fmt:
 	fi
 
 tools:
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION)
 
-check: lint test
+# What CI enforces, so a green check here means a green pipeline.
+check: tidy lint test
+
+tidy:
+	go mod tidy -diff
 
 install:
 	CGO_ENABLED=0 go install -ldflags "$(LDFLAGS)" $(PKG)
 
 clean:
-	rm -rf bin $(COVER)
+	rm -rf bin dist $(COVER)

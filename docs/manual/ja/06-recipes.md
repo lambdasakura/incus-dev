@@ -296,11 +296,11 @@ Incusが使えるランナーであれば、実際に構築して検証できる
 
 ```bash
 idev up
-idev shell -- make test
+idev exec -- make test
 idev destroy --force
 ```
 
-`idev shell -- <command>` はコマンドの終了コードをそのまま返すため、
+`idev exec -- <command>` はコマンドの終了コードをそのまま返すため、
 CIの成否判定にそのまま使える。
 
 ---

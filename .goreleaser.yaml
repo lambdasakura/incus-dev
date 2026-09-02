@@ -34,6 +34,9 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
+    # Unpacking must not scatter idev, the READMEs, docs/ and examples/ into
+    # whatever directory the user happened to be in.
+    wrap_in_directory: true
     files:
       - README.md
       - README.ja.md
@@ -80,5 +83,6 @@ release:
     sha256sum --check --ignore-missing checksums.txt
     ```
 
-    See `docs/manual/01-installation.md` in the archive for the rest of the
+    The archive unpacks into a directory of its own, with the manual beside
+    the binary: see `docs/manual/01-installation.md` in it for the rest of the
     setup (Incus, and optionally Ansible).

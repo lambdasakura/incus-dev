@@ -18,7 +18,6 @@ project:
 
 instance:
   image: images:ubuntu/24.04       # required
-  type: container                  # optional (default: container)
   profiles:                        # optional (default: [default])
     - default
   config:                          # optional. passed through to the Incus instance config
@@ -199,6 +198,11 @@ config:
 Numbers and booleans are accepted and converted to strings, so `limits.cpu: 8`
 is fine too.
 
+**Quote anything YAML would read as something else.** It is the value YAML
+parsed that gets converted, not what you typed: `0660` is octal and becomes
+`"432"`, and `no` is a boolean and becomes `"false"`. Write `"0660"` and `"no"`
+to pass them through as they are.
+
 `limits.cpu` and `limits.memory` do take effect in containers, and are
 reflected in what the container sees as its CPU count (`nproc`) and memory
 (`/proc/meminfo`). That lets `make -j$(nproc)` and friends size themselves to
@@ -298,7 +302,7 @@ bootstrap:
   runs and installs python3, assuming a Debian-family image
 - Written out, the default bootstrap does not run
 - `bootstrap: []` disables it
-- Only `run` is allowed here (`ansible` is not)
+- Only `run` is allowed here (not `ansible`, not `galaxy`)
 
 See [05-provisioning.md](05-provisioning.md) for details.
 
@@ -309,7 +313,7 @@ See [05-provisioning.md](05-provisioning.md) for details.
 The steps that configure the inside of the container. An ordered list, run top
 to bottom.
 
-Each step has either a `run` or an `ansible`, never both.
+Each step has exactly one of `run`, `ansible` or `galaxy`.
 
 ```yaml
 provision:

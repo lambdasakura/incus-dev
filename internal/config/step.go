@@ -75,8 +75,8 @@ type stepJSON struct {
 
 // UnmarshalJSON decodes a step.
 //
-// Semantic problems, such as run and ansible being mutually exclusive, are not
-// errors here; validation reports them with their position
+// Semantic problems, such as run, ansible and galaxy being mutually exclusive,
+// are not errors here; validation reports them with their position
 // (spec 07-implementation.md 7.3.4).
 func (s *Step) UnmarshalJSON(b []byte) error {
 	var raw stepJSON

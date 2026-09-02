@@ -237,12 +237,13 @@ idev status --json
   "config": { "limits.cpu": "4" },
   "devices": ["workspace(disk)"],
   "provision_steps": 1,
-  "runtime": "container",
+  "runtime": "1.0",
   "incus_project": "default"
 }
 ```
 
-`profiles` / `config` / `devices` / `runtime` は、instanceが存在しない場合は出力されない。
+`profiles` / `config` / `devices` は、instanceが存在しない場合は出力されない。
+`runtime` は dev.yml の `runtime.version` の値であり、宣言が無ければ出力されない。
 
 ```bash
 # 実行中かどうかで分岐する例

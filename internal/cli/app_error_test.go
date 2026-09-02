@@ -1486,7 +1486,7 @@ func TestListSnapshotsWriteError(t *testing.T) {
 	}
 }
 
-// Persistent volumes (spec 03-configuration.md 3.16).
+// Persistent volumes (spec 03-configuration.md 3.13).
 func TestVolumeLifecycle(t *testing.T) {
 	client := incustest.New()
 	body := rootYAML + `

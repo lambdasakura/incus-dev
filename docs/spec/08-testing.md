@@ -186,8 +186,13 @@ Linuxのみで実行する。配布対象がLinuxだけであり
 POSIXのパーミッション（`chmod 0o000`）に依存する。
 **移植性のためにこれらの検査を弱めない**（8.1「カバレッジ」参照）。
 
-統合テスト（8.3）はIncusを必要とするため、GitHub Actionsでは実行しない。
-Incusが利用可能なランナーを持つCI（`.gitlab-ci.yml`）側で実行する。
+統合テスト（8.3）はIncusを必要とするため、CIでは実行しない。
+Incusのある環境で `make test-integration` を手で実行する。
+
+GitHub Actionsのランナーには Incus が無く、入れて `incus admin init` まで
+持っていくのはCIの安定性に見合わない。Incusを持たない環境では
+テスト側がskipするため（`test/integration/main_test.go`）、
+うっかり緑になることもない。
 
 ### 8.4.3 リリース
 

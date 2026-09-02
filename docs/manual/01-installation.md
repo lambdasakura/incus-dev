@@ -52,7 +52,7 @@ binary on your `PATH`.
 ```bash
 sha256sum --check --ignore-missing checksums.txt
 tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 idev /usr/local/bin/idev
+sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
 ```
 
 **idev is for Linux.** It operates the Incus on the machine it runs on, and the

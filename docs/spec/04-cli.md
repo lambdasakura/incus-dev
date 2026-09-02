@@ -178,7 +178,7 @@ Workspace:  /home/user/src/example-project -> /workspace
 - 主要なconfig（`limits.cpu`, `limits.memory` など）
 - devices
 - provisionステップ数
-- Incus remote / project
+- Incus project
 - runtime version
 - idev管理下かどうか
 

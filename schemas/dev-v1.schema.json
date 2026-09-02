@@ -135,16 +135,7 @@
           "propertyNames": { "minLength": 1 },
           "additionalProperties": { "$ref": "#/$defs/scalar" }
         },
-        "galaxy": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["requirements"],
-      "properties": {
-        "requirements": { "type": "string", "minLength": 1 },
-        "extra_args": { "type": "array", "items": { "type": "string" } }
-      }
-    },
-    "ansible": { "$ref": "#/$defs/ansible" },
+        "ansible": { "$ref": "#/$defs/ansible" },
         "galaxy": { "$ref": "#/$defs/galaxy" }
       }
     },

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode"
@@ -66,5 +67,58 @@ func TestExamplesAreASCII(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk: %v", err)
+	}
+}
+
+// The reference sample in the manual is a valid dev.yml.
+//
+// It is what a user copies from, and it drifted: instance.type stayed in it
+// after the setting was removed, so the sample no longer parsed. Both
+// languages carry their own copy, so both are checked.
+func TestManualSampleIsValid(t *testing.T) {
+	for _, path := range []string{
+		filepath.Join("..", "docs", "manual", "04-dev-yml.md"),
+		filepath.Join("..", "docs", "manual", "ja", "04-dev-yml.md"),
+	} {
+		t.Run(filepath.Base(filepath.Dir(path)), func(t *testing.T) {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sample := firstYAMLBlock(t, string(body))
+
+			root := t.TempDir()
+			writeUnder(t, root, ".incus-dev/dev.yml", sample)
+			writeUnder(t, root, ".incus-dev/ansible/site.yml", "---\n")
+			writeUnder(t, root, ".incus-dev/scripts/setup.sh", "#!/bin/sh\n")
+
+			if _, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml")); err != nil {
+				t.Errorf("config.Load() error = %v", err)
+			}
+		})
+	}
+}
+
+// firstYAMLBlock returns the contents of the first ```yaml fence.
+func firstYAMLBlock(t *testing.T, md string) string {
+	t.Helper()
+
+	m := regexp.MustCompile("(?s)```yaml\n(.*?)```").FindStringSubmatch(md)
+	if m == nil {
+		t.Fatal("no yaml block found")
+	}
+	return m[1]
+}
+
+// writeUnder writes a file below root, creating the directories it needs.
+func writeUnder(t *testing.T, root, rel, body string) {
+	t.Helper()
+
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

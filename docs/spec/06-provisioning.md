@@ -245,14 +245,25 @@ ansible-playbook \
 
 ### 6.5.5 collectionの導入
 
-`requirements.yml` の適用はMVPの対象外とする。
+`galaxy` ステップでホスト側の `ansible-galaxy install` を実行する
+（[03-configuration.md](03-configuration.md) 3.9.3）。
 
-プロジェクトは以下のいずれかで対応する。
+```yaml
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
 
-- ホスト側の前提条件として文書化する
-- CI/セットアップ手順で `ansible-galaxy install -r .incus-dev/ansible/requirements.yml` を実行する
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+```
 
-将来的に `galaxy` ステップ型の追加を検討する（[09-roadmap.md](09-roadmap.md)）。
+Roleやcollectionの導入手順を `.incus-dev/` の中で完結させられる。
+導入先はAnsibleの既定に従い、idevは場所を指定しない。
+
+`ansible` ステップと同じく、最初に実行する前に `ansible-playbook` と
+`community.general` の有無を確認する（6.5.1）。
 
 ---
 
@@ -300,8 +311,8 @@ type Env struct {
     Instance        string
     Workspace       string // コンテナ内
     WorkspaceSource string // ホスト側
-    Remote          string
     IncusProject    string
+    Secrets         map[string]string // 表示時はマスクする（04-cli.md 4.10）
 }
 
 // Selection は実行するステップの絞り込み（部分実行）。

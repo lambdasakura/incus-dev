@@ -115,7 +115,7 @@ type Instance struct {
 	Devices  map[string]StringMap `json:"devices,omitempty"`
 }
 
-// Volume is a persistent volume (spec 03-configuration.md 3.16).
+// Volume is a persistent volume (spec 03-configuration.md 3.13).
 //
 // It survives a recreated instance, so it suits build caches and database
 // files.

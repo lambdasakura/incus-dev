@@ -1,5 +1,9 @@
 # Publishes a GitHub Release with the Linux binaries.
 #
+# Actions are pinned by commit SHA, not by a tag: a tag can be moved to point
+# at something else, and the release job holds contents: write. dependabot
+# keeps the pins current.
+#
 #     git tag -a v0.1.0 -m 'v0.1.0' && git push origin v0.1.0
 name: Release
 
@@ -17,14 +21,16 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
+      # The same target a developer runs and CI runs, so a tag cannot publish
+      # a tree they would have rejected.
       - name: Test
-        run: go test ./...
+        run: make check
 
   release:
     name: release
@@ -34,18 +40,20 @@ jobs:
       # Needed to create the release and upload its assets.
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # GoReleaser builds the changelog from the history.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: "~> v2"
+          # Pinned, so the release runs the same GoReleaser the snapshot in CI
+          # was checked against.
+          version: "2.18.0"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

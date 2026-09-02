@@ -204,9 +204,9 @@ var runOnlyFields = []string{"cwd", "env", "shell", "user"}
 // stepKinds are the keys that name a step's kind.
 var stepKinds = []string{"run", "ansible", "galaxy"}
 
-// validateSteps checks the shape of the steps — run and ansible being mutually
-// exclusive, and so on — against the raw document rather than the struct, so
-// that positions can be reported exactly.
+// validateSteps checks the shape of the steps — run, ansible and galaxy being
+// mutually exclusive, and so on — against the raw document rather than the
+// struct, so that positions can be reported exactly.
 func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *problems) {
 	list, ok := raw[key].([]any)
 	if !ok {

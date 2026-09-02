@@ -1,4 +1,7 @@
 # Keeps the pinned GitHub Actions and the Go dependencies from going stale.
+#
+# The actions are pinned by commit SHA, which dependabot updates in place,
+# rewriting the trailing "# <tag>" comment as it goes.
 version: 2
 
 updates:

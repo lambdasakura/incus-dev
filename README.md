@@ -21,8 +21,8 @@ Take the archive for your platform from the
 ```bash
 VERSION=0.1.0        # the release you want
 curl -LO https://github.com/lambdasakura/incus-dev/releases/download/v$VERSION/incus-dev_${VERSION}_linux_amd64.tar.gz
-tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz idev
-sudo install -m 0755 idev /usr/local/bin/idev
+tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_${VERSION}_linux_amd64/idev /usr/local/bin/idev
 
 idev --version
 ```
@@ -156,7 +156,7 @@ plus a `checksums.txt` to check it against.
 ```bash
 sha256sum --check --ignore-missing checksums.txt
 tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 idev /usr/local/bin/idev
+sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
 ```
 
 With a Go toolchain, no download is needed. A binary built this way reports

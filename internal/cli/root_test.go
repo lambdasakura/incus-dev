@@ -371,6 +371,10 @@ func TestConfirm(t *testing.T) {
 		{"yes\n", true},
 		{"YES\n", true},
 		{" y \n", true},
+		// Without a trailing newline, as a pipe gives: `printf y | idev destroy`
+		// must not be read as a refusal.
+		{"y", true},
+		{"yes", true},
 		{"n\n", false},
 		{"\n", false},
 		{"", false},
@@ -544,12 +548,53 @@ provision:
 	}
 }
 
+// A flag-shaped argument after shell or exec belongs to the command being run,
+// not to idev.
+//
+// SetInterspersed(false) is what stops cobra from claiming it. Every other test
+// writes -- first, which works either way.
+func TestShellAndExecDoNotClaimTheCommandsFlags(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"shell", []string{"shell", "bash", "-lc", "make"}, "exec dev-example-project bash -lc make"},
+		{"exec", []string{"exec", "ls", "-l"}, "exec dev-example-project ls -l"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			app, client := fakeApp(t, out)
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+
+			root := newRootCommand("test", stub(app), stub(app))
+			root.SetArgs(tt.args)
+			root.SetOut(out)
+			root.SetErr(out)
+
+			if err := root.ExecuteContext(context.Background()); err != nil {
+				t.Fatalf("execute %v: %v", tt.args, err)
+			}
+			if !client.Called(tt.want) {
+				t.Errorf("calls = %v, want it to contain %q", client.Calls, tt.want)
+			}
+		})
+	}
+}
+
 // Combining mutually exclusive flags is an error.
-func TestProvisionFlagsAreMutuallyExclusive(t *testing.T) {
+func TestMutuallyExclusiveFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"provision", "--step", "a", "--from", "b"},
 		{"provision", "--step", "a", "--list"},
 		{"provision", "--from", "a", "--list"},
+		// --dry-run wins over --restart, so accepting both would silently
+		// ignore the restart the user asked for.
+		{"up", "--dry-run", "--restart"},
 	} {
 		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
 			never := func(*globalFlags) (*App, error) {

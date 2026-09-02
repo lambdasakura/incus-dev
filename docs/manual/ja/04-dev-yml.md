@@ -18,7 +18,6 @@ project:
 
 instance:
   image: images:ubuntu/24.04       # 必須
-  type: container                  # 任意（既定 container）
   profiles:                        # 任意（既定 [default]）
     - default
   config:                          # 任意。Incusのinstance configへ素通し
@@ -193,6 +192,10 @@ config:
 
 数値や真偽値で書いても文字列へ変換される（`limits.cpu: 8` でもよい）。
 
+**YAMLが別の意味に取る値は引用符で囲むこと。** 変換されるのは書いた文字列では
+なくYAMLが解釈した後の値であり、`0660` は8進数として `"432"` に、`no` は真偽値
+として `"false"` になる。そのまま渡したい場合は `"0660"` `"no"` と書く。
+
 `limits.cpu` / `limits.memory` はコンテナでも有効で、コンテナ内から見える
 CPU数（`nproc`）とメモリ量（`/proc/meminfo`）にも反映される。
 `make -j$(nproc)` のような並列度の自動判定を、ホスト全体ではなく
@@ -287,7 +290,7 @@ bootstrap:
   Debian系を前提とした既定bootstrap（python3の導入）が実行される
 - 記述した場合、既定bootstrapは実行されない
 - `bootstrap: []` で無効化できる
-- `run` のみ使用できる（`ansible` は使えない）
+- `run` のみ使用できる（`ansible` と `galaxy` は使えない）
 
 詳細は [05-provisioning.md](05-provisioning.md) を参照。
 
@@ -297,7 +300,7 @@ bootstrap:
 
 コンテナ内部の構成手順。順序付きの配列で、上から順に実行される。
 
-各ステップは `run` か `ansible` のどちらか一方を持つ。
+各ステップは `run` / `ansible` / `galaxy` のいずれか一つを持つ。
 
 ```yaml
 provision:

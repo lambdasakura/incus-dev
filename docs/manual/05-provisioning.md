@@ -156,12 +156,9 @@ stdout_callback = yaml
 
 If that file exists, idev passes it as `ANSIBLE_CONFIG`.
 
-For external collections, keep a `requirements.yml` and install it from your
-setup instructions or CI — idev does not install it for you.
-
-```bash
-ansible-galaxy install -r .incus-dev/ansible/requirements.yml
-```
+For external collections, keep a `requirements.yml` and install it with a
+`galaxy` step (below), so nothing outside `.incus-dev/` has to be arranged
+first.
 
 ### Python inside the container
 
@@ -189,7 +186,31 @@ default bootstrap does nothing but confirm it.
 
 ---
 
-## 5.4 Variables idev passes in
+## 5.4 `galaxy` steps
+
+Runs `ansible-galaxy install` on the host, so the roles and collections a
+playbook needs are installed from the project itself.
+
+```yaml
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `requirements` | yes | path to requirements.yml, relative to the project root |
+| `extra_args` | | passed straight to `ansible-galaxy` |
+
+Where they land is Ansible's own default; idev does not choose. It needs
+Ansible on the host, exactly as an `ansible` step does.
+
+## 5.5 Variables idev passes in
 
 So you do not have to hard-code instance names and paths, run-time information
 is passed to every step.
@@ -235,7 +256,7 @@ These are passed before `vars`, so the project can override them.
 
 ---
 
-## 5.5 Write steps so they can be re-run
+## 5.6 Write steps so they can be re-run
 
 `idev provision` runs repeatedly. Idempotence is the project's responsibility.
 
@@ -265,7 +286,7 @@ idev provision && idev provision
 
 ---
 
-## 5.6 Which to use
+## 5.7 Which to use
 
 | | `run` | `ansible` |
 | --- | --- | --- |

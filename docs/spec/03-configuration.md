@@ -290,6 +290,17 @@ Incusのconfig値は文字列であるため、YAML上のスカラ値（数値�
 limits.cpu: 8         # "8" として渡される
 ```
 
+変換されるのはYAMLが解釈した**後の値**である。YAML 1.1 では `0660` は8進数、
+`no` は真偽値として解釈されるため、それぞれ `"432"` `"false"` になる。
+元の表記はJSONへの変換時点で失われており、実装側で区別できない。
+
+意図した文字列をそのまま渡したい場合は引用符で囲む。
+
+```yaml
+mode: "0660"          # 引用符が無いと "432" になる
+environment.FLAG: "no"
+```
+
 `user.incus-dev.*` 名前空間はidevが管理用に予約する。
 プロジェクトから指定してはならない。
 
@@ -484,8 +495,8 @@ provision:
 
 任意。順序付きのステップ配列。
 
-各ステップは `run` または `ansible` のいずれか一方を持つ。
-両方を持つステップは不正とする。
+各ステップは `run` / `ansible` / `galaxy` のいずれか一つを持つ。
+二つ以上を持つステップ、一つも持たないステップは不正とする。
 
 ステップは記述順に実行する。いずれかが失敗した時点で全体を失敗とする。
 
@@ -556,9 +567,30 @@ provision:
 | `extra_args` | | `ansible-playbook` へそのまま渡す引数 |
 
 idevは接続用の一時inventoryを生成する。
-Role解決やcollectionの導入はプロジェクトの責務とする。
+Role解決はプロジェクトの責務とし、collectionの導入は `galaxy` ステップで行える。
 
 詳細は [06-provisioning.md](06-provisioning.md) を参照。
+
+### 3.9.3 `galaxy` ステップ
+
+ホスト側で `ansible-galaxy install` を実行する。
+Roleやcollectionの導入を `.incus-dev/` の中で完結させるためのものである
+（REQ-007の方向）。
+
+```yaml
+- name: collections
+  galaxy:
+    requirements: .incus-dev/ansible/requirements.yml
+    extra_args:
+      - --force
+```
+
+| フィールド | 必須 | 説明 |
+| --- | --- | --- |
+| `requirements` | ○ | requirements.ymlのパス（project root相対） |
+| `extra_args` | | `ansible-galaxy` へそのまま渡す引数 |
+
+導入先はAnsibleの既定に従う。idevは場所を指定しない。
 
 ---
 
@@ -699,19 +731,9 @@ incus:
 CLIの `--incus-project` が指定された場合はそちらが優先される。
 どちらも無ければ `default` を使う。
 
-remoteの指定は現時点では対象外とする。
-remoteを使うとworkspaceのbind mountがホスト側パスを前提とするため
-成立せず、共有方式そのものを決め直す必要があるためである。
+remoteの指定は持たない。**対応する予定もない。**
+workspaceはホスト側パスのbind mountであり、remoteの向こう側には存在しないため
+成立しない（[05-incus.md](05-incus.md) 5.6）。
 
 ---
 
-## 3.16 将来的な拡張予定フィールド
-
-以下は初期実装では対象外だが、後方互換に追加できる構造としておく。
-
-```yaml
-incus:
-  remote: dev-server
-```
-
-詳細は [09-roadmap.md](09-roadmap.md) を参照。

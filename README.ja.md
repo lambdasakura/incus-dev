@@ -19,8 +19,8 @@ Linuxホストだけ。`idev` は単一の静的バイナリで、実行時の�
 ```bash
 VERSION=0.1.0        # 使いたいリリース
 curl -LO https://github.com/lambdasakura/incus-dev/releases/download/v$VERSION/incus-dev_${VERSION}_linux_amd64.tar.gz
-tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz idev
-sudo install -m 0755 idev /usr/local/bin/idev
+tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_${VERSION}_linux_amd64/idev /usr/local/bin/idev
 
 idev --version
 ```
@@ -152,7 +152,7 @@ root:<gid>:1
 ```bash
 sha256sum --check --ignore-missing checksums.txt
 tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 idev /usr/local/bin/idev
+sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
 ```
 
 Goツールチェインがあればダウンロードは要らない。
