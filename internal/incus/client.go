@@ -265,7 +265,11 @@ type ExecOptions struct {
 	// diagnosis, so they are shown.
 	PublicEnv map[string]string
 	Cwd       string
-	User      string
+	// User and Group are the numeric ids to run as. The Incus exec API takes
+	// no names, so resolving one is the caller's job; without Group the
+	// process runs in root's group whatever User says.
+	User  string
+	Group string
 	// TTY allocates a pseudo-terminal and hands the standard streams through.
 	TTY bool
 	// Term is the host terminal type (TERM), passed to the container only when

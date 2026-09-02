@@ -2230,8 +2230,14 @@ func TestShellUsesConfiguredSettings(t *testing.T) {
 	client := incustest.New()
 	managed(client, "Running")
 
+	client.Users["1000"] = "developer:x:1000:1000::/home/developer:/bin/sh"
+
 	var got incus.ExecOptions
-	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+	client.ExecFunc = func(_ string, argv []string, opt incus.ExecOptions) (int, error) {
+		if len(argv) > 0 && argv[0] == "getent" {
+			_, _ = io.WriteString(opt.Stdout, client.Users[argv[2]]+"\n")
+			return 0, nil
+		}
 		got = opt
 		return 0, nil
 	}
@@ -2241,15 +2247,22 @@ func TestShellUsesConfiguredSettings(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
-	if diff := cmp.Diff([]string{"/bin/bash"}, client.Execs[0]); diff != "" {
+	last := client.Execs[len(client.Execs)-1]
+	if diff := cmp.Diff([]string{"/bin/bash"}, last); diff != "" {
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
 	if got.Cwd != "/workspace/src" || got.User != "1000" {
 		t.Errorf("ExecOptions = %+v", got)
 	}
+	// A uid alone left the process in root's group, whatever the account's
+	// own group is.
+	if got.Group != "1000" {
+		t.Errorf("Group = %q, want the account's own group", got.Group)
+	}
 }
 
-// A user name is switched to with su, since the exec API only accepts a uid.
+// A user name is resolved inside the container, since the exec API takes only
+// numbers, and the command then runs as that user.
 func TestShellWithNamedUser(t *testing.T) {
 	client := incustest.New()
 	managed(client, "Running")
@@ -2259,9 +2272,12 @@ func TestShellWithNamedUser(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
-	want := []string{"su", "-s", "/bin/bash", "developer", "-c", `'make' 'test'`}
-	if diff := cmp.Diff(want, client.Execs[0]); diff != "" {
-		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	want := [][]string{
+		{"getent", "passwd", "developer"},
+		{"make", "test"},
+	}
+	if diff := cmp.Diff(want, client.Execs); diff != "" {
+		t.Errorf("execs mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -2795,31 +2811,46 @@ func TestPlanChecksSecrets(t *testing.T) {
 
 // A command reaches the container unchanged when it runs as a named user.
 //
-// su -c takes one string, so the argv has to be quoted for the shell rather
-// than joined: without that, an argument holding a space or a shell
-// metacharacter is re-split inside the container.
-func TestAsUserKeepsArgumentBoundaries(t *testing.T) {
-	tests := []struct {
-		name string
-		argv []string
-		want string
-	}{
-		{"a space in an argument", []string{"cat", "my file"}, `'cat' 'my file'`},
-		{"shell metacharacters", []string{"bash", "-lc", "cd sub && make"}, `'bash' '-lc' 'cd sub && make'`},
-		{"a single quote", []string{"echo", "it's"}, `'echo' 'it'\''s'`},
-		{"nothing to quote", []string{"make", "test"}, `'make' 'test'`},
-	}
+// It used to be handed to su -c as one string, so every argument had to be
+// quoted for the shell it would be re-split by. Running as the user directly
+// means the argv is the argv, and this is what says so: an argument holding a
+// space, a metacharacter or a quote arrives whole.
+func TestArgumentBoundariesSurviveRunningAsAUser(t *testing.T) {
+	for _, argv := range [][]string{
+		{"cat", "my file"},
+		{"bash", "-lc", "cd sub && make"},
+		{"echo", "it's"},
+		{"make", "test"},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			cfg := mustParse(t, rootYAML+"shell:\n  user: developer\n")
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, user := asUser(tt.argv, config.Shell{User: "developer", Command: "/bin/sh"})
-
-			if user != "" {
-				t.Errorf("user = %q, want it switched inside the container", user)
+			var got []string
+			client.ExecFunc = func(_ string, ran []string, opt incus.ExecOptions) (int, error) {
+				if len(ran) > 0 && ran[0] == "getent" {
+					_, _ = io.WriteString(opt.Stdout, "developer:x:1001:1001::/home/developer:/bin/sh\n")
+					return 0, nil
+				}
+				got = ran
+				return 0, nil
 			}
-			want := []string{"su", "-s", "/bin/sh", "developer", "-c", tt.want}
-			if diff := cmp.Diff(want, got); diff != "" {
-				t.Errorf("asUser() mismatch (-want +got):\n%s", diff)
+
+			a := MustNewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{},
+				CheckIDMap: func(int, int) error { return nil },
+			})
+			if err := a.Exec(context.Background(), argv, ShellOptions{}); err != nil {
+				t.Fatalf("Exec() error = %v", err)
+			}
+			if diff := cmp.Diff(argv, got); diff != "" {
+				t.Errorf("argv mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

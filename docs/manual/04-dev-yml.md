@@ -560,9 +560,16 @@ shell:
   cwd: /workspace/src  # working directory. defaults to workspace.target
 ```
 
-A numeric uid in `user` is passed to Incus as it is. A user *name* is switched
-to with `su` inside the container, because the Incus exec API only accepts
-uids. The user has to exist in the container, so create it during provisioning.
+`user` takes a name or a uid. The Incus exec API only accepts numbers, so idev
+looks the user up in the container once (`getent passwd`) and runs as the uid
+and gid it finds, setting `HOME`, `USER`, `LOGNAME` and `SHELL` as a login
+would. The user has to exist in the container, so create it during
+provisioning.
+
+It is not wrapped in `su`. su starts the shell as its own child, so the shell
+is not the session leader on the terminal and cannot take its foreground
+process group -- bash then reports `cannot set terminal process group` and runs
+without job control.
 
 ---
 

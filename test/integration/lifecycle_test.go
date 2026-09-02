@@ -584,3 +584,67 @@ func TestIPReturnsTheAddressTheDaemonReports(t *testing.T) {
 		t.Errorf("status does not show %q in its address row:\n%s", address, f.mustRun("status"))
 	}
 }
+
+// shell.user gives a shell with job control (spec 04-cli.md 4.3).
+//
+// It used to run the command under su, which starts it as su's own child: not
+// the session leader on the pty, so it cannot take the terminal's foreground
+// process group, and bash says "cannot set terminal process group" and turns
+// job control off. A fake cannot settle that -- who owns the terminal is the
+// daemon's doing -- so this runs a real shell on a real pty.
+//
+// The account's own group and environment are checked here too: they came free
+// with su and have to be arranged now that idev runs as the user itself.
+func TestShellUserGetsATerminalAndItsOwnGroup(t *testing.T) {
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skip("script(1) is needed to give idev a pty")
+	}
+
+	// A Debian-family image, not the suite's Alpine, and bash rather than the
+	// image's /bin/sh. Both matter, and both were found by putting su back and
+	// watching this pass:
+	//
+	//   - busybox su hands the shell the terminal, util-linux su does not, so
+	//     the defect does not exist on Alpine at all
+	//   - the complaint is bash's; busybox sh says nothing either way
+	//
+	// The image is the one the ansible tests already pull, so nothing extra is
+	// fetched for this.
+	f := newFixture(t, strings.ReplaceAll(minimalYAML, "{{IMAGE}}", "{{ANSIBLE_IMAGE}}")+`
+shell:
+  user: probe
+  command: /bin/bash
+provision:
+  - name: account
+    run: useradd -m -u 4242 -s /bin/bash probe
+`)
+	f.mustRun("up")
+
+	// A pty, so the shell is interactive and job control is meaningful.
+	cmd := exec.Command("script", "-qec", idevBin+" shell", "/dev/null")
+	cmd.Dir = f.root
+	cmd.Env = os.Environ()
+	cmd.Stdin = strings.NewReader("exit\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("idev shell on a pty: %v\n%s", err, out)
+	}
+	for _, complaint := range []string{"no job control", "cannot set terminal process group"} {
+		if strings.Contains(string(out), complaint) {
+			t.Errorf("the shell reported %q:\n%s", complaint, out)
+		}
+	}
+
+	// The group and the environment, which su used to set.
+	got := f.mustRun("exec", "--", "sh", "-c", "id -u; id -g; echo $HOME; echo $USER")
+	want := []string{"4242", "4242", "/home/probe", "probe"}
+	lines := strings.Fields(got)
+	if len(lines) < 4 {
+		t.Fatalf("id/env = %q, want four lines", got)
+	}
+	for i, w := range want {
+		if lines[i] != w {
+			t.Errorf("line %d = %q, want %q (all of it: %q)", i+1, lines[i], w, got)
+		}
+	}
+}

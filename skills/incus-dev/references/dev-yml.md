@@ -75,7 +75,7 @@ Elements of `bootstrap` and `provision` have the same shape. Each holds
     make deps
   shell: /bin/bash       # default /bin/sh
   cwd: /workspace        # working directory
-  user: developer        # a numeric uid goes to Incus; a name is switched to with su
+  user: developer        # a name or a uid; looked up in the container, then run as
   env:                   # extra environment variables. values are masked when displayed
     CGO_ENABLED: "0"
 ```

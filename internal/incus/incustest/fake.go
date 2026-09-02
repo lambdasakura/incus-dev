@@ -4,6 +4,7 @@ package incustest
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -51,6 +52,9 @@ type Fake struct {
 
 	// Calls records the calls in order, such as "create dev-x", "start dev-x".
 	Calls []string
+	// Users are the container's passwd entries, keyed by the name or uid a
+	// lookup asks for: "developer" -> "developer:x:1001:1001::/home/dev:/bin/sh".
+	Users map[string]string
 	// Execs records the argv of each execution.
 	Execs [][]string
 }
@@ -65,6 +69,13 @@ func New() *Fake {
 		Volumes:             map[string]bool{},
 		Profiles:            []string{"default"},
 		Pools:               []string{"default"},
+		// The account the tests that set shell.user name. A container image
+		// ships accounts; a fake with none would make every such test set one
+		// up before it could say what it is about.
+		Users: map[string]string{
+			"developer": "developer:x:1001:1001::/home/developer:/bin/sh",
+			"root":      "root:x:0:0::/root:/bin/sh",
+		},
 	}
 }
 
@@ -501,6 +512,19 @@ func (f *Fake) Exec(_ context.Context, name string, argv []string, opt incus.Exe
 	f.Execs = append(f.Execs, argv)
 	if f.ExecFunc != nil {
 		return f.ExecFunc(name, argv, opt)
+	}
+	// idev asks the container who a user is before running as them, so a fake
+	// container has to be able to answer. Nothing is invented: a name the test
+	// did not put in Users is one the container does not have, which is what
+	// getent says by exiting non-zero.
+	if len(argv) == 3 && argv[0] == "getent" && argv[1] == "passwd" {
+		entry, ok := f.Users[argv[2]]
+		if !ok {
+			return 2, nil
+		}
+		if opt.Stdout != nil {
+			_, _ = io.WriteString(opt.Stdout, entry+"\n")
+		}
 	}
 	return 0, nil
 }

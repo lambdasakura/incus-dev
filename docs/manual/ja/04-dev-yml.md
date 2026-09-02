@@ -543,10 +543,16 @@ shell:
   cwd: /workspace/src  # 作業ディレクトリ。既定は workspace.target
 ```
 
-`user` に数値uidを指定した場合はそのままIncusへ渡す。ユーザー名の場合は
-コンテナ内で `su` を使って切り替える（Incusのexecはuidしか受け付けないため）。
+`user` は名前でもuidでもよい。Incusのexecは数値しか受け付けないため、
+idevはコンテナ内で1度だけ `getent passwd` を実行し、得られたuid/gidで実行する。
+`HOME` / `USER` / `LOGNAME` / `SHELL` もログイン時と同じように設定する。
 指定したユーザーはコンテナ内に存在している必要があるので、
 provisionで作成しておくこと。
+
+`su` では包まない。`su` はシェルを自分の子として起動するため、
+シェルは端末のセッションリーダーにならずフォアグラウンドプロセスグループを
+取れない。bashは `cannot set terminal process group` を出し、
+職制御の無いシェルになる。
 
 ---
 

@@ -985,9 +985,21 @@ shell:
   cwd: /workspace/src  # 作業ディレクトリ。既定は workspace.target
 ```
 
-`user` に数値uidを指定した場合はIncusのexecへそのまま渡す。
-ユーザー名の場合はコンテナ内で `su` を用いて切り替える
-（Incusのexecはuidしか受け付けないため）。
+`user` は名前でもuidでもよい。Incusのexecはuidしか受け付けないため、
+idevは実行前にコンテナ内で `getent passwd <user>` を1度実行し、
+uid・gid・home・shellを得てから、そのuid/gidで実行する。
+`HOME` / `USER` / `LOGNAME` / `SHELL` もそのとき設定する。
+
+**`su` で包まない。** `su` はコマンドを自分の子として起動するため、
+シェルはpty上のセッションリーダーにならず、端末のフォアグラウンドプロセス
+グループを取れない。bashは
+`cannot set terminal process group` と `no job control in this shell` を出し、
+職制御の無いシェルになる。この症状はイメージ依存で、
+util-linuxの `su`（Debian系）で起き、busyboxの `su`（Alpine）では起きない。
+
+uidに対応するpasswdエントリが無い場合は、そのuidで実行し、
+gidはIncusの既定（root）のままとする。idevが問い合わせる前の挙動と同じである。
+名前が見つからない場合はエラーとする。
 
 ---
 

@@ -748,6 +748,13 @@ func newExecRequest(argv []string, opt ExecOptions) (api.InstanceExecPost, error
 		}
 		req.User = uint32(uid)
 	}
+	if opt.Group != "" {
+		gid, err := strconv.ParseUint(opt.Group, 10, 32)
+		if err != nil {
+			return req, fmt.Errorf("exec group must be a numeric gid, got %q", opt.Group)
+		}
+		req.Group = uint32(gid)
+	}
 	return req, nil
 }
 

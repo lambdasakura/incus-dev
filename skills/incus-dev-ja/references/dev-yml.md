@@ -75,7 +75,7 @@ provision:                     # 本体
     make deps
   shell: /bin/bash       # 既定 /bin/sh
   cwd: /workspace        # 実行時の作業ディレクトリ
-  user: developer        # 数値uidはIncusへ、名前は su で切り替える
+  user: developer        # 名前でもuidでもよい。コンテナ内で解決して実行する
   env:                   # 追加の環境変数。値は表示時に隠される
     CGO_ENABLED: "0"
 ```

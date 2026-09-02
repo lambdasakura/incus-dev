@@ -153,7 +153,7 @@ idev exec --user root -- apt-get install -y tcpdump
 その変更が他の全員へ及ぶという意味で釣り合わない。
 
 値の解釈は `shell.user` と同じ（数値ならuidとして扱い、そうでなければ
-`su` を用いる。3.14）。フラグを与えない場合は `shell.user` に従う。
+コンテナ内で解決する。3.14）。フラグを与えない場合は `shell.user` に従う。
 
 `shell.user` が設定されている状態でinstanceの既定ユーザーへ戻す手段は
 `--user root` である。空文字を「既定へ戻す」の意味に使わない。

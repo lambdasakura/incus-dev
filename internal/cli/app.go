@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -520,11 +521,19 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool, opt 
 	if len(argv) == 0 {
 		argv = []string{sh.Command}
 	}
-	argv, user := asUser(argv, sh)
+
+	var who shellUser
+	if sh.User != "" {
+		if who, err = a.resolveShellUser(ctx, sh.User); err != nil {
+			return err
+		}
+	}
 
 	exec := incus.ExecOptions{
-		Cwd:  sh.Cwd,
-		User: user,
+		Cwd:       sh.Cwd,
+		User:      who.UID,
+		Group:     who.GID,
+		PublicEnv: who.env(),
 		// Allocating a pseudo-terminal when nothing is attached to one puts
 		// carriage returns into the output and breaks pipes and redirects.
 		TTY:    tty,
@@ -550,33 +559,57 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool, opt 
 	return nil
 }
 
-// asUser returns the argv that runs as the given user, and the user to pass to
-// Incus.
-//
-// The Incus exec API only accepts a uid, so a user name is switched to with su
-// inside the container, exactly as a run step does it.
-func asUser(argv []string, sh config.Shell) (out []string, user string) {
-	if sh.User == "" {
-		return argv, ""
-	}
-	if _, err := strconv.Atoi(sh.User); err == nil {
-		return argv, sh.User
-	}
-
-	return []string{"su", "-s", sh.Command, sh.User, "-c", shellCommand(argv)}, ""
+// shellUser is what the container knows about the user to run as.
+type shellUser struct {
+	Name, UID, GID, Home, Shell string
 }
 
-// shellCommand renders an argv as one string for a shell to run.
-//
-// su -c takes a single string, so the words have to be quoted rather than
-// joined: an argument holding a space or a shell metacharacter would
-// otherwise be re-split inside the container and run as something else.
-func shellCommand(argv []string) string {
-	quoted := make([]string, len(argv))
-	for i, arg := range argv {
-		quoted[i] = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+// env is what a login would have set, which idev has to set itself.
+func (u shellUser) env() map[string]string {
+	return map[string]string{
+		"HOME": u.Home, "USER": u.Name, "LOGNAME": u.Name, "SHELL": u.Shell,
 	}
-	return strings.Join(quoted, " ")
+}
+
+// resolveShellUser looks shell.user up inside the container.
+//
+// The command runs as the user itself rather than under su. su starts it as
+// its own child, so it is not the session leader on the pty and cannot take
+// the terminal's foreground process group: bash reports "cannot set terminal
+// process group" and runs without job control. Incus runs the process as the
+// user, which leaves it owning the terminal -- but then everything su used to
+// arrange has to be arranged here, which is what this reads.
+//
+// A name or a uid: getent takes either, and the gid, home and shell are only
+// on the passwd entry whichever was written.
+func (a *App) resolveShellUser(ctx context.Context, name string) (shellUser, error) {
+	var out bytes.Buffer
+	code, err := a.client.Exec(ctx, a.instance, []string{"getent", "passwd", name},
+		incus.ExecOptions{Stdout: &out, Stderr: io.Discard})
+
+	if err != nil || code != 0 || strings.TrimSpace(out.String()) == "" {
+		// A uid with no passwd entry still names a uid to run as. Incus puts
+		// it in root's group, which is what idev did before it asked at all.
+		if _, numeric := strconv.Atoi(name); numeric == nil {
+			return shellUser{Name: name, UID: name}, nil
+		}
+		if err != nil {
+			return shellUser{}, fmt.Errorf("look up shell.user %q in %s: %w", name, a.instance, err)
+		}
+		return shellUser{}, fmt.Errorf("shell.user %q does not exist in %s; "+
+			"create it during provisioning, or give a uid", name, a.instance)
+	}
+
+	// name:password:uid:gid:gecos:home:shell
+	fields := strings.Split(strings.TrimSpace(out.String()), ":")
+	if len(fields) < 7 {
+		return shellUser{}, fmt.Errorf("look up shell.user %q in %s: getent returned %q",
+			name, a.instance, out.String())
+	}
+	return shellUser{
+		Name: fields[0], UID: fields[2], GID: fields[3],
+		Home: fields[5], Shell: fields[6],
+	}, nil
 }
 
 // Validate reports that the configuration is valid. Loading already checked it.

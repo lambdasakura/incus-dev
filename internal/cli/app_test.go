@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1433,21 +1434,15 @@ shell:
   user: developer
   command: /bin/bash
 `
+	// The argv is the same either way: which user it runs as is decided by
+	// the lookup, not by wrapping the command.
 	tests := []struct {
 		name string
 		opt  cli.ShellOptions
-		want []string
+		want string
 	}{
-		{
-			"the declared user by default",
-			cli.ShellOptions{},
-			[]string{"su", "-s", "/bin/bash", "developer", "-c", "'/bin/bash'"},
-		},
-		{
-			"overridden for this run",
-			cli.ShellOptions{User: "root"},
-			[]string{"su", "-s", "/bin/bash", "root", "-c", "'/bin/bash'"},
-		},
+		{"the declared user by default", cli.ShellOptions{}, "developer"},
+		{"overridden for this run", cli.ShellOptions{User: "root"}, "root"},
 	}
 
 	for _, tt := range tests {
@@ -1459,15 +1454,26 @@ shell:
 				Config: map[string]string{"user.incus-dev.project": "example-project"},
 			})
 
+			client.Users["root"] = "root:x:0:0::/root:/bin/bash"
+
+			var askedFor string
 			var got []string
-			client.ExecFunc = func(_ string, argv []string, _ incus.ExecOptions) (int, error) {
+			client.ExecFunc = func(_ string, argv []string, opt incus.ExecOptions) (int, error) {
+				if len(argv) > 0 && argv[0] == "getent" {
+					askedFor = argv[2]
+					_, _ = io.WriteString(opt.Stdout, client.Users[argv[2]]+"\n")
+					return 0, nil
+				}
 				got = argv
 				return 0, nil
 			}
 			if err := app.Shell(context.Background(), nil, tt.opt); err != nil {
 				t.Fatalf("Shell() error = %v", err)
 			}
-			if diff := cmp.Diff(tt.want, got); diff != "" {
+			if askedFor != tt.want {
+				t.Errorf("looked up %q, want %q", askedFor, tt.want)
+			}
+			if diff := cmp.Diff([]string{"/bin/bash"}, got); diff != "" {
 				t.Errorf("argv mismatch (-want +got):\n%s", diff)
 			}
 		})
@@ -1493,5 +1499,63 @@ func TestExecUserOverrideAcceptsAUID(t *testing.T) {
 	}
 	if got.User != "1000" {
 		t.Errorf("ExecOptions.User = %q, want the uid passed through", got.User)
+	}
+}
+
+// shell.user given as a name runs as that user, not through su.
+//
+// su starts the shell as its own child, so the shell is not the session leader
+// on the pty and cannot take the terminal's foreground process group: bash
+// says "cannot set terminal process group" and turns job control off. Incus
+// runs the process as the user itself, which leaves it owning the terminal --
+// but then idev has to supply what su was supplying, the group and the
+// environment.
+func TestShellUserRunsAsTheUserRatherThanThroughSu(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+`
+shell:
+  user: developer
+  command: /bin/bash
+`)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
+	})
+
+	var ran [][]string
+	var opts []incus.ExecOptions
+	client.ExecFunc = func(_ string, argv []string, opt incus.ExecOptions) (int, error) {
+		ran = append(ran, argv)
+		opts = append(opts, opt)
+		if len(argv) > 0 && argv[0] == "getent" {
+			_, _ = io.WriteString(opt.Stdout, "developer:x:1001:1002::/home/developer:/bin/bash\n")
+		}
+		return 0, nil
+	}
+
+	if err := app.Shell(context.Background(), nil, cli.ShellOptions{}); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	last := ran[len(ran)-1]
+	if len(last) > 0 && last[0] == "su" {
+		t.Fatalf("argv = %v, want the shell run directly rather than under su", last)
+	}
+	if diff := cmp.Diff([]string{"/bin/bash"}, last); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	}
+
+	opt := opts[len(opts)-1]
+	if opt.User != "1001" || opt.Group != "1002" {
+		t.Errorf("User/Group = %q/%q, want 1001/1002: without the group the "+
+			"process runs in root's", opt.User, opt.Group)
+	}
+	for k, want := range map[string]string{
+		"HOME": "/home/developer", "USER": "developer",
+		"LOGNAME": "developer", "SHELL": "/bin/bash",
+	} {
+		if got := opt.PublicEnv[k]; got != want {
+			t.Errorf("%s = %q, want %q: su used to set this", k, got, want)
+		}
 	}
 }
