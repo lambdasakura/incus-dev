@@ -14,7 +14,7 @@ runtime:
 
 project:
   name: my-project                 # required. the instance name is derived from it
-  scope: name                      # optional. name (default) | path | branch
+  scope: name                      # optional. path (default) | name | branch
 
 instance:
   image: images:ubuntu/24.04       # required
@@ -103,32 +103,41 @@ characters). It is normalised to letters, digits and hyphens for the instance
 name.
 
 That normalisation lower-cases the name and turns `.` and `_` into `-`, so
-`My.Project`, `my_project` and `my-project` all ask for `dev-my-project`. Only
-the first to run gets it; the others are refused, because two projects cannot
-share one instance. Writing the name in the form it will take avoids the
-surprise.
+`My.Project`, `my_project` and `my-project` all ask for the same instance name.
+Under the default `scope: path` that only collides when they sit in one
+directory; under `scope: name` it always does, and then only the first to run
+gets the instance while the others are refused, because two projects cannot
+share one. Writing the name in the form it will take avoids the surprise.
 
 If you work on several projects on one machine, keep the names distinct.
 
 ### `scope`
 
-If you clone the same project into several places, or want a separate
-environment per branch, you can choose how instance names are distinguished.
+How instance names are distinguished, which decides when two directories share
+an environment and when they get one each.
 
 ```yaml
 project:
   name: my-project
-  scope: path        # name (default) | path | branch
+  scope: name        # path (default) | name | branch
 ```
 
 | Value | Instance name | Use |
 | --- | --- | --- |
-| `name` (default) | `dev-my-project` | one shared environment |
-| `path` | `dev-my-project-cb958c73` | one per checkout |
+| `path` (default) | `dev-my-project-cb958c73` | one environment per checkout |
+| `name` | `dev-my-project` | one environment for the project, wherever it is |
 | `branch` | `dev-my-project-feature-x` | one per branch (requires Git) |
 
-Changing the default would turn existing environments into different ones, so
-the name only changes when you set this explicitly.
+The default is `path` because cloning one repository into two places is
+ordinary, and under `name` the two share a single instance: `/workspace` in
+the container is whichever checkout ran `up` last, so `idev shell` from the
+other one edits files that are not its own. idev warns when it notices, but
+not sharing is better than being warned about sharing.
+
+Pick `name` when one environment per project is what you want and you would
+rather have the shorter instance name. Note that `path` follows the directory,
+not the project: moving the checkout gives a different name, and the old
+environment is left behind (`idev up` says so and names the `incus delete`).
 
 ---
 

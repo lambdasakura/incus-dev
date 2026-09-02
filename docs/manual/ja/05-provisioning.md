@@ -23,7 +23,7 @@ provision[0] → provision[1] → ...
 失敗したステップは位置と名前で特定できる。
 
 ```text
-[idev] error: provision step 2/3 in dev-my-project: install deps: exit 1: exited with code 1
+[idev] error: provision step 2/3 in dev-my-project-cb958c73: install deps: exit 1: exited with code 1
 ```
 
 ---
@@ -135,7 +135,7 @@ all:
     idev:
       hosts:
         dev:
-          ansible_host: dev-my-project
+          ansible_host: dev-my-project-cb958c73
           ansible_connection: community.general.incus
           ansible_incus_remote: local
           ansible_incus_project: default
@@ -241,7 +241,7 @@ provision:
 
 ```yaml
 idev_project_name: my-project
-idev_instance: dev-my-project
+idev_instance: dev-my-project-cb958c73
 idev_workspace: /workspace
 idev_workspace_source: /home/you/src/my-project
 idev_incus_project: default

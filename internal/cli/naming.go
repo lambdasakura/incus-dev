@@ -16,8 +16,8 @@ type branchFunc func() (string, error)
 // instanceNameFor derives the instance name according to project.scope
 // (spec 05-incus.md 5.1).
 //
-// The default is the project name alone, as before. Several checkouts on one
-// machine can be told apart by path or by branch.
+// The default is path, which gives one instance per checkout. name puts every
+// checkout of a project on one instance, and branch gives one per branch.
 func instanceNameFor(cfg *config.Config, branch branchFunc) (string, error) {
 	switch cfg.Project.ScopeOrDefault() {
 	case config.ScopePath:

@@ -35,7 +35,7 @@ func TestWorkspaceIDMapAuto(t *testing.T) {
 		if !strings.Contains(out, "shift") {
 			t.Errorf("output = %q, want it to say it fell back", out)
 		}
-		if got := incusOut(t, "config", "get", f.instance, "raw.idmap"); got != "" {
+		if got := incusOut(t, "config", "get", f.instanceName(), "raw.idmap"); got != "" {
 			t.Errorf("raw.idmap = %q, want it unset when it does not work", got)
 		}
 	}
@@ -105,7 +105,7 @@ func TestWorkspaceIDMapShift(t *testing.T) {
 
 	f.mustRun("up")
 
-	if got := incusOut(t, "config", "get", f.instance, "raw.idmap"); got != "" {
+	if got := incusOut(t, "config", "get", f.instanceName(), "raw.idmap"); got != "" {
 		t.Errorf("raw.idmap = %q, want it unset under shift", got)
 	}
 	if got := f.mustRun("shell", "--", "cat", "/workspace/src/marker.txt"); !strings.Contains(got, "hello from host") {
@@ -133,7 +133,7 @@ func TestWorkspaceIDMapRawRequiresHostSetup(t *testing.T) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Errorf("created the instance before the check: %q", got)
 	}
 }
@@ -300,10 +300,10 @@ func TestWorkspaceMapFormMountsEveryEntry(t *testing.T) {
 	if got := f.mustRun("shell", "--", "sh", "-c", "test -d /workspace && echo ok"); !strings.Contains(got, "ok") {
 		t.Errorf("main is not mounted at /workspace: %q", got)
 	}
-	if got := incusOut(t, "config", "device", "get", f.instance, "workspace", "path"); strings.TrimSpace(got) != "/workspace" {
+	if got := incusOut(t, "config", "device", "get", f.instanceName(), "workspace", "path"); strings.TrimSpace(got) != "/workspace" {
 		t.Errorf("the device %q is not main's mount: %q", "workspace", got)
 	}
-	if out, err := runIncus("config", "device", "get", f.instance, "main", "path"); err == nil {
+	if out, err := runIncus("config", "device", "get", f.instanceName(), "main", "path"); err == nil {
 		t.Errorf("a device named main exists (%q); main is applied as %q so an "+
 			"instance from an older idev is not remounted", out, "workspace")
 	}
@@ -319,7 +319,7 @@ func TestWorkspaceMapFormMountsEveryEntry(t *testing.T) {
 
 	// The mapping is instance-wide, so it reached both disks.
 	for _, device := range []string{"workspace", "extra"} {
-		if got := incusOut(t, "config", "device", "get", f.instance, device, "shift"); strings.TrimSpace(got) != "true" {
+		if got := incusOut(t, "config", "device", "get", f.instanceName(), device, "shift"); strings.TrimSpace(got) != "true" {
 			t.Errorf("device %s shift = %q, want the section's idmap applied to every mount",
 				device, got)
 		}

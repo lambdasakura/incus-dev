@@ -71,7 +71,7 @@ idev status --json
 ```json
 {
   "project": "my-project",
-  "instance": "dev-my-project",
+  "instance": "dev-my-project-cb958c73",
   "status": "Running",
   "exists": true,
   "managed": true,

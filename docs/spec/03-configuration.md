@@ -154,6 +154,8 @@ project:
   name: example-project
 ```
 
+### 3.5.1 name
+
 `name` は原則必須。
 
 Incus instance名生成などに利用する（[05-incus.md](05-incus.md) 参照）。
@@ -168,27 +170,41 @@ Incus instance名生成などに利用する（[05-incus.md](05-incus.md) 参照
 
 これを満たさない名前は `idev validate` が弾く。
 
-### scope
+### 3.5.2 scope
 
 同一マシンで複数のチェックアウトを扱う場合の、instance名の区別の仕方。
 
 ```yaml
 project:
   name: my-project
-  scope: path        # name（既定） | path | branch
+  scope: path        # path（既定） | name | branch
 ```
 
 | 値 | instance名 | 用途 |
 | --- | --- | --- |
-| `name`（既定） | `dev-my-project` | 従来どおり |
-| `path` | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
+| `path`（既定） | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
+| `name` | `dev-my-project` | 1マシンに1つで足り、名前を短く保ちたい |
 | `branch` | `dev-my-project-feature-x` | ブランチごとに分ける（Gitが必要） |
 
 `branch` はコミットが無いリポジトリでもブランチ名を解決する。
 detached HEADの場合はコミットの短縮ハッシュを使う。
 
-既定を変えると既存の環境が別物になってしまうため、
-明示的に指定した場合のみ名前が変わる。
+#### なぜ `path` が既定なのか
+
+1つのリポジトリを2箇所にチェックアウトするのは普通のことであり、
+`name` ではその2つが1つのinstanceを共有する。共有した結果として、
+コンテナ内の `/workspace` は最後に `up` を実行したチェックアウトを指し、
+もう一方から `idev shell` で触るファイルは自分のtreeではない。
+
+idevが「このworkspaceは別のチェックアウトのものである」と警告する仕組み
+（[04-cli.md](04-cli.md)、`user.incus-dev.root` の記録）は、
+すべてこの共有への対処として存在する。既定を `path` にすると
+その状況自体が起きない。
+
+`name` を選ぶ理由は、instance名を短く保てることと、
+チェックアウトを移動しても同じ環境を指し続けることである。
+`path` はパスのハッシュを持つため、`mv` すると別の名前になり、
+それまでの環境は `warnStrandedInstances` が報告する置き去りになる。
 
 ---
 

@@ -35,7 +35,7 @@ func TestValidate(t *testing.T) {
 		t.Errorf("validate output = %q", out)
 	}
 	// It changes nothing in Incus.
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Errorf("validate created an instance: %q", got)
 	}
 }
@@ -56,7 +56,7 @@ func TestUpCreatesRunningInstanceWithWorkspace(t *testing.T) {
 
 	f.mustRun("up")
 
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "ns"); !strings.Contains(got, "RUNNING") {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "ns"); !strings.Contains(got, "RUNNING") {
 		t.Fatalf("instance state = %q, want RUNNING", got)
 	}
 
@@ -66,7 +66,7 @@ func TestUpCreatesRunningInstanceWithWorkspace(t *testing.T) {
 	}
 
 	// The mark that says idev manages it.
-	if got := incusOut(t, "config", "get", f.instance, "user.incus-dev.project"); got != f.project {
+	if got := incusOut(t, "config", "get", f.instanceName(), "user.incus-dev.project"); got != f.project {
 		t.Errorf("user.incus-dev.project = %q, want %q", got, f.project)
 	}
 }
@@ -76,7 +76,7 @@ func TestStatusReportsRunningInstance(t *testing.T) {
 	f.mustRun("up")
 
 	out := f.mustRun("status")
-	for _, want := range []string{f.project, f.instance, "Running", "/workspace"} {
+	for _, want := range []string{f.project, f.instanceName(), "Running", "/workspace"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status = %q, want it to contain %q", out, want)
 		}
@@ -168,7 +168,7 @@ func TestProvisionRequiresExistingInstance(t *testing.T) {
 	if !strings.Contains(out, "idev up") {
 		t.Errorf("output = %q, want it to point at idev up", out)
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Errorf("provision created an instance: %q", got)
 	}
 }
@@ -188,7 +188,7 @@ func TestUpReappliesConfigWithoutRecreating(t *testing.T) {
 
 	f.mustRun("up")
 
-	if got := incusOut(t, "config", "get", f.instance, "limits.cpu"); got != "2" {
+	if got := incusOut(t, "config", "get", f.instanceName(), "limits.cpu"); got != "2" {
 		t.Errorf("limits.cpu = %q, want 2", got)
 	}
 	if got := f.mustRun("shell", "--", "cat", "/etc/idev-state"); !strings.Contains(got, "keep") {
@@ -207,7 +207,7 @@ func TestRebuildDiscardsInstanceState(t *testing.T) {
 	if _, err := f.run("shell", "--", "test", "-f", "/etc/idev-state"); err == nil {
 		t.Error("state inside the instance survived the rebuild")
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "ns"); !strings.Contains(got, "RUNNING") {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "ns"); !strings.Contains(got, "RUNNING") {
 		t.Errorf("state after the rebuild = %q, want RUNNING", got)
 	}
 }
@@ -219,7 +219,7 @@ func TestDestroyKeepsHostFiles(t *testing.T) {
 
 	f.mustRun("destroy", "--force")
 
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Errorf("the instance was not deleted: %q", got)
 	}
 	for _, path := range []string{
@@ -236,7 +236,7 @@ func TestDestroyKeepsHostFiles(t *testing.T) {
 func TestRefusesUnmanagedInstance(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 
-	if out, err := runIncus("create", testImage, f.instance); err != nil {
+	if out, err := runIncus("create", testImage, f.instanceName()); err != nil {
 		t.Fatalf("the setup failed: %v\n%s", err, out)
 	}
 
@@ -247,7 +247,7 @@ func TestRefusesUnmanagedInstance(t *testing.T) {
 	if out := f.mustFail("destroy", "--force"); !strings.Contains(out, "not managed by idev") {
 		t.Errorf("destroy output = %q", out)
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got == "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got == "" {
 		t.Error("deleted an unmanaged instance")
 	}
 }
@@ -264,7 +264,7 @@ func TestFailsWhenProfileMissing(t *testing.T) {
 	if !strings.Contains(out, "idev-nonexistent-profile") {
 		t.Errorf("output = %q, want it to name the missing profile", out)
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Errorf("created the instance before checking the profiles: %q", got)
 	}
 }
@@ -296,7 +296,7 @@ provision:
 `)
 	f.mustRun("up")
 
-	if got := incusOut(t, "config", "get", f.instance, "limits.cpu"); got != "1" {
+	if got := incusOut(t, "config", "get", f.instanceName(), "limits.cpu"); got != "1" {
 		t.Errorf("limits.cpu = %q", got)
 	}
 }
@@ -374,7 +374,7 @@ provision:
 	out := f.mustRun("up", "--dry-run")
 
 	for _, want := range []string{
-		"Create instance " + f.instance,
+		"Create instance " + f.instanceName(),
 		"Add device workspace",
 		"Start instance",
 		"Provision step 1/1: setup (run)",
@@ -383,7 +383,7 @@ provision:
 			t.Errorf("output =\n%s\nwant it to contain %q", out, want)
 		}
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Fatalf("an instance was created: %q", got)
 	}
 
@@ -404,7 +404,7 @@ volumes:
     size: 64MiB
 `)
 	t.Cleanup(func() {
-		_, _ = runIncus("storage", "volume", "delete", "default", f.instance+"-cache")
+		_, _ = runIncus("storage", "volume", "delete", "default", f.instanceName()+"-cache")
 	})
 
 	f.mustRun("up")
@@ -417,14 +417,14 @@ volumes:
 
 	// destroy keeps it.
 	f.mustRun("destroy", "--force")
-	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); !strings.Contains(out, f.instance+"-cache") {
+	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); !strings.Contains(out, f.instanceName()+"-cache") {
 		t.Error("destroy deleted the volume as well")
 	}
 
 	// Only --volumes deletes it.
 	f.mustRun("up")
 	f.mustRun("destroy", "--force", "--volumes")
-	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); strings.Contains(out, f.instance+"-cache") {
+	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); strings.Contains(out, f.instanceName()+"-cache") {
 		t.Error("--volumes did not delete the volume")
 	}
 }
@@ -445,7 +445,7 @@ provision:
 	if !strings.Contains(out, "API_TOKEN") || !strings.Contains(out, "IDEV_TEST_TOKEN") {
 		t.Errorf("output = %q, want the missing secret reported", out)
 	}
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "n"); got != "" {
 		t.Error("created the instance despite the secret not resolving")
 	}
 
@@ -499,7 +499,7 @@ func TestIPReturnsTheAddressTheDaemonReports(t *testing.T) {
 		Address string `json:"address"`
 		Scope   string `json:"scope"`
 	}
-	raw := incusOut(t, "query", "/1.0/instances/"+f.instance+"/state")
+	raw := incusOut(t, "query", "/1.0/instances/"+f.instanceName()+"/state")
 	var state struct {
 		Network map[string]struct {
 			Addresses []struct {
@@ -533,7 +533,7 @@ func TestIPReturnsTheAddressTheDaemonReports(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("idev ip = %q, which the daemon does not report for %s: %+v",
-			address, f.instance, reported)
+			address, f.instanceName(), reported)
 	}
 
 	// And status shows it, in the row that says so.

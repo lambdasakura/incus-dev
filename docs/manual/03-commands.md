@@ -40,15 +40,17 @@ idev shell -- sh -c 'exit 42'; echo $?   # 42
 
 ### Instance names
 
-The instance is named `dev-<project name>`. Anything but letters, digits and
-hyphens is normalised away.
-
-If you clone the same project into several places, tell them apart with
-`project.scope` in `dev.yml` (`path` or `branch`).
+The instance is named `dev-<project name>-<hash of the checkout's path>`, so
+each checkout of a project gets its own environment. Anything but letters,
+digits and hyphens is normalised away.
 
 ```text
-project.name: my.project_1   →   instance: dev-my-project-1
+project.name: my.project_1   →   instance: dev-my-project-1-cb958c73
 ```
+
+`project.scope` in `dev.yml` decides the suffix: `path` (the default), `name`
+for one environment per project wherever it is, or `branch` for one per branch
+(4.4).
 
 - Names longer than 63 characters are truncated
 - A name that normalises to nothing (all punctuation, say) is distinguished by
@@ -248,7 +250,7 @@ idev status --json
 ```json
 {
   "project": "my-project",
-  "instance": "dev-my-project",
+  "instance": "dev-my-project-cb958c73",
   "status": "Running",
   "image": "images:ubuntu/24.04",
   "workspace": "/workspace",

@@ -2074,7 +2074,7 @@ func TestListStepsWriteError(t *testing.T) {
 func TestStatusShowsAdditionalFields(t *testing.T) {
 	out := &bytes.Buffer{}
 	cfg, err := config.Parse([]byte("schema: 1\nruntime:\n  version: \"1.0\"\n"+
-		"project:\n  name: example-project\ninstance:\n  image: images:ubuntu/24.04\n"), config.Options{})
+		"project:\n  name: example-project\n  scope: name\ninstance:\n  image: images:ubuntu/24.04\n"), config.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2978,7 +2978,9 @@ func TestDestroyDoesNotOfferToDeleteWhileTheInstanceIsThere(t *testing.T) {
 // one instance. The loser was told the instance "is not managed by idev",
 // which reads as someone having made it by hand.
 func TestUnmanagedErrorExplainsANameCollision(t *testing.T) {
-	cfg := mustParse(t, "schema: 1\nproject:\n  name: My.Project\n"+
+	// scope: name so the collision is between two project names rather than
+	// between two checkouts, which is the case being reported.
+	cfg := mustParse(t, "schema: 1\nproject:\n  name: My.Project\n  scope: name\n"+
 		"instance:\n  image: images:ubuntu/24.04\n")
 
 	client := incustest.New()

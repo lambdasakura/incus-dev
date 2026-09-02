@@ -25,6 +25,8 @@ const rootYAML = `
 schema: 1
 project:
   name: example-project
+  # See baseYAML: named so the instance name is stable across runs.
+  scope: name
 instance:
   image: images:ubuntu/24.04
 `

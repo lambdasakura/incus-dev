@@ -24,6 +24,10 @@ const baseYAML = `
 schema: 1
 project:
   name: example-project
+  # scope: name so the instance is dev-example-project and these tests can
+  # say so. The default is path, whose suffix is a hash of a temp directory;
+  # what the default derives is covered in the naming tests.
+  scope: name
 instance:
   image: images:ubuntu/24.04
 `
@@ -1383,4 +1387,41 @@ func TestStatusShowsAddresses(t *testing.T) {
 			}
 		}
 	})
+}
+
+// up on a project that says nothing about scope creates one instance per
+// checkout (spec 03-configuration.md 3.5.2).
+func TestUpNamesTheInstanceAfterTheCheckoutByDefault(t *testing.T) {
+	yaml := "schema: 1\nproject:\n  name: example-project\n" +
+		"instance:\n  image: images:ubuntu/24.04\n"
+
+	rootA, rootB := t.TempDir(), t.TempDir()
+	appA, clientA, _ := newAppIn(t, rootA, yaml)
+	appB, clientB, _ := newAppIn(t, rootB, yaml)
+
+	if err := appA.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("Up() in the first checkout: %v", err)
+	}
+	if err := appB.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("Up() in the second checkout: %v", err)
+	}
+
+	if appA.InstanceName() == appB.InstanceName() {
+		t.Fatalf("both checkouts got %q; one of them would be working in the "+
+			"other's tree", appA.InstanceName())
+	}
+	for _, tt := range []struct {
+		app    *cli.App
+		client *incustest.Fake
+		root   string
+	}{{appA, clientA, rootA}, {appB, clientB, rootB}} {
+		inst, ok := tt.client.Instances[tt.app.InstanceName()]
+		if !ok {
+			t.Fatalf("%s was not created: %v", tt.app.InstanceName(), tt.client.Calls)
+		}
+		if got := inst.Devices["workspace"]["source"]; got != tt.root {
+			t.Errorf("%s mounts %q, want its own checkout %q",
+				tt.app.InstanceName(), got, tt.root)
+		}
+	}
 }

@@ -88,7 +88,7 @@ func TestRestartPendingConvergesAfterARevert(t *testing.T) {
 	if out := f.mustRun("up"); strings.Contains(out, "restart") {
 		t.Errorf("a reverted change still asked for a restart:\n%s", out)
 	}
-	if got := incusOut(t, "config", "get", f.instance, "user.incus-dev.restart-pending"); got != "" {
+	if got := incusOut(t, "config", "get", f.instanceName(), "user.incus-dev.restart-pending"); got != "" {
 		t.Errorf("restart-pending = %q, want it cleared", got)
 	}
 
@@ -98,16 +98,21 @@ func TestRestartPendingConvergesAfterARevert(t *testing.T) {
 	}
 }
 
-// Two checkouts of one project share an instance by design, and up repoints
-// the workspace at whichever ran last. What each command then says about the
-// other checkout's tree was wrong for three rounds running: the warning for
-// up was given to commands that remount nothing.
+// Under project.scope: name, two checkouts of one project share an instance,
+// and up repoints the workspace at whichever ran last. What each command then
+// says about the other checkout's tree was wrong for three rounds running: the
+// warning for up was given to commands that remount nothing.
+//
+// The default is path, so this is now something a project asks for. The
+// warnings still have to be right for the projects that do: sharing is exactly
+// when they matter.
 func TestWarningsForASecondCheckout(t *testing.T) {
-	first := newFixture(t, minimalYAML)
+	first := newFixture(t, strings.Replace(minimalYAML,
+		"  name: {{PROJECT}}", "  name: {{PROJECT}}\n  scope: name", 1))
 	first.mustRun("up")
 
 	// A second checkout of the same project: same dev.yml, another directory.
-	second := &fixture{t: t, root: t.TempDir(), project: first.project, instance: first.instance}
+	second := &fixture{t: t, root: t.TempDir(), project: first.project, instance: first.instanceName()}
 	body, err := os.ReadFile(filepath.Join(first.root, ".incus-dev", "dev.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -161,8 +166,8 @@ volumes:
 	f := newFixture(t, withTwo)
 	f.mustRun("up")
 
-	kept := f.instance + "-keep"
-	dropped := f.instance + "-gone"
+	kept := f.instanceName() + "-keep"
+	dropped := f.instanceName() + "-gone"
 	for _, v := range []string{kept, dropped} {
 		if out := incusOut(t, "storage", "volume", "list", "default", "--format", "csv"); !strings.Contains(out, v) {
 			t.Fatalf("volume %s was not created:\n%s", v, out)
@@ -200,11 +205,11 @@ func TestAnInstanceFromBeforeTheRecords(t *testing.T) {
 	// Roll it back to what an older idev left: the markers it had then, plus
 	// a config key and a device from a dev.yml that has since changed.
 	for _, key := range []string{"user.incus-dev.managed", "user.incus-dev.devices", "user.incus-dev.image"} {
-		if out, err := runIncus("config", "unset", f.instance, key); err != nil {
+		if out, err := runIncus("config", "unset", f.instanceName(), key); err != nil {
 			t.Fatalf("incus config unset %s: %v\n%s", key, err, out)
 		}
 	}
-	if out, err := runIncus("config", "set", f.instance, "limits.memory=512MiB"); err != nil {
+	if out, err := runIncus("config", "set", f.instanceName(), "limits.memory=512MiB"); err != nil {
 		t.Fatalf("incus config set: %v\n%s", err, out)
 	}
 
@@ -259,7 +264,7 @@ func TestUpFromAnImageTheDaemonHasNotCached(t *testing.T) {
 	}
 
 	f.mustRun("up")
-	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "s"); got != "RUNNING" {
+	if got := incusOut(t, "list", f.instanceName(), "--format", "csv", "-c", "s"); got != "RUNNING" {
 		t.Errorf("status = %q, want RUNNING", got)
 	}
 }

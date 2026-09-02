@@ -73,8 +73,11 @@ through is settled by the next one.
 Another project's environment, not one made by hand -- so do **not** delete it.
 The instance name drops what an Incus name cannot hold: it is lower-cased, and
 `.` and `_` become `-`. So `My.Project`, `my_project` and `my-project` all ask
-for `dev-my-project`, and the message says so when that is the cause. Rename one
-of the two projects.
+for the same base name, and the message says so when that is the cause. Rename
+one of the two projects.
+
+Under the default `project.scope: path` the suffix differs per directory, so
+this needs two projects in **one** directory, or `scope: name` on both.
 
 ### `incus profile(s) not found on this host: <name>`
 

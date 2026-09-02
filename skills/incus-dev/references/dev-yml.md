@@ -14,7 +14,7 @@ runtime:
 
 project:
   name: my-project             # required. the instance is named dev-<name>
-  scope: name                  # name (default) | path | branch
+  scope: name                  # path (default) | name | branch
 
 instance:
   image: images:ubuntu/24.04   # required
@@ -177,15 +177,19 @@ applied.
 
 ## `project.scope`
 
-Change this only when you clone the same repository into several places, or
-want a separate environment per branch. Changing the default turns existing
-environments into different ones.
+How instance names are distinguished, and so which directories share an
+environment.
 
-| Value | Instance name |
-| --- | --- |
-| `name` (default) | `dev-my-project` |
-| `path` | `dev-my-project-cb958c73` |
-| `branch` | `dev-my-project-feature-x` |
+| Value | Instance name | |
+| --- | --- | --- |
+| `path` (default) | `dev-my-project-cb958c73` | one per checkout |
+| `name` | `dev-my-project` | one per project, wherever it is |
+| `branch` | `dev-my-project-feature-x` | one per branch (requires Git) |
+
+Default `path`: under `name`, two checkouts of one repository share an
+instance, and `/workspace` is whichever ran `up` last. `path` follows the
+directory, so moving a checkout leaves the old environment behind — `idev up`
+says so and names the `incus delete`.
 
 ## Things to watch when writing it
 

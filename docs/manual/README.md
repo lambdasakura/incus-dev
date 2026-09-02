@@ -49,6 +49,6 @@ The intent behind the design — the "why is it like this" — is recorded in th
 | `.incus-dev/` | The project's configuration directory |
 | `dev.yml` | The environment definition file (`.incus-dev/dev.yml`) |
 | workspace | The project working tree, mounted into the container |
-| instance | The Incus container idev creates. Named `dev-<project name>` |
+| instance | The Incus container idev creates. Named `dev-<project name>-<hash of the checkout>` by default (`project.scope`) |
 | provision | The steps that configure the inside of the container, declared in `dev.yml` |
 | bootstrap | The minimum preparation needed before provisioning can run |

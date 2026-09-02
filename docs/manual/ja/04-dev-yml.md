@@ -14,7 +14,7 @@ runtime:
 
 project:
   name: my-project                 # 必須。instance名の元になる
-  scope: name                      # 任意。name（既定）| path | branch
+  scope: name                      # 任意。path（既定）| name | branch
 
 instance:
   image: images:ubuntu/24.04       # 必須
@@ -101,8 +101,9 @@ instance名 `dev-<name>` の元になる。英数字で始まり、以降は
 instance名としては英数字とハイフンへ正規化される。
 
 この正規化は小文字化し、`.` と `_` を `-` にする。そのため
-`My.Project` / `my_project` / `my-project` はいずれも `dev-my-project` を要求する。
-先に起動したものだけがそれを得て、残りは拒否される。
+`My.Project` / `my_project` / `my-project` はいずれも同じinstance名を要求する。
+既定の `scope: path` では、それが衝突するのは同じディレクトリにある場合だけである。
+`scope: name` では必ず衝突し、先に起動したものだけがそれを得て残りは拒否される。
 2つのプロジェクトが1つのinstanceを共有することはできないためである。
 最初から正規化後の形で書いておくと迷わない。
 
@@ -110,22 +111,31 @@ instance名としては英数字とハイフンへ正規化される。
 
 ### `scope`
 
-同じプロジェクトを複数の場所に clone する、あるいはブランチごとに
-環境を分けたい場合、instance名の区別の仕方を選べる。
+instance名の区別の仕方。2つのディレクトリが環境を共有するか、
+それぞれ持つかがこれで決まる。
 
 ```yaml
 project:
   name: my-project
-  scope: path        # name（既定） | path | branch
+  scope: name        # path（既定） | name | branch
 ```
 
 | 値 | instance名 | 用途 |
 | --- | --- | --- |
-| `name`（既定） | `dev-my-project` | 1つの環境を共有する |
-| `path` | `dev-my-project-cb958c73` | チェックアウト先ごとに分ける |
+| `path`（既定） | `dev-my-project-cb958c73` | チェックアウト先ごとに環境を分ける |
+| `name` | `dev-my-project` | 場所によらずプロジェクトに1つ |
 | `branch` | `dev-my-project-feature-x` | ブランチごとに分ける（Gitが必要） |
 
-既定を変えると既存の環境が別物になるため、明示した場合のみ名前が変わる。
+既定が `path` なのは、1つのリポジトリを2箇所へcloneするのが普通のことであり、
+`name` ではその2つが1つのinstanceを共有するためである。共有すると、
+コンテナ内の `/workspace` は最後に `up` したチェックアウトを指すので、
+もう一方から `idev shell` で触るファイルは自分のtreeではない。
+idevは気づいた時点で警告するが、警告されるより共有しないほうがよい。
+
+プロジェクトに環境が1つで足り、instance名を短く保ちたい場合は `name` を選ぶ。
+`path` はプロジェクトではなくディレクトリに追従する点に注意する。
+チェックアウトを移動すると別の名前になり、それまでの環境は置き去りになる
+（`idev up` がそれを報告し、`incus delete` のコマンドを示す）。
 
 ---
 

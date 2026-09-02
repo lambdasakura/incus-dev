@@ -35,6 +35,10 @@ const minimal = `
 schema: 1
 project:
   name: example-project
+  # scope: name so the instance is dev-example-project and the tests below
+  # can say so. The default is path, whose suffix is a hash of a temp
+  # directory; naming itself is covered in the naming tests.
+  scope: name
 instance:
   image: images:ubuntu/24.04
 `
@@ -1803,5 +1807,19 @@ func TestWorkspaceMapFormRefusals(t *testing.T) {
 				t.Errorf("error = %q, want it to name %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// An omitted project.scope means path, so two checkouts of one repository do
+// not share an instance (spec 03-configuration.md 3.5.2).
+func TestScopeDefaultsToPath(t *testing.T) {
+	// Not through `minimal`: that fixture pins scope so the instance name is
+	// stable, which is the one thing this has to check without.
+	c := parse(t, "schema: 1\nproject:\n  name: example-project\n"+
+		"instance:\n  image: images:ubuntu/24.04\n")
+
+	if got := c.Project.ScopeOrDefault(); got != config.ScopePath {
+		t.Errorf("ScopeOrDefault() = %q, want %q: under %q both checkouts of a "+
+			"repository claim one instance", got, config.ScopePath, config.ScopeName)
 	}
 }

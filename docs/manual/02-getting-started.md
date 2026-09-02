@@ -33,7 +33,7 @@ idev validate
 ```text
 configuration is valid
 Project:    my-project
-Instance:   dev-my-project
+Instance:   dev-my-project-cb958c73
 Provision:  0 step(s)
 ```
 
@@ -47,9 +47,9 @@ idev up
 
 ```text
 [idev] Project: my-project
-[idev] Creating instance dev-my-project
+[idev] Creating instance dev-my-project-cb958c73
 [idev] Mounting workspace /home/you/src/my-project -> /workspace
-[idev] Starting instance dev-my-project
+[idev] Starting instance dev-my-project-cb958c73
 [idev] Development environment is ready
 ```
 
@@ -136,7 +136,7 @@ idev status
 
 ```text
 Project:    my-project
-Instance:   dev-my-project
+Instance:   dev-my-project-cb958c73
 Status:     Running
 Image:      images:ubuntu/24.04
 Workspace:  /home/you/src/my-project -> /workspace

@@ -39,14 +39,15 @@ idev shell -- sh -c 'exit 42'; echo $?   # 42
 
 ### instance名
 
-`dev-<プロジェクト名>` となる。英数字とハイフン以外は正規化される。
-
-同じプロジェクトを複数の場所に clone する場合は、`dev.yml` の
-`project.scope` で区別できる（`path` または `branch`）。
+`dev-<プロジェクト名>-<チェックアウト先パスのハッシュ>` となる。
+チェックアウトごとに別の環境になる。英数字とハイフン以外は正規化される。
 
 ```text
-project.name: my.project_1   →   instance: dev-my-project-1
+project.name: my.project_1   →   instance: dev-my-project-1-cb958c73
 ```
+
+接尾辞は `dev.yml` の `project.scope` で決まる。`path`（既定）のほか、
+場所によらずプロジェクトに1つなら `name`、ブランチごとなら `branch`（4.4）。
 
 - 63文字を超える場合は切り詰める
 - 正規化した結果が空になる名前（記号のみなど）は、
@@ -238,7 +239,7 @@ idev status --json
 ```json
 {
   "project": "my-project",
-  "instance": "dev-my-project",
+  "instance": "dev-my-project-cb958c73",
   "status": "Running",
   "image": "images:ubuntu/24.04",
   "workspace": "/workspace",

@@ -76,9 +76,12 @@ func TestMain(m *testing.M) {
 
 // fixture is a project directory for a test.
 type fixture struct {
-	t        *testing.T
-	root     string
-	project  string
+	t       *testing.T
+	root    string
+	project string
+	// instance is derived on first use, not at construction: deriving it
+	// asks idev, and some fixtures hold a dev.yml that is deliberately
+	// invalid and has no answer to give.
 	instance string
 }
 
@@ -91,9 +94,8 @@ func newFixture(t *testing.T, devYAML string) *fixture {
 
 	root := t.TempDir()
 	project := fmt.Sprintf("idev-it-%d", time.Now().UnixNano()%1e9)
-	instance := "dev-" + project
 
-	f := &fixture{t: t, root: root, project: project, instance: instance}
+	f := &fixture{t: t, root: root, project: project}
 	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), render(f, devYAML))
 	writeFile(t, filepath.Join(root, "src", "marker.txt"), "hello from host\n")
 
@@ -110,7 +112,11 @@ func render(f *fixture, devYAML string) string {
 }
 
 func (f *fixture) cleanup() {
-	_ = exec.Command("incus", "delete", "--force", f.instance).Run()
+	// Derived rather than read: a test may have created the instance without
+	// ever asking for its name, and leaving it behind costs the next run.
+	if name, ok := f.deriveInstanceName(); ok {
+		_ = exec.Command("incus", "delete", "--force", name).Run()
+	}
 }
 
 // run executes idev and returns its combined output.
@@ -142,6 +148,42 @@ func (f *fixture) runSplit(args ...string) (stdout, stderr string, err error) {
 	cmd.Stderr = &errOut
 	err = cmd.Run()
 	return out.String(), errOut.String(), err
+}
+
+// instanceName is what idev calls this project's instance.
+//
+// Asked of idev rather than computed here: project.scope decides it, and a
+// test that reimplements the rule agrees with itself rather than with idev.
+// status names it without creating anything.
+func (f *fixture) instanceName() string {
+	f.t.Helper()
+
+	name, ok := f.deriveInstanceName()
+	if !ok {
+		f.t.Fatalf("idev could not name this project's instance:\n%s",
+			f.mustRun("status"))
+	}
+	return name
+}
+
+// deriveInstanceName is instanceName without failing the test, for the cleanup
+// that runs even when the fixture's dev.yml never became valid.
+func (f *fixture) deriveInstanceName() (string, bool) {
+	if f.instance != "" {
+		return f.instance, true
+	}
+
+	out, err := f.run("status")
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if name, ok := strings.CutPrefix(line, "Instance:"); ok {
+			f.instance = strings.TrimSpace(name)
+			return f.instance, f.instance != ""
+		}
+	}
+	return "", false
 }
 
 // mustRun requires the idev run to succeed.

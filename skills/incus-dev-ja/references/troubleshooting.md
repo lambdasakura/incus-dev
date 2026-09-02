@@ -68,8 +68,12 @@ instanceの読み取りから決めるため、読み取り以降に変更され
 
 手動で作られたinstanceではなく、**別プロジェクトの環境**である。削除してはならない。
 instance名はIncusが扱えない文字を落とす。小文字化され、`.` と `_` は `-` になる。
-そのため `My.Project` / `my_project` / `my-project` はいずれも `dev-my-project` を
+そのため `My.Project` / `my_project` / `my-project` はいずれも同じ基底名を
 要求する。原因がこれである場合、メッセージがそう述べる。どちらかのプロジェクト名を変える。
+
+既定の `project.scope: path` では接尾辞がディレクトリごとに変わるため、
+これが起きるのは2つのプロジェクトが**同じディレクトリ**にある場合か、
+両方が `scope: name` の場合である。
 
 ### `incus profile(s) not found on this host: <name>`
 

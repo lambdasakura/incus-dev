@@ -14,7 +14,7 @@ runtime:
 
 project:
   name: my-project             # 必須。instance名 dev-<name> の元
-  scope: name                  # name（既定） | path | branch
+  scope: name                  # path（既定） | name | branch
 
 instance:
   image: images:ubuntu/24.04   # 必須
@@ -173,14 +173,18 @@ device名は `-` で始められず `,` を含められない。キーは `-` �
 
 ## project.scope
 
-同じリポジトリを複数の場所にcloneする、あるいはブランチごとに
-環境を分けたいときだけ変える。既定を変えると既存の環境が別物になる。
+instance名の区別の仕方であり、どのディレクトリが環境を共有するかが決まる。
 
-| 値 | instance名 |
-| --- | --- |
-| `name`（既定） | `dev-my-project` |
-| `path` | `dev-my-project-cb958c73` |
-| `branch` | `dev-my-project-feature-x` |
+| 値 | instance名 | |
+| --- | --- | --- |
+| `path`（既定） | `dev-my-project-cb958c73` | チェックアウトごとに1つ |
+| `name` | `dev-my-project` | 場所によらずプロジェクトに1つ |
+| `branch` | `dev-my-project-feature-x` | ブランチごとに1つ（Gitが必要） |
+
+既定が `path` なのは、`name` では1つのリポジトリの2つのチェックアウトが
+instanceを共有し、`/workspace` が最後に `up` した側になるためである。
+`path` はディレクトリに追従するので、チェックアウトを移動すると
+それまでの環境は置き去りになる（`idev up` が報告し `incus delete` を示す）。
 
 ## 書くときの注意
 

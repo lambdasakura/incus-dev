@@ -46,6 +46,6 @@ idev shell
 | `.incus-dev/` | プロジェクト側の設定ディレクトリ |
 | `dev.yml` | 開発環境定義ファイル（`.incus-dev/dev.yml`） |
 | workspace | コンテナへマウントされるプロジェクトのworking tree |
-| instance | idevが作るIncusコンテナ。名前は `dev-<プロジェクト名>` |
+| instance | idevが作るIncusコンテナ。既定の名前は `dev-<プロジェクト名>-<チェックアウトのハッシュ>`（`project.scope`） |
 | provision | コンテナ内部を構成する手順。`dev.yml` に宣言する |
 | bootstrap | provisionを動かすための最小限の準備 |

@@ -98,9 +98,9 @@ type Runtime struct {
 type Scope string
 
 const (
-	// ScopeName uses the project name alone (the default).
+	// ScopeName uses the project name alone.
 	ScopeName Scope = "name"
-	// ScopePath distinguishes by the path of the checkout.
+	// ScopePath distinguishes by the path of the checkout (the default).
 	ScopePath Scope = "path"
 	// ScopeBranch distinguishes by the current Git branch.
 	ScopeBranch Scope = "branch"
@@ -110,14 +110,18 @@ const (
 type Project struct {
 	Name string `json:"name"`
 	// Scope is how several checkouts on one machine are told apart.
-	// The default is name: the project name alone, as before.
 	Scope Scope `json:"scope,omitempty"`
 }
 
 // ScopeOrDefault returns how names are distinguished.
+//
+// path by default: two checkouts of one repository on one machine are the
+// ordinary case, and under name they share a single instance. Everything idev
+// says about a workspace belonging to another checkout exists because of that
+// sharing (spec 03-configuration.md 3.5.2).
 func (p Project) ScopeOrDefault() Scope {
 	if p.Scope == "" {
-		return ScopeName
+		return ScopePath
 	}
 	return p.Scope
 }

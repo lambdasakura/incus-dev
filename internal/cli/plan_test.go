@@ -252,7 +252,8 @@ func TestInstanceNameScope(t *testing.T) {
 		branch string
 		want   string
 	}{
-		{"the name alone by default", "", "/home/u/a", "main", "dev-example-project"},
+		{"the checkout's path by default", "", "/home/u/a", "main",
+			"dev-example-project-" + incus.ShortHash("/home/u/a")},
 		{"name", "name", "/home/u/a", "main", "dev-example-project"},
 		{"branch", "branch", "/home/u/a", "feature/x", "dev-example-project-feature-x"},
 		{"branch, on the default branch", "branch", "/home/u/a", "main", "dev-example-project-main"},
