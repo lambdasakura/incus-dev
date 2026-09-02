@@ -255,7 +255,7 @@ const devkitEnvPrefix = "DEVKIT_"
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func validateInstance(c *Config, ps *problems) {
-	// 位置引数としてincusコマンドへ渡す値は、フラグと解釈されうる。
+	// "-" で始まるimage参照は、remoteと名前への分解が成り立たない。
 	if strings.HasPrefix(c.Instance.Image, "-") {
 		ps.add("instance.image", "must not start with %q", "-")
 	}
@@ -269,8 +269,8 @@ func validateInstance(c *Config, ps *problems) {
 		}
 	}
 
-	// "-" で始まるキーはincusコマンドのフラグとして解釈されうる。
-	// "=" を含むキーは key=value の分割位置がずれる。
+	// Incusが受け付けないキー形式を、適用する前に知らせる。
+	// "-" で始まるキー、"=" を含むキーはいずれも拒否される。
 	for _, k := range sortedKeys(c.Instance.Config) {
 		if strings.HasPrefix(k, "-") {
 			ps.add("instance.config."+k, "key must not start with %q", "-")

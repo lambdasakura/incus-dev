@@ -633,17 +633,20 @@ func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 				Config: map[string]string{"user.incus-devkit.project": "example-project"},
 			})
 
-			var gotTTY bool
+			var got incus.ExecOptions
 			client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
-				gotTTY = opt.TTY
+				got = opt
 				return 0, nil
 			}
 
+			in, out, errOut := strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}
 			app := cli.NewApp(cli.AppOptions{
 				Config:      cfg,
 				Client:      client,
 				Runner:      &runnertest.Fake{},
-				Out:         &bytes.Buffer{},
+				In:          in,
+				Out:         out,
+				ErrOut:      errOut,
 				Interactive: tt.interactive,
 				CheckIDMap:  func(int, int) error { return nil },
 			})
@@ -651,8 +654,12 @@ func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 			if err := app.Shell(context.Background(), []string{"pwd"}); err != nil {
 				t.Fatalf("Shell() error = %v", err)
 			}
-			if gotTTY != tt.wantTTY {
-				t.Errorf("TTY = %v, want %v", gotTTY, tt.wantTTY)
+			if got.TTY != tt.wantTTY {
+				t.Errorf("TTY = %v, want %v", got.TTY, tt.wantTTY)
+			}
+			// 端末を割り当てる場合も、入出力はIncusへ渡す必要がある
+			if got.Stdin != in || got.Stdout != out || got.Stderr != errOut {
+				t.Errorf("入出力が渡されていない: %+v", got)
 			}
 		})
 	}
@@ -838,5 +845,41 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 	}
 	if got := gotEnv["DEVKIT_INCUS_PROJECT"]; got != "default" {
 		t.Errorf("DEVKIT_INCUS_PROJECT = %q, want default", got)
+	}
+}
+
+// 擬似端末を割り当てる場合、ホストの TERM をコンテナへ渡すこと。
+// これが無いと vim / less などが端末を判別できない。
+func TestShellPassesTerm(t *testing.T) {
+	cfg := loadTestConfig(t, baseYAML)
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+	})
+
+	var got incus.ExecOptions
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		got = opt
+		return 0, nil
+	}
+
+	app := cli.NewApp(cli.AppOptions{
+		Config:      cfg,
+		Client:      client,
+		Runner:      &runnertest.Fake{},
+		In:          strings.NewReader(""),
+		Out:         &bytes.Buffer{},
+		Interactive: true,
+		Term:        "xterm-256color",
+		CheckIDMap:  func(int, int) error { return nil },
+	})
+
+	if err := app.Shell(context.Background(), nil); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+	if got.Term != "xterm-256color" {
+		t.Errorf("Term = %q, want xterm-256color", got.Term)
 	}
 }

@@ -35,6 +35,8 @@ type AppOptions struct {
 	// Interactive は標準入出力が端末に接続されているか。
 	// idev shell で擬似端末を割り当てるかの判断に使う。
 	Interactive bool
+	// Term はホスト端末の種類（TERM）。擬似端末を割り当てる際にコンテナへ渡す。
+	Term string
 
 	Remote       string
 	IncusProject string
@@ -67,6 +69,7 @@ type App struct {
 	log         *slog.Logger
 	instance    string
 	interactive bool
+	term        string
 
 	remote       string
 	incusProject string
@@ -136,6 +139,7 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		errOut:       errOut,
 		log:          log,
 		interactive:  opt.Interactive,
+		term:         opt.Term,
 		instance:     name,
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
@@ -426,12 +430,11 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 		User: user,
 		// 端末に接続されていない場合に擬似端末を割り当てると、
 		// 出力へCRが混入しパイプやリダイレクトが壊れる。
-		TTY: tty,
-	}
-	if !opt.TTY {
-		opt.Stdin = a.in
-		opt.Stdout = a.out
-		opt.Stderr = a.errOut
+		TTY:    tty,
+		Term:   a.term,
+		Stdin:  a.in,
+		Stdout: a.out,
+		Stderr: a.errOut,
 	}
 
 	code, err := a.client.Exec(ctx, a.instance, argv, opt)
@@ -450,9 +453,9 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 	return nil
 }
 
-// asUser は指定ユーザーで実行するためのargvと、incusへ渡すユーザー指定を返す。
+// asUser は指定ユーザーで実行するためのargvと、Incusへ渡すユーザー指定を返す。
 //
-// incus exec --user はUIDのみを受け付けるため、ユーザー名の場合は
+// Incusのexecはuidしか受け付けないため、ユーザー名の場合は
 // コンテナ内で su を使って切り替える（run ステップと同じ扱い）。
 func asUser(argv []string, sh config.Shell) (out []string, user string) {
 	if sh.User == "" {

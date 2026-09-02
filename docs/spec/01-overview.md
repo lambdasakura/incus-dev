@@ -125,7 +125,7 @@ provisioning用のスクリプトはコンテナ内から直接参照できる�
 idev CLI
    │
    ▼
-Incus CLI / Incus daemon
+Incus API (daemon)
    │
    ▼
 Container

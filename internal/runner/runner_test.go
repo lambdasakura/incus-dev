@@ -166,28 +166,11 @@ func TestRunRespectsContextCancellation(t *testing.T) {
 }
 
 func TestCommandString(t *testing.T) {
-	c := runner.Command{Name: "incus", Args: []string{"exec", "dev-x", "--", "sh", "-c", "echo hi"}}
+	c := runner.Command{Name: "ansible-playbook", Args: []string{"-i", "inv", "--", "sh", "-c", "echo hi"}}
 	got := c.String()
-	want := `incus exec dev-x -- sh -c "echo hi"`
+	want := `ansible-playbook -i inv -- sh -c "echo hi"`
 	if got != want {
 		t.Errorf("String() = %q, want %q", got, want)
-	}
-}
-
-func TestRunInteractivePassesThroughStdio(t *testing.T) {
-	r := runner.New()
-
-	// Interactive では親プロセスの標準入出力を引き継ぐ。
-	// ここでは何も出力しないコマンドで、経路が動作することのみ確認する。
-	res, err := r.Run(context.Background(), runner.Command{
-		Name:        "true",
-		Interactive: true,
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if res.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", res.ExitCode)
 	}
 }
 
@@ -227,26 +210,26 @@ func TestRunStartFailureIsNotExitError(t *testing.T) {
 }
 
 func TestExitErrorWithoutLabel(t *testing.T) {
-	err := &runner.ExitError{Cmd: "incus list", ExitCode: 1}
+	err := &runner.ExitError{Cmd: "ansible-playbook site.yml", ExitCode: 1}
 
 	got := err.Error()
-	if !strings.Contains(got, "incus list") || !strings.Contains(got, "exit code 1") {
+	if !strings.Contains(got, "ansible-playbook site.yml") || !strings.Contains(got, "exit code 1") {
 		t.Errorf("Error() = %q", got)
 	}
 }
 
 func TestCommandStringWithoutArgs(t *testing.T) {
-	if got := (runner.Command{Name: "incus"}).String(); got != "incus" {
-		t.Errorf("String() = %q, want %q", got, "incus")
+	if got := (runner.Command{Name: "ansible-playbook"}).String(); got != "ansible-playbook" {
+		t.Errorf("String() = %q, want %q", got, "ansible-playbook")
 	}
 }
 
 // Secretを含みうる引数は表示用文字列でマスクする（仕様 04-cli.md 4.10）
 func TestCommandStringRedactsMarkedArgs(t *testing.T) {
 	c := runner.Command{
-		Name:   "incus",
-		Args:   []string{"exec", "dev-x", "--env", "TOKEN=s3cret", "--env", "MODE=debug", "--", "true"},
-		Redact: []int{3, 5},
+		Name:   "ansible-playbook",
+		Args:   []string{"site.yml", "-e", "token=s3cret", "-e", "mode=debug"},
+		Redact: []int{2, 4},
 	}
 
 	got := c.String()
@@ -254,7 +237,7 @@ func TestCommandStringRedactsMarkedArgs(t *testing.T) {
 	if strings.Contains(got, "s3cret") || strings.Contains(got, "debug") {
 		t.Errorf("String() = %q, 値を含めないこと", got)
 	}
-	for _, want := range []string{"TOKEN=***", "MODE=***", "incus exec dev-x"} {
+	for _, want := range []string{"token=***", "mode=***", "ansible-playbook site.yml"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("String() = %q, %q を含むこと", got, want)
 		}
@@ -362,23 +345,5 @@ func TestCollapseMultilineArgs(t *testing.T) {
 				t.Errorf("String() = %q, %q を含むこと", got, tt.want)
 			}
 		})
-	}
-}
-
-// 対話実行では、親のcontextがキャンセルされても子プロセスを殺さない。
-// そうしないと、コンテナ内コマンドを止めようとしたCtrl-Cでシェルごと落ちる。
-func TestInteractiveIgnoresContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	r := runner.New()
-
-	if _, err := r.Run(ctx, runner.Command{Name: "true", Interactive: true}); err != nil {
-		t.Errorf("Run() error = %v, 対話実行はcontextに追従しないこと", err)
-	}
-
-	// 非対話ではcontextに従う
-	if _, err := r.Run(ctx, runner.Command{Name: "true"}); err == nil {
-		t.Error("非対話実行はcontextに従うこと")
 	}
 }

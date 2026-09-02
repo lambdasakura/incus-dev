@@ -76,7 +76,8 @@ devkit管理下でない場合、明示的に失敗する。
 省略時は `["default"]` を使用する。
 
 明示的な空リストはProfileを一切適用しないことを意味する。
-実装は対象Incus versionの該当フラグ（例: `--no-profiles`）を用いる。
+実装は作成リクエストの `profiles` へ空リストを渡す
+（省略とは区別する必要があるため、`InstanceSpec.NoProfiles` で明示する）。
 
 この場合、Profileが提供していたroot diskとネットワークも失われるため、
 `instance.devices` で明示する必要がある（[03-configuration.md](03-configuration.md) 3.6.3）。
@@ -104,20 +105,20 @@ CPUやメモリも `limits.cpu` / `limits.memory` として素通しする。
 
 `instance.config` と `instance.devices` はinstance作成時に適用する。
 
-`incus create` の `-c` / `-d` フラグはProfile上に既にあるdeviceの
-上書きしか行えず、新規deviceを作成できない。このため作成時の指定は
-標準入力へYAMLで渡す。
+作成リクエスト（`api.InstancesPost`）へconfig・devices・profilesを載せ、
+一度の呼び出しで作る。作成後に設定し直すと、起動前にしか適用できない
+設定を扱えなくなるためである。
 
-```bash
-incus create <image> <name> -p <profile> <<'YAML'
-config:
-  limits.cpu: "8"
-devices:
-  workspace:
-    type: disk
-    source: /home/u/src/example
-    path: /workspace
-YAML
+```go
+req := api.InstancesPost{
+    Name: spec.Name,
+    Type: api.InstanceType(spec.Type),
+    InstancePut: api.InstancePut{
+        Config:   spec.Config,
+        Devices:  toAPIDevices(spec.Devices),
+        Profiles: spec.Profiles,
+    },
+}
 ```
 
 ### 5.4.3 適用タイミング
@@ -161,6 +162,11 @@ idev up --restart
 利用者の作業中プロセスを予期せず停止させてはならないため、
 再起動は明示的な指示があった場合のみ行う。
 
+停止も同じ理由で **正常停止を先に試みる**。ただし応答しないinstanceで
+固まらないよう待ち時間には上限（30秒）を設け、超えた場合は強制停止する。
+`idev destroy` / `idev rebuild` のように破棄が前提の場合はこの限りではなく、
+最初から強制停止してよい。
+
 対象は devkit が実際に変更・取り消したキーに限る。
 触れていないキーを含めると、何もしていないのに警告が出続けてしまう。
 
@@ -168,39 +174,30 @@ idev up --restart
 
 ## 5.5 Incus Project
 
-初期実装ではIncusの `default` projectを利用してよい。
+操作対象のIncus projectは、CLIの `--incus-project` → `dev.yml` の
+`incus.project` → `default` の順で決まる（[04-cli.md](04-cli.md) 4.0、
+[03-configuration.md](03-configuration.md) 3.15）。
 
-ただし内部APIではIncus projectを固定値として埋め込まない。
+決定した値は `incus.Target` として操作層へ渡し、接続時に
+`UseProject` で固定する。個々の操作でproject名を組み立てない。
 
-将来的に、
-
-```yaml
-incus:
-  project: development
-```
-
-のような設定を追加できる設計とする。
+devkitはIncus projectを作成しない。存在しないprojectを指定した場合、
+Incus側のエラーがそのまま利用者へ届く。
 
 ---
 
 ## 5.6 Incus Remote
 
-同様にlocal Incusをデフォルトとする。
+`--incus-remote` は `incus.Target` として操作層まで渡り、
+`incus` コマンドと同じ設定（`~/.config/incus/config.yml`）から
+接続先を解決する。省略時はその設定の既定remoteを使う。
 
-将来的には、
+ただし **remoteの利用は未検証である。** workspaceのbind mountは
+ホスト側のパスを前提とするため、remoteでは成立しない。
+共有方式そのものを決め直す必要があり、実際の要求が出てから設計する
+（[09-roadmap.md](09-roadmap.md)）。
 
-```yaml
-incus:
-  remote: dev-server
-```
-
-を扱える構造とする。
-
-初期実装でremote対応を実装する必要はないが、
-Incus操作層ではremoteを引数として受けられるようにすることが望ましい。
-
-remoteを利用する場合、workspaceのbind mountはホスト側パスを前提とするため
-成立しない点に注意する。remote対応時に扱いを定義する。
+`dev.yml` 側での remote 指定は提供しない。
 
 ---
 
@@ -210,7 +207,7 @@ Incus関連処理を `internal/incus` へ集約する。
 
 CLI処理からIncusコマンド文字列を直接組み立てることを避ける。
 
-インターフェースとして最低限以下を定義する。
+インターフェースとして以下を定義する（`internal/incus/client.go`）。
 
 ```go
 package incus
@@ -220,26 +217,41 @@ type Client interface {
 
     CreateInstance(ctx context.Context, spec InstanceSpec) error
     StartInstance(ctx context.Context, name string) error
+    StopInstance(ctx context.Context, name string) error
     DeleteInstance(ctx context.Context, name string) error
 
     ApplyConfig(ctx context.Context, name string, cfg map[string]string) error
     UnsetConfig(ctx context.Context, name string, keys []string) error
     ApplyDevices(ctx context.Context, name string, dev map[string]Device) error
+    RemoveDevices(ctx context.Context, name string, devices []string) error
 
     ProfileExists(ctx context.Context, name string) (bool, error)
+
+    VolumeExists(ctx context.Context, pool, name string) (bool, error)
+    CreateVolume(ctx context.Context, pool, name string, config map[string]string) error
+    DeleteVolume(ctx context.Context, pool, name string) error
+
+    CreateSnapshot(ctx context.Context, instance, snapshot string) error
+    Snapshots(ctx context.Context, instance string) ([]Snapshot, error)
+    RestoreSnapshot(ctx context.Context, instance, snapshot string) error
+    DeleteSnapshot(ctx context.Context, instance, snapshot string) error
 
     Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error)
     WaitReady(ctx context.Context, name string, opt WaitOptions) error
 }
 
 type ExecOptions struct {
-    Env         map[string]string
-    Cwd         string
-    User        string
-    TTY         bool      // idev shell のみ true
-    Stdin       io.Reader
-    Stdout      io.Writer
-    Stderr      io.Writer
+    // Env は利用者が指定した値。Secretを含みうるため表示しない。
+    Env map[string]string
+    // PublicEnv はdevkitが注入する値。診断に役立つため表示してよい。
+    PublicEnv map[string]string
+
+    Cwd    string
+    User   string
+    TTY    bool // idev shell が端末に接続されている場合のみ true
+    Stdin  io.Reader
+    Stdout io.Writer
+    Stderr io.Writer
 }
 ```
 
@@ -254,35 +266,48 @@ instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で�
 
 ### 5.7.1 実装方針
 
-MVPでは `incus` CLIをラップした実装 (`internal/incus/cli.go`) を用いる。
-
-理由：
-
-- 対象Incus versionのCLI互換性を確認しやすい
-- `idev shell` のような端末を伴う操作を扱いやすい
-
-将来的に、公式Go client library
+Incus操作は公式Go client library
 
 ```text
-github.com/lxc/incus/client
+github.com/lxc/incus/v6/client
 ```
 
-を用いた実装へ差し替え可能とする。これにより以下の利点が得られる。
+を用いた実装 (`internal/incus/api.go`) に一本化する。利点：
 
 - CLI出力のパースが不要になる
 - 型付きのAPIレスポンスを扱える
-- CLIのバージョン差異の影響を受けにくい
+- CLIのバージョン差異や出力形式の変更の影響を受けにくい
+- `incus` コマンドの存在に依存しない
 
-ただし `idev shell` は端末制御の都合上、CLI呼び出しを維持してよい。
+remote・project・imageの解決には `incus` コマンドと同じ設定
+（`~/.config/incus/config.yml`）を読む (`internal/incus/connect.go`)。
+利用者から見た挙動を `incus` コマンドと揃えるためである。
 
-### 5.7.2 出力パース
+### 5.7.2 端末を伴う実行
 
-CLI実装で状態を取得する場合は、人間向け出力ではなく
-機械可読な形式を用いる。
+`idev shell` のようにTTYを割り当てる実行では、ホスト側の端末操作が要る
+(`internal/incus/exec_tty.go`)。
 
-```bash
-incus list <name> --format json
-incus config show <name>
-```
+- 入力をそのままコンテナへ渡すため、ホストの端末をraw modeへ切り替える。
+  **失敗しても必ず元へ戻す**（戻さないとシェルが壊れる）
+- 端末サイズを `InstanceExecPost.Width` / `Height` で渡す
+- SIGWINCH を受けたら、制御用websocketへ `window-resize` を送る
+- ホストの `TERM` をコンテナへ渡す。Incusは既定値を補わないため、
+  渡さないと `vim` や `less` が端末を判別できない
 
-得られたJSON/YAMLは型付き構造体へデコードする。
+端末操作は `Console` interfaceの背後に置き、テストではfakeへ差し替える。
+サイズを取得できない場合はIncus側の既定に任せ、サイズ送信に失敗した場合は
+表示の乱れにとどめて実行そのものは継続する。
+
+### 5.7.3 中断の伝達
+
+制御用websocketは端末を伴わない実行でも開く。
+
+`idev` が中断された場合（Ctrl-C / SIGTERM）、この経路で
+コンテナ内のプロセスへ `SIGTERM` を送る。伝えないとパッケージ導入などが
+走り続け、次の `idev up` がロック待ちなどで衝突する。
+
+同様に、imageの取得（instance作成）と出力の中継待ちも中断できるようにする。
+どちらも数分かかることがあり、待っている間に応答しなくなると
+利用者は強制終了するしかなくなる。
+

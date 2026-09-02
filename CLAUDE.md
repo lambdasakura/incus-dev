@@ -90,7 +90,7 @@ cmd/idev
    └─▶ internal/cli
           ├─▶ internal/project     project root 探索
           ├─▶ internal/config      dev.yml の解釈とvalidation
-          ├─▶ internal/incus       Incus操作（interface + CLI実装）
+          ├─▶ internal/incus       Incus操作（interface + API実装）
           └─▶ internal/provision   bootstrap / ステップ実行
                  ├─▶ internal/incus    run ステップ
                  └─▶ internal/runner   ansible ステップ
@@ -99,8 +99,11 @@ cmd/idev
 守るべき制約：
 
 - `internal/config` はIncus操作もステップ実行も行わない（解釈とvalidationのみ）
+- Incus操作はGo client library（`internal/incus/api.go`）で行う。
+  `incus` コマンドを呼び出さない（`docs/spec/05-incus.md` 5.7.1）
 - `internal/incus` / `internal/provision` はCLIの出力形式を知らない
-- 外部コマンド実行は `internal/runner` に集約する。他パッケージで `os/exec` を直接使わない
+- 外部コマンド実行（ansible-playbook / git）は `internal/runner` に集約する。
+  他パッケージで `os/exec` を直接使わない
 - `os.Exit` は `cmd/idev/main.go` のみ。他は `error` を返す
 - 外部プロセスを伴う関数は第一引数に `context.Context` を取る
 
@@ -122,6 +125,9 @@ cmd/idev
 | CLI | `github.com/spf13/cobra` |
 | YAML | `sigs.k8s.io/yaml`（YAML→JSON→struct） |
 | JSON Schema | `github.com/santhosh-tekuri/jsonschema/v6` |
+| Incus API | `github.com/lxc/incus/v6/client` |
+| 端末制御 | `golang.org/x/term` |
+| 制御用websocket | `github.com/gorilla/websocket` |
 | テスト差分 | `github.com/google/go-cmp` |
 
 ## 用語

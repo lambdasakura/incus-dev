@@ -16,9 +16,6 @@ func TestFakeLifecycle(t *testing.T) {
 	ctx := context.Background()
 	f := incustest.New()
 
-	if ok, err := f.InstanceExists(ctx, "dev-x"); ok || err != nil {
-		t.Fatalf("InstanceExists() = %v, %v, want false, nil", ok, err)
-	}
 	if _, err := f.Instance(ctx, "dev-x"); !errors.Is(err, incus.ErrInstanceNotFound) {
 		t.Fatalf("Instance() error = %v, want ErrInstanceNotFound", err)
 	}
@@ -227,15 +224,15 @@ func TestFakeCalled(t *testing.T) {
 	}
 }
 
-func TestFakeInstanceExistsAfterCreate(t *testing.T) {
+func TestFakeInstanceIsFoundAfterCreate(t *testing.T) {
 	ctx := context.Background()
 	f := incustest.New()
 
 	if err := f.CreateInstance(ctx, incus.InstanceSpec{Name: "dev-x"}); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := f.InstanceExists(ctx, "dev-x"); !ok || err != nil {
-		t.Errorf("InstanceExists() = %v, %v, want true, nil", ok, err)
+	if _, err := f.Instance(ctx, "dev-x"); err != nil {
+		t.Errorf("Instance() error = %v", err)
 	}
 }
 

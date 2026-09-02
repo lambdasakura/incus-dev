@@ -66,7 +66,7 @@ func (c Command) String() string {
 	parts = append(parts, c.Name)
 
 	for i, a := range c.Args {
-		a = collapse(c.redacted(i, a))
+		a = Collapse(c.redacted(i, a))
 		if strings.ContainsAny(a, " \t\"'") {
 			parts = append(parts, fmt.Sprintf("%q", a))
 			continue
@@ -76,11 +76,11 @@ func (c Command) String() string {
 	return strings.Join(parts, " ")
 }
 
-// collapse は複数行の引数を1行へ畳む。
+// Collapse は複数行の文字列を1行へ畳む。
 //
-// provisionのスクリプトのような長い引数がそのままエラーへ流れ込むと、
+// provisionのスクリプトのような長い内容がそのままエラーへ流れ込むと、
 // 肝心の失敗理由が埋もれてしまうため、先頭行だけを示す。
-func collapse(arg string) string {
+func Collapse(arg string) string {
 	first, rest, found := strings.Cut(arg, "\n")
 	if !found {
 		return arg
@@ -152,13 +152,6 @@ func NewWithLogger(l *slog.Logger) *Exec { return &Exec{Logger: l} }
 
 // Run はコマンドを実行する。
 func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
-	if c.Interactive {
-		// 対話実行では、端末からのCtrl-Cは子プロセスへ直接届く。
-		// ここで親のcontextに追従して子を殺すと、コンテナ内のコマンドを
-		// 止めようとしただけでシェルごと落ちてしまう。
-		ctx = context.WithoutCancel(ctx)
-	}
-
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Dir = c.Dir
 	if len(c.Env) > 0 {
@@ -168,22 +161,15 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 	// 中継先が指定されている場合はそちらへ直接流す。
 	// 出力量が読めないステップもあるため、不要な蓄積はしない。
 	var stdout, stderr bytes.Buffer
-	switch {
-	case c.Interactive:
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	default:
-		cmd.Stdin = c.Stdin
+	cmd.Stdin = c.Stdin
 
-		cmd.Stdout = c.Stdout
-		if cmd.Stdout == nil {
-			cmd.Stdout = &stdout
-		}
-		cmd.Stderr = c.Stderr
-		if cmd.Stderr == nil {
-			cmd.Stderr = &stderr
-		}
+	cmd.Stdout = c.Stdout
+	if cmd.Stdout == nil {
+		cmd.Stdout = &stdout
+	}
+	cmd.Stderr = c.Stderr
+	if cmd.Stderr == nil {
+		cmd.Stderr = &stderr
 	}
 
 	if e.Logger != nil {
@@ -208,7 +194,7 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 			ExitCode: res.ExitCode,
 		}
 		// 呼び出し側へ中継済みの場合、同じ内容を二重に見せない。
-		if c.Stderr == nil && !c.Interactive {
+		if c.Stderr == nil {
 			e.Stderr = string(res.Stderr)
 		}
 		return res, e

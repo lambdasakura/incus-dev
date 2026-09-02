@@ -13,6 +13,7 @@ import (
 
 	"github.com/lambdasakura/incus-dev/internal/config"
 	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
 	"github.com/lambdasakura/incus-dev/internal/provision"
 	"github.com/lambdasakura/incus-dev/internal/runner"
 	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
@@ -31,10 +32,64 @@ func testEnv() provision.Env {
 }
 
 func newExecutor(f *runnertest.Fake) *provision.Executor {
-	return &provision.Executor{
-		Incus:  &incus.CLI{Runner: f, Project: "default"},
-		Runner: f,
+	return newExecutorWith(f, newIncus())
+}
+
+func newExecutorWith(f *runnertest.Fake, client *fakeIncus) *provision.Executor {
+	return &provision.Executor{Incus: client, Runner: f}
+}
+
+// execCall は run ステップの実行内容。
+type execCall struct {
+	Argv []string
+	Opt  incus.ExecOptions
+}
+
+// fakeIncus は run ステップの実行内容を記録するIncusクライアント。
+type fakeIncus struct {
+	*incustest.Fake
+	calls []execCall
+	// code はスクリプトに対して返す終了コード。キー "" は全スクリプトに適用する。
+	code map[string]int
+}
+
+func newIncus() *fakeIncus {
+	f := &fakeIncus{Fake: incustest.New(), code: map[string]int{}}
+	f.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
+	f.ExecFunc = func(_ string, argv []string, opt incus.ExecOptions) (int, error) {
+		f.calls = append(f.calls, execCall{Argv: argv, Opt: opt})
+		if code, ok := f.code[script(argv)]; ok {
+			return code, nil
+		}
+		return f.code[""], nil
 	}
+	return f
+}
+
+// last は最後の実行内容を返す。
+func (f *fakeIncus) last(t *testing.T) execCall {
+	t.Helper()
+	if len(f.calls) == 0 {
+		t.Fatal("run ステップが実行されていない")
+	}
+	return f.calls[len(f.calls)-1]
+}
+
+// scripts は実行されたスクリプトを順に返す。
+func (f *fakeIncus) scripts() []string {
+	out := make([]string, 0, len(f.calls))
+	for _, c := range f.calls {
+		out = append(out, script(c.Argv))
+	}
+	return out
+}
+
+// script は run ステップのargvからスクリプト部分を取り出す。
+func script(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	return argv[len(argv)-1]
 }
 
 func parseConfig(t *testing.T, yaml string) *config.Config {
@@ -118,55 +173,55 @@ provision:
 // --- run ステップ（仕様 06-provisioning.md 6.4） ---
 
 func TestRunStepExecutesInContainer(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - name: hello
     run: echo hi
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastArgv()
-	for _, want := range []string{
-		"incus exec --project default dev-example-project",
-		"-T -- /bin/sh -c",
-		"echo hi",
-	} {
-		if !strings.Contains(cmd, want) {
-			t.Errorf("command = %q, %q を含むこと", cmd, want)
-		}
+	got := client.last(t)
+	if diff := cmp.Diff([]string{"/bin/sh", "-c", "echo hi"}, got.Argv); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	}
+	if got.Opt.TTY {
+		t.Error("provisionは端末を割り当てないこと")
+	}
+	if !client.Called("exec dev-example-project") {
+		t.Errorf("calls = %v", client.Calls)
 	}
 }
 
 func TestRunStepInjectsDevkitEnv(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: echo hi
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastArgv()
-	for _, want := range []string{
-		"--env DEVKIT_INSTANCE=dev-example-project",
-		"--env DEVKIT_PROJECT_NAME=example-project",
-		"--env DEVKIT_WORKSPACE=/workspace",
-		"--env DEVKIT_WORKSPACE_SOURCE=/home/u/src/example",
-		"--env DEVKIT_INCUS_PROJECT=default",
-		"--env DEVKIT_INCUS_REMOTE=local",
-	} {
-		if !strings.Contains(cmd, want) {
-			t.Errorf("command = %q, %q を含むこと", cmd, want)
-		}
+	want := map[string]string{
+		"DEVKIT_INSTANCE":         "dev-example-project",
+		"DEVKIT_PROJECT_NAME":     "example-project",
+		"DEVKIT_WORKSPACE":        "/workspace",
+		"DEVKIT_WORKSPACE_SOURCE": "/home/u/src/example",
+		"DEVKIT_INCUS_PROJECT":    "default",
+		"DEVKIT_INCUS_REMOTE":     "local",
+	}
+	if diff := cmp.Diff(want, client.last(t).Opt.PublicEnv); diff != "" {
+		t.Errorf("環境変数 mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestRunStepEnvOverridesDevkitEnv(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: echo hi
@@ -174,116 +229,162 @@ provision:
       DEVKIT_WORKSPACE: /elsewhere
       EXTRA: value
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastArgv()
-	if !strings.Contains(cmd, "--env DEVKIT_WORKSPACE=/elsewhere") {
-		t.Errorf("command = %q, ステップのenvが優先されること", cmd)
+	got := client.last(t)
+	if got.Opt.Env["DEVKIT_WORKSPACE"] != "/elsewhere" {
+		t.Errorf("env = %v, ステップのenvが優先されること", got.Opt.Env)
 	}
-	if strings.Contains(cmd, "--env DEVKIT_WORKSPACE=/workspace") {
-		t.Errorf("command = %q, 上書きされた値が残っている", cmd)
+	if _, ok := got.Opt.PublicEnv["DEVKIT_WORKSPACE"]; ok {
+		t.Errorf("env = %v, 上書きされた値が残っている", got.Opt.PublicEnv)
 	}
-	if !strings.Contains(cmd, "--env EXTRA=value") {
-		t.Errorf("command = %q", cmd)
+	if got.Opt.Env["EXTRA"] != "value" {
+		t.Errorf("env = %v", got.Opt.Env)
 	}
 }
 
 func TestRunStepCwdAndShell(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: echo hi
     shell: /bin/bash
     cwd: /workspace
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastArgv()
-	if !strings.Contains(cmd, "--cwd /workspace") {
-		t.Errorf("command = %q, cwdを反映すること", cmd)
+	got := client.last(t)
+	if got.Opt.Cwd != "/workspace" {
+		t.Errorf("cwd = %q, cwdを反映すること", got.Opt.Cwd)
 	}
-	if !strings.Contains(cmd, "-- /bin/bash -c") {
-		t.Errorf("command = %q, shellを反映すること", cmd)
+	if diff := cmp.Diff([]string{"/bin/bash", "-c", "echo hi"}, got.Argv); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestRunStepNumericUser(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: echo hi
     user: "1000"
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
-	if !strings.Contains(f.LastArgv(), "--user 1000") {
-		t.Errorf("command = %q, 数値ユーザーは --user で渡すこと", f.LastArgv())
+	if got := client.last(t).Opt.User; got != "1000" {
+		t.Errorf("user = %q, 数値ユーザーはそのまま渡すこと", got)
 	}
 }
 
-// incus exec --user はUIDのみを受けるため、ユーザー名は su で切り替える
+// Incusのexecはユーザー名を解決できないため、su で切り替える
 func TestRunStepNamedUser(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: echo hi
     user: developer
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	cmd := f.LastArgv()
-	if !strings.Contains(cmd, "-- su -s /bin/sh developer -c") {
-		t.Errorf("command = %q, ユーザー名指定は su を使うこと", cmd)
+	got := client.last(t)
+	want := []string{"su", "-s", "/bin/sh", "developer", "-c", "echo hi"}
+	if diff := cmp.Diff(want, got.Argv); diff != "" {
+		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
-	if strings.Contains(cmd, "--user developer") {
-		t.Errorf("command = %q, 名前を --user へ渡さないこと", cmd)
+	if got.Opt.User != "" {
+		t.Errorf("user = %q, 名前をIncusへ渡さないこと", got.Opt.User)
 	}
 }
 
 func TestStepsRunInOrder(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: first
   - run: second
   - run: third
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	var order []string
-	for _, c := range f.Argvs() {
-		for _, want := range []string{"first", "second", "third"} {
-			if strings.Contains(c, want) {
-				order = append(order, want)
-			}
-		}
-	}
-	if diff := cmp.Diff([]string{"first", "second", "third"}, order); diff != "" {
+	if diff := cmp.Diff([]string{"first", "second", "third"}, client.scripts()); diff != "" {
 		t.Errorf("実行順が違う (-want +got):\n%s", diff)
 	}
 }
 
 // 失敗したステップを特定できること（仕様 04-cli.md 4.10）
-func TestStepFailureIdentifiesStep(t *testing.T) {
-	f := &runnertest.Fake{}
-	f.Handler = func(c runner.Command) (runner.Result, error) {
-		// 実際に実行される引数で判定する（表示用文字列はマスクされる）
-		if strings.Contains(strings.Join(c.Args, " "), "failing") {
-			return runner.Result{ExitCode: 7}, &runner.ExitError{
-				Cmd: c.String(), ExitCode: 7, Stderr: "boom",
-			}
-		}
-		return runner.Result{}, nil
+// 失敗したスクリプトが分かること。名前を付けていないステップでは
+// 番号だけでは何が落ちたのか分からない（仕様 04-cli.md 4.10）
+func TestStepFailureShowsScript(t *testing.T) {
+	client := newIncus()
+	client.code[""] = 1
+	cfg := parseConfig(t, base+`
+provision:
+  - run: |
+      first-line
+      second-line
+      third-line
+`)
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{})
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
 	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "first-line") {
+		t.Errorf("error = %q, 失敗したスクリプトを示すこと", msg)
+	}
+	if strings.Contains(msg, "third-line") {
+		t.Errorf("error = %q, 全文は載せないこと", msg)
+	}
+	if !strings.Contains(msg, "+2 lines") {
+		t.Errorf("error = %q, 省略した行数を示すこと", msg)
+	}
+}
+
+// エラーへ環境変数の値を混ぜないこと（Secretを含みうる）
+func TestStepFailureDoesNotLeakEnv(t *testing.T) {
+	client := newIncus()
+	client.code[""] = 1
+	cfg := parseConfig(t, base+`
+provision:
+  - run: deploy
+    env:
+      API_TOKEN: s3cret-value
+`)
+	env := testEnv()
+	env.Secrets = map[string]string{"DEPLOY_KEY": "s3cret-key"}
+
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, env, provision.Selection{})
+	if err == nil {
+		t.Fatal("Provision() = nil error, want error")
+	}
+	for _, secret := range []string{"s3cret-value", "s3cret-key"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error = %q, 秘密情報を含めないこと", err.Error())
+		}
+	}
+}
+
+func TestStepFailureIdentifiesStep(t *testing.T) {
+	client := newIncus()
+	client.code["failing"] = 7
+
 	cfg := parseConfig(t, base+`
 provision:
   - run: ok
@@ -291,7 +392,8 @@ provision:
     run: failing
   - run: never
 `)
-	err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{})
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{})
 	if err == nil {
 		t.Fatal("Provision() = nil error, want error")
 	}
@@ -300,24 +402,23 @@ provision:
 			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
 		}
 	}
-	for _, c := range f.Argvs() {
-		if strings.Contains(c, "never") {
-			t.Error("失敗後のステップを実行しないこと")
-		}
+	if diff := cmp.Diff([]string{"ok", "failing"}, client.scripts()); diff != "" {
+		t.Errorf("失敗後のステップを実行しないこと (-want +got):\n%s", diff)
 	}
 }
 
 func TestBootstrapUsesRunSteps(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 bootstrap:
   - run: bootstrap-command
 `)
-	if err := newExecutor(f).Bootstrap(context.Background(), cfg, testEnv()); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Bootstrap(
+		context.Background(), cfg, testEnv()); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
-	if !strings.Contains(f.LastArgv(), "bootstrap-command") {
-		t.Errorf("command = %q", f.LastArgv())
+	if diff := cmp.Diff([]string{"bootstrap-command"}, client.scripts()); diff != "" {
+		t.Errorf("スクリプト mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -574,25 +675,27 @@ func containsString(list []string, want string) bool {
 	return false
 }
 
-// 環境変数の値はSecretを含みうるため、表示用文字列ではマスクされる
+// ステップのenvはSecretを含みうるため、表示しうる値と分けて渡す
 // （仕様 04-cli.md 4.10）
-func TestRunStepEnvIsRedactedInDisplay(t *testing.T) {
-	f := &runnertest.Fake{}
+func TestRunStepEnvIsSeparatedFromPublicEnv(t *testing.T) {
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: deploy
     env:
       API_TOKEN: s3cret-value
 `)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
+	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	if display := f.LastCommand(); strings.Contains(display, "s3cret-value") {
-		t.Errorf("表示 = %q, 環境変数の値を含めないこと", display)
+	got := client.last(t)
+	if got.Opt.Env["API_TOKEN"] != "s3cret-value" {
+		t.Errorf("env = %v, 実際の値を渡すこと", got.Opt.Env)
 	}
-	if raw := f.LastArgv(); !strings.Contains(raw, "API_TOKEN=s3cret-value") {
-		t.Errorf("実引数 = %q, 実際の値を渡すこと", raw)
+	if _, ok := got.Opt.PublicEnv["API_TOKEN"]; ok {
+		t.Errorf("公開env = %v, 利用者指定の値を含めないこと", got.Opt.PublicEnv)
 	}
 }
 
@@ -612,13 +715,12 @@ func TestRunStepsRejectsEmptyStep(t *testing.T) {
 
 // コンテナ内でのコマンド実行が失敗した場合
 func TestRunStepReportsNonZeroExit(t *testing.T) {
-	f := &runnertest.Fake{}
-	f.Handler = func(runner.Command) (runner.Result, error) {
-		return runner.Result{ExitCode: 5}, nil
-	}
+	client := newIncus()
+	client.code[""] = 5
 	cfg := parseConfig(t, base+"provision:\n  - run: failing\n")
 
-	err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{})
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{})
 	if err == nil || !strings.Contains(err.Error(), "5") {
 		t.Errorf("error = %v, 終了コードを報告すること", err)
 	}
@@ -627,17 +729,15 @@ func TestRunStepReportsNonZeroExit(t *testing.T) {
 // 既定bootstrapが失敗した場合、bootstrapを明示するよう促すこと
 // （仕様 06-provisioning.md 6.3.2、REQ-007例外の成立条件）
 func TestDefaultBootstrapFailureGuidesUser(t *testing.T) {
-	f := &runnertest.Fake{}
-	f.Handler = func(runner.Command) (runner.Result, error) {
-		return runner.Result{ExitCode: 127}, nil
-	}
+	client := newIncus()
+	client.code[""] = 127
 	cfg := parseConfig(t, base+`
 provision:
   - ansible:
       playbook: p.yml
 `)
 
-	err := newExecutor(f).Bootstrap(context.Background(), cfg, testEnv())
+	err := newExecutorWith(&runnertest.Fake{}, client).Bootstrap(context.Background(), cfg, testEnv())
 	if err == nil {
 		t.Fatal("Bootstrap() = nil error, want error")
 	}
@@ -650,16 +750,14 @@ provision:
 
 // 明示されたbootstrapの失敗には案内を付けない
 func TestExplicitBootstrapFailureHasNoGuidance(t *testing.T) {
-	f := &runnertest.Fake{}
-	f.Handler = func(runner.Command) (runner.Result, error) {
-		return runner.Result{ExitCode: 1}, nil
-	}
+	client := newIncus()
+	client.code[""] = 1
 	cfg := parseConfig(t, base+`
 bootstrap:
   - run: dnf install -y python3
 `)
 
-	err := newExecutor(f).Bootstrap(context.Background(), cfg, testEnv())
+	err := newExecutorWith(&runnertest.Fake{}, client).Bootstrap(context.Background(), cfg, testEnv())
 	if err == nil {
 		t.Fatal("Bootstrap() = nil error, want error")
 	}
@@ -698,84 +796,11 @@ provision:
 	}
 }
 
-// 複数行のスクリプトは、エラーへ全文が流れ込まないよう表示時に折り畳む。
-// 実行するコマンドは診断の中心なので、隠すのではなく短くする。
-func TestMultilineScriptIsCollapsedInDisplay(t *testing.T) {
-	f := &runnertest.Fake{}
-	cfg := parseConfig(t, base+`
-provision:
-  - name: deploy
-    run: |
-      first-line
-      second-line
-      third-line
-`)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
-		t.Fatalf("Provision() error = %v", err)
-	}
-
-	display := f.LastCommand()
-	if !strings.Contains(display, "first-line") {
-		t.Errorf("表示 = %q, 先頭行は示すこと", display)
-	}
-	if strings.Contains(display, "third-line") {
-		t.Errorf("表示 = %q, 全文は載せないこと", display)
-	}
-	if !strings.Contains(display, "+2 lines") {
-		t.Errorf("表示 = %q, 省略した行数を示すこと", display)
-	}
-	if raw := f.LastArgv(); !strings.Contains(raw, "third-line") {
-		t.Errorf("実引数 = %q, 実際のスクリプトは全文渡すこと", raw)
-	}
-}
-
-// devkitが注入する変数は診断のため表示し、プロジェクト指定の値のみ隠す
-func TestDevkitEnvIsVisibleAndProjectEnvIsRedacted(t *testing.T) {
-	f := &runnertest.Fake{}
-	cfg := parseConfig(t, base+`
-provision:
-  - run: deploy
-    env:
-      API_TOKEN: s3cret
-      DEVKIT_WORKSPACE: /overridden
-`)
-	if err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{}); err != nil {
-		t.Fatalf("Provision() error = %v", err)
-	}
-
-	display := f.LastCommand()
-	if !strings.Contains(display, "--env DEVKIT_INSTANCE=dev-example-project") {
-		t.Errorf("表示 = %q, devkitの変数は表示すること", display)
-	}
-	if strings.Contains(display, "s3cret") {
-		t.Errorf("表示 = %q, プロジェクト指定の値は隠すこと", display)
-	}
-	// 上書きされた変数の値はプロジェクト由来なので隠す
-	if strings.Contains(display, "/overridden") {
-		t.Errorf("表示 = %q, 上書きされた値も隠すこと", display)
-	}
-	if strings.Contains(display, "DEVKIT_WORKSPACE=/workspace") {
-		t.Errorf("表示 = %q, 上書きされた変数の元の値を渡さないこと", display)
-	}
-
-	raw := f.LastArgv()
-	for _, want := range []string{"API_TOKEN=s3cret", "DEVKIT_WORKSPACE=/overridden"} {
-		if !strings.Contains(raw, want) {
-			t.Errorf("実引数 = %q, %q を含むこと", raw, want)
-		}
-	}
-}
-
 // 一部だけ実行しても、ラベルは全体の中での位置を示すこと。
 // "step 1/1" では、どのステップを流したのか分からなくなる。
 func TestSelectedStepKeepsItsPosition(t *testing.T) {
-	f := &runnertest.Fake{}
-	f.Handler = func(c runner.Command) (runner.Result, error) {
-		if strings.Contains(strings.Join(c.Args, " "), "third") {
-			return runner.Result{ExitCode: 1}, &runner.ExitError{Cmd: "x", ExitCode: 1}
-		}
-		return runner.Result{}, nil
-	}
+	client := newIncus()
+	client.code["third"] = 1
 	cfg := parseConfig(t, base+`
 provision:
   - run: first
@@ -784,7 +809,8 @@ provision:
     run: third
 `)
 
-	err := newExecutor(f).Provision(context.Background(), cfg, testEnv(), provision.Selection{From: "3"})
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
+		context.Background(), cfg, testEnv(), provision.Selection{From: "3"})
 	if err == nil {
 		t.Fatal("Provision() = nil error, want error")
 	}
@@ -793,15 +819,13 @@ provision:
 	}
 
 	// 選ばれなかったステップは実行しない
-	for _, argv := range f.Argvs() {
-		if strings.Contains(argv, "first") || strings.Contains(argv, "second") {
-			t.Errorf("選択外のステップを実行している: %q", argv)
-		}
+	if diff := cmp.Diff([]string{"third"}, client.scripts()); diff != "" {
+		t.Errorf("実行したステップ mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestSelectedStepsRunInOrder(t *testing.T) {
-	f := &runnertest.Fake{}
+	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - name: a
@@ -812,22 +836,14 @@ provision:
     run: third
 `)
 
-	err := newExecutor(f).Provision(context.Background(), cfg, testEnv(),
+	err := newExecutorWith(&runnertest.Fake{}, client).Provision(context.Background(), cfg, testEnv(),
 		provision.Selection{Only: []string{"c", "a"}})
 	if err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	var order []string
-	for _, argv := range f.Argvs() {
-		for _, name := range []string{"first", "second", "third"} {
-			if strings.Contains(argv, name) {
-				order = append(order, name)
-			}
-		}
-	}
 	// 指定順ではなく、宣言順で実行する
-	if diff := cmp.Diff([]string{"first", "third"}, order); diff != "" {
+	if diff := cmp.Diff([]string{"first", "third"}, client.scripts()); diff != "" {
 		t.Errorf("実行順が違う (-want +got):\n%s", diff)
 	}
 }
@@ -1064,10 +1080,12 @@ func TestStepEnvOverridesSecret(t *testing.T) {
 	env := testEnv()
 	env.Secrets = map[string]string{"API_TOKEN": "from-secret"}
 
-	if err := newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+	client := newIncus()
+	if err := newExecutorWith(f, client).Provision(
+		context.Background(), cfg, env, provision.Selection{}); err != nil {
 		t.Fatalf("Provision() error = %v", err)
 	}
-	if raw := f.LastArgv(); !strings.Contains(raw, "API_TOKEN=from-step") {
-		t.Errorf("実引数 = %q", raw)
+	if got := client.last(t).Opt.Env["API_TOKEN"]; got != "from-step" {
+		t.Errorf("API_TOKEN = %q, want from-step", got)
 	}
 }

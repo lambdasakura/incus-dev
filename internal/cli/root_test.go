@@ -358,29 +358,26 @@ func TestIsTerminal(t *testing.T) {
 // グローバルフラグが Incus 操作層まで届くこと
 // （マニュアル 03-commands.md が契約として提示している）
 func TestNewAppWiresIncusFlags(t *testing.T) {
-	root := testProject(t, rootYAML)
-
-	app, err := newApp(&globalFlags{
-		directory:    root,
-		incusRemote:  "dev-server",
-		incusProject: "development",
-	})
+	cfg, err := config.Load(filepath.Join(testProject(t, rootYAML), ".incus-dev", "dev.yml"))
 	if err != nil {
-		t.Fatalf("newApp() error = %v", err)
+		t.Fatal(err)
 	}
 
-	client, ok := app.client.(*incus.CLI)
-	if !ok {
-		t.Fatalf("client = %T, want *incus.CLI", app.client)
-	}
-	if client.Remote != "dev-server" {
-		t.Errorf("Remote = %q, want dev-server", client.Remote)
-	}
-	if client.Project != "development" {
-		t.Errorf("Project = %q, want development", client.Project)
+	target := resolveTarget(&globalFlags{incusRemote: "dev-server", incusProject: "development"}, cfg)
+	if target.Remote != "dev-server" || target.Project != "development" {
+		t.Errorf("target = %+v", target)
 	}
 
 	// ansible inventory へ渡す値も同じであること
+	app := NewApp(AppOptions{
+		Config:       cfg,
+		Client:       incustest.New(),
+		Runner:       &runnertest.Fake{},
+		Remote:       target.Remote,
+		IncusProject: target.Project,
+		CheckIDMap:   func(int, int) error { return nil },
+	})
+
 	env, err := app.env()
 	if err != nil {
 		t.Fatal(err)
@@ -556,28 +553,14 @@ func TestIncusProjectPrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app, err := newApp(&globalFlags{
-				directory:    testProject(t, tt.yaml),
-				incusRemote:  "local",
-				incusProject: tt.flag,
-			})
-			if err != nil {
-				t.Fatalf("newApp() error = %v", err)
-			}
-
-			client, ok := app.client.(*incus.CLI)
-			if !ok {
-				t.Fatalf("client = %T", app.client)
-			}
-			if client.Project != tt.want {
-				t.Errorf("Project = %q, want %q", client.Project, tt.want)
-			}
-			env, err := app.env()
+			cfg, err := config.Load(filepath.Join(testProject(t, tt.yaml), ".incus-dev", "dev.yml"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := env.IncusProject; got != tt.want {
-				t.Errorf("env.IncusProject = %q, want %q", got, tt.want)
+
+			got := resolveTarget(&globalFlags{incusRemote: "local", incusProject: tt.flag}, cfg)
+			if got.Project != tt.want {
+				t.Errorf("Project = %q, want %q", got.Project, tt.want)
 			}
 		})
 	}

@@ -426,14 +426,15 @@ Incus disk deviceを使用する。
 
 概念例：
 
-```bash
-incus config device add \
-    <instance> workspace disk \
-    source=<project-root> \
-    path=/workspace
+```yaml
+devices:
+  workspace:
+    type: disk
+    source: <project-root>
+    path: /workspace
 ```
 
-実際のCLI引数については実装時に対象Incus versionで確認すること。
+実際にはinstanceの `devices` として設定する（[05-incus.md](05-incus.md) 5.4）。
 
 ---
 

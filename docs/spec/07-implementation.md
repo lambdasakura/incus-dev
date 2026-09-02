@@ -51,13 +51,20 @@ type Runner interface {
 }
 
 type Command struct {
-    Name  string
-    Args  []string
-    Dir   string
-    Env   []string
-    Stdin io.Reader
-    // 端末を引き継ぐ対話実行（idev shell）用
-    Interactive bool
+    // Label は失敗時に示す操作名。
+    Label string
+
+    Name string
+    Args []string
+    Dir  string
+    Env  []string
+
+    Stdin  io.Reader
+    Stdout io.Writer
+    Stderr io.Writer
+
+    // Redact は表示時に値を隠す引数のindex。
+    Redact []int
 }
 
 type Result struct {
@@ -74,16 +81,21 @@ type Result struct {
   操作名・対象・コマンド・exit code・stderr を含むエラーを構築する
 - ログ出力時、Secretを含みうる引数・環境変数はマスクする
   （indexの指定間違いを防ぐため、`ArgList` で引数の追加と同時に区別を宣言する）
-- 対話実行（`idev shell`）では `os.Stdin` / `os.Stdout` / `os.Stderr` を直接引き継ぐ
+- 複数行の引数は表示時に先頭行へ畳む（`Collapse`）。長いスクリプトが
+  そのままエラーへ流れ込むと、肝心の失敗理由が埋もれるため
+
+この層が扱うのは `ansible-playbook` / `ansible-galaxy` / `git` である。
+Incus操作はAPIを直接呼ぶため、この層を通らない
+（端末を伴う実行も同様。[05-incus.md](05-incus.md) 5.7.2）。
 
 エラーは `fmt.Errorf("...: %w", err)` でラップし、
 呼び出し側は `errors.Is` / `errors.As` で判別する。
 
 ### dry-runはこの層に置かない
 
-`internal/runner` は読み取りと変更を区別できない。dry-runでも
-`incus list` のような読み取りは実行する必要があるため、
-この層で実行を止めると計画そのものを立てられなくなる。
+外部コマンドを実行する層は読み取りと変更を区別できない。dry-runでも
+instanceの状態取得のような読み取りは行う必要があるため、
+実行の直前で止めると計画そのものを立てられなくなる。
 
 dry-runの継ぎ目は `internal/cli/plan.go` の純粋関数群であり、
 `App.Plan` がそれらを使って実行予定を組み立てる
@@ -272,9 +284,12 @@ project root検出にGitを利用してもよい。
 | CLI | `github.com/spf13/cobra` |
 | YAML | `sigs.k8s.io/yaml` |
 | JSON Schema | `github.com/santhosh-tekuri/jsonschema` |
+| JSON Schemaのエラー整形 | `golang.org/x/text` |
 | ログ | 標準 `log/slog` |
 | テスト | 標準 `testing`（必要なら `github.com/google/go-cmp`） |
-| Incus API（将来） | `github.com/lxc/incus/client` |
+| Incus API | `github.com/lxc/incus/v6/client` |
+| 端末制御（`idev shell`） | `golang.org/x/term` |
+| 制御用websocket（ウィンドウサイズ） | `github.com/gorilla/websocket` |
 
 標準ライブラリで十分な領域に依存を追加しない。
 

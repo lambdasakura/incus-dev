@@ -72,31 +72,47 @@ requirements.yml の自動適用
 
 ## 9.2 MVP以降の候補
 
+MVP完成後に以下を実装した。
+
 ```text
+up --dry-run / up --restart
+provision --step / --from / --list（部分実行）
+idev exec
+idev snapshot（create / list / restore / delete）
+dev.yml の shell（user / command / cwd）
+dev.yml の incus.project
+dev.yml の volumes（永続ボリューム）
+dev.yml の secrets（ホストからの注入）
+project.scope（複数checkout / ブランチ別instance）
 galaxy ステップ型（ansible-galaxy install）
+設定・deviceの削除追従（user.incus-devkit.managed / .devices）
+Incus Go client library への移行（incus コマンドへの依存を解消）
+```
+
+残る候補：
+
+```text
 追加のステップ型（必要が生じた場合のみ）
 
-idev exec
-idev shell の user / command / cwd 設定
-
-instance.config の削除追従（user.incus-devkit.managed による差分unset）
-再起動が必要な設定変更の自動処理
 virtual-machine サポート
-
 Incus remote
-Incus project
-
-multiple checkout support
-branch-specific instance
-
-snapshot / restore
-persistent volumes
-multiple workspaces
-
-環境変数 / secrets の注入機構
-
-Incus Go client library への移行
 ```
+
+### virtual-machine と Incus remote を保留する理由
+
+いずれも **workspaceの共有方式を決め直す必要がある** ため、
+実際の要求が出てから設計する。
+
+- virtual-machine では bind mount が使えず、virtiofs / 9p となる。
+  `raw.idmap` や disk の `shift` もコンテナ固有の仕組みで意味を持たない
+- remote では workspace がホスト側のパスを前提とするため成立しない
+  （CLIのフラグ `--incus-remote` は操作層まで通しているが、未検証）
+
+### 複数workspaceについて
+
+`instance.devices` でホストのディレクトリを追加マウントでき、
+workspaceと同じuid/gid対応付けが適用される（[03-configuration.md](03-configuration.md) 3.7.3）。
+専用の構文は設けない。
 
 ---
 

@@ -22,7 +22,7 @@ Bootstrap 既定動作の選択
   - bootstrap 明示時の上書き
 Step planning（実行順序）
 Command construction
-  - incus exec の引数
+  - run ステップのargvとexec指定
   - ansible-playbook の引数
 Inventory / extra-vars 生成
 Error handling（失敗ステップの特定）

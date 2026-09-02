@@ -75,6 +75,20 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	return root
 }
 
+// resolveTarget は操作対象のIncusを決める。
+//
+// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
+func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
+	project := g.incusProject
+	if project == "" {
+		project = cfg.IncusProject()
+	}
+	if project == "" {
+		project = defaultIncusProject
+	}
+	return incus.Target{Remote: g.incusRemote, Project: project}
+}
+
 // newApp はproject探索と設定読み込みを行い、Appを構成する。
 func newApp(g *globalFlags) (*App, error) {
 	start := g.directory
@@ -95,21 +109,17 @@ func newApp(g *globalFlags) (*App, error) {
 		return nil, err
 	}
 
-	// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
-	incusProject := g.incusProject
-	if incusProject == "" {
-		incusProject = cfg.IncusProject()
-	}
-	if incusProject == "" {
-		incusProject = defaultIncusProject
-	}
+	target := resolveTarget(g, cfg)
 
-	cmdRunner := runner.NewWithLogger(newLogger(os.Stderr, g.verbose))
-	client := &incus.CLI{
-		Runner:  cmdRunner,
-		Remote:  g.incusRemote,
-		Project: incusProject,
+	log := newLogger(os.Stderr, g.verbose)
+	cmdRunner := runner.NewWithLogger(log)
+
+	client, err := incus.Connect(target)
+	if err != nil {
+		return nil, err
 	}
+	// --verbose でIncusへの操作を追えるようにする。
+	client.Logger = log
 
 	return NewAppFor(AppOptions{
 		Config:       cfg,
@@ -121,8 +131,9 @@ func newApp(g *globalFlags) (*App, error) {
 		ErrOut:       os.Stderr,
 		Verbose:      g.verbose,
 		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
-		Remote:       g.incusRemote,
-		IncusProject: incusProject,
+		Term:         os.Getenv("TERM"),
+		Remote:       target.Remote,
+		IncusProject: target.Project,
 	})
 }
 

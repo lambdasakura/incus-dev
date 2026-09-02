@@ -20,8 +20,8 @@ Gitリポジトリである必要はない。
 | --- | --- | --- |
 | `-v`, `--verbose` | | 実行した外部コマンドなど詳細を出力する |
 | `-C`, `--directory <dir>` | カレントディレクトリ | 探索を開始するディレクトリ |
-| `--incus-remote <name>` | `local` | Incus remote |
-| `--incus-project <name>` | `default` | Incus project |
+| `--incus-remote <name>` | `local` | Incus remote（`incus remote switch` の既定には従わない） |
+| `--incus-project <name>` | `dev.yml` の `incus.project`、無ければ `default` | Incus project |
 
 ### 終了コード
 
@@ -41,7 +41,7 @@ idev shell -- sh -c 'exit 42'; echo $?   # 42
 `dev-<プロジェクト名>` となる。英数字とハイフン以外は正規化される。
 
 同じプロジェクトを複数の場所に clone する場合は、`dev.yml` の
-`project.scope` で区別できます（`path` または `branch`）。
+`project.scope` で区別できる（`path` または `branch`）。
 
 ```text
 project.name: my.project_1   →   instance: dev-my-project-1
@@ -99,12 +99,24 @@ idev up
 **devkitが適用したものだけ** が対象で、`incus config set` などで
 手動追加した設定には触れない。
 
+| フラグ | 説明 |
+| --- | --- |
+| `--restart` | 反映に再起動が必要な変更があれば、instanceを再起動する |
+| `--dry-run` | 実行予定の操作を表示するだけで、Incusへ変更を加えない |
+
 ```bash
 idev up --restart
 ```
 
 `security.nesting` のように反映へ再起動が必要な変更があるとき、
 instanceを再起動する。既定では警告のみを表示する。
+
+```bash
+idev up --dry-run
+```
+
+作成・再適用・削除の予定を一覧するだけで、Incusへは一切変更を加えない。
+`dev.yml` を書き換えたあと、何が起きるかを先に確認したいときに使う。
 
 idev が作ったものでないinstanceが同名で存在する場合は、
 何もせずに失敗する（誤って壊さないため）。
@@ -128,6 +140,26 @@ instanceが存在しない場合は明示的に失敗する。暗黙的に `idev
 
 `instance.config` や `devices` の変更は反映しない（それは `idev up` の役割）。
 
+### 一部だけ実行する
+
+| フラグ | 説明 |
+| --- | --- |
+| `--list` | ステップの一覧を表示する（Incusへは触れない） |
+| `--step <名前または番号>` | 指定したステップのみ実行する（複数指定可） |
+| `--from <名前または番号>` | 指定したステップ以降を実行する |
+
+```bash
+idev provision --list
+idev provision --step 3
+idev provision --step setup-go --step install-tools
+idev provision --from 2
+```
+
+`--step` を複数指定しても、実行順は **宣言順** である（指定順ではない）。
+失敗時のステップ番号は、一部だけ実行した場合も全体の中での位置で示す。
+
+`--step` と `--from` は同時に指定できない。
+
 ---
 
 ## 3.5 `idev shell`
@@ -149,7 +181,26 @@ idev shell -- go test ./... | tee test.log
 ```
 
 - コンテナが停止していれば起動してから実行する
-- 初期実装ではrootで実行する
+- 実行ユーザー・シェル・作業ディレクトリは `dev.yml` の `shell` で変えられる
+  （既定はroot、`/bin/sh`、`workspace.target`。[4. dev.yml](04-dev-yml.md) 参照）
+
+コマンドの終了コードはそのまま `idev` の終了コードになる。
+
+---
+
+## 3.5.1 `idev exec`
+
+コンテナ内でコマンドを実行する。**擬似端末は割り当てない。**
+
+```bash
+idev exec -- make test
+idev exec -- go test ./... | tee test.log
+```
+
+`idev shell` との違いは、端末に接続されていても擬似端末を割り当てない点だけである。
+CIやスクリプトから呼ぶ場合は、環境によって挙動が変わらない `exec` を使う。
+
+コマンドの指定は必須である（省略した場合は `idev shell` を使うよう促して失敗する）。
 
 ---
 
@@ -182,9 +233,15 @@ idev status --json
   "managed": true,
   "profiles": ["default"],
   "config": { "limits.cpu": "4" },
-  "provision_steps": 1
+  "devices": ["workspace(disk)"],
+  "provision_steps": 1,
+  "runtime": "container",
+  "incus_remote": "local",
+  "incus_project": "default"
 }
 ```
+
+`profiles` / `config` / `devices` / `runtime` は、instanceが存在しない場合は出力されない。
 
 ```bash
 # 実行中かどうかで分岐する例
@@ -208,6 +265,16 @@ idev destroy --force        # 確認を省略（CI・スクリプト用）
 
 ---
 
+| フラグ | 説明 |
+| --- | --- |
+| `-f`, `--force` | 確認せずに実行する |
+| `--volumes` | `dev.yml` の `volumes` で宣言した永続ボリュームも削除する |
+
+既定では永続ボリュームを残す。instanceを作り直してもキャッシュを保ちたい、
+という用途で使われるためである。残した場合はその旨を表示する。
+
+---
+
 ## 3.8 `idev rebuild`
 
 instanceを破棄して作り直す。
@@ -217,14 +284,15 @@ idev rebuild
 idev rebuild --force
 ```
 
-コンテナ内の状態はすべて失われる。`dev.yml` から設定項目を削除した場合、
-その削除を確実に反映させたいときにも使う（`idev up` は削除を追従しない）。
+コンテナ内の状態はすべて失われる。`idev up` も削除に追従するが、
+それはdevkitが適用した設定・deviceに限られる。手動で加えた設定ごと
+きれいな状態へ戻したいときに使う。
 
 ---
 
 ## 3.8.1 `idev snapshot`
 
-環境を壊す前に退避しておき、あとで戻せます。
+環境を壊す前に退避しておき、あとで戻せる。
 
 ```bash
 idev snapshot create before-upgrade
@@ -233,11 +301,11 @@ idev snapshot restore before-upgrade
 idev snapshot delete before-upgrade
 ```
 
-名前を省略すると日時（`20260831-142530`）が付きます。
-`restore` と `delete` は確認を求めます（`--force` で省略）。
+名前を省略すると日時（`20260831-142530`）が付く。
+`restore` と `delete` は確認を求める（`--force` で省略）。
 
-**ホスト側のworkspaceには影響しません。** bind mount であり、
-instanceの状態ではないためです。
+**ホスト側のworkspaceには影響しない。** bind mount であり、
+instanceの状態ではないためである。
 
 ---
 
