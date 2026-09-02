@@ -348,6 +348,10 @@ provision:
 
 See [05-provisioning.md](05-provisioning.md) for how to write them.
 
+A step `name` must not contain a control character -- a tab or a newline in it
+would split or shift the rows of `idev provision --list`, which is one line per
+step.
+
 ---
 
 ## 4.9 How paths are resolved

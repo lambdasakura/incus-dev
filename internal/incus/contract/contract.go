@@ -153,14 +153,14 @@ func Run(t *testing.T, env Env) []string {
 //
 // A check deleted and replaced in the same edit keeps the count, which no
 // cheap guard catches -- but that is a deliberate act, not an oversight.
-const Checks = 31
+const Checks = 34
 
 // Critical are the checks that exist because the fake once disagreed with
 // Incus and a defect reached a user through the gap.
 var Critical = []string{
 	"VolumeExists reports a missing pool rather than a missing volume",
 	"CreateVolume refuses a name that is already taken",
-	"ApplyDevices replaces a device rather than merging",
+	"UpdateInstance replaces a device rather than merging",
 	"snapshots round-trip and a duplicate name is refused",
 	"a delete cut short reports that the outcome is unknown",
 	"Instance returns a detached copy",
@@ -310,10 +310,10 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		}
 	})
 
-	// ApplyDevices replaces the named device rather than merging into it,
+	// UpdateInstance replaces the named device rather than merging into it,
 	// which is what makes the managed-devices record the only way to remove
 	// one. idev depended on this without checking it.
-	check("ApplyDevices replaces a device rather than merging", func(t *testing.T) {
+	check("UpdateInstance replaces a device rather than merging", func(t *testing.T) {
 		first := map[string]incus.Device{
 			"extra": {"type": "disk", "source": "/tmp", "path": "/one", "readonly": "true"},
 		}
@@ -341,7 +341,7 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		}
 	})
 
-	check("RemoveDevices removes it", func(t *testing.T) {
+	check("UpdateInstance removes a device", func(t *testing.T) {
 		if err := env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{RemoveDevices: []string{"extra"}}, ""); err != nil {
 			t.Fatalf("UpdateInstance() error = %v", err)
 		}
@@ -583,6 +583,90 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		}
 		if before.ETag == after.ETag {
 			t.Error("the etag did not move across a start")
+		}
+	})
+
+	check("a listed instance is detached from the client's state", func(t *testing.T) {
+		// What the listing hands back must not be the client's own maps.
+		//
+		// It carries less than Instance does -- idev's ListInstances keeps
+		// the name, the status and the config and drops the rest -- but that
+		// is idev's choice, not something Incus does: GetInstances really
+		// does return devices and profiles. Asserting the absence here would
+		// pin a decision the client is free to revisit, and could not fail
+		// against either side anyway.
+		listed, err := env.Client.ListInstances(ctx)
+		if err != nil {
+			t.Fatalf("ListInstances() error = %v", err)
+		}
+		var found *incus.Instance
+		for i := range listed {
+			if listed[i].Name == env.Instance {
+				found = &listed[i]
+			}
+		}
+		if found == nil {
+			t.Fatalf("ListInstances() did not include %s", env.Instance)
+		}
+		found.Config["user.incus-dev.listing-probe"] = "written through the listing"
+
+		again, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if _, leaked := again.Config["user.incus-dev.listing-probe"]; leaked {
+			t.Error("a write to a listed instance reached the client's own state")
+		}
+	})
+
+	check("a created device is not shared with the caller", func(t *testing.T) {
+		// The same rule as for a written device, on the other way in. The
+		// contract covered one half of it and the fake diverged on the other.
+		device := incus.Device{"type": "disk", "source": "/srv", "path": "/created-probe"}
+		spec := incus.InstanceSpec{
+			Name:    env.Instance + "-devcopy",
+			Image:   env.Image,
+			Config:  map[string]string{"user.incus-dev.project": "contract"},
+			Devices: map[string]incus.Device{"probe": device},
+		}
+		if err := env.Client.CreateInstance(ctx, spec); err != nil {
+			t.Fatalf("CreateInstance() error = %v", err)
+		}
+		t.Cleanup(func() { _ = env.Client.DeleteInstance(ctx, spec.Name) })
+
+		device["path"] = "/changed-after-the-create"
+
+		inst, err := env.Client.Instance(ctx, spec.Name)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if got := inst.Devices["probe"]["path"]; got != "/created-probe" {
+			t.Errorf("device path = %q, want %q: the create shares state with the caller", got, "/created-probe")
+		}
+	})
+
+	check("a written device is not shared with the caller", func(t *testing.T) {
+		// The real client serialises the request, so a caller that reuses its
+		// map cannot reach back into the instance. A client that keeps the
+		// map lets a test mutate state it has already written.
+		device := incus.Device{"type": "disk", "source": "/srv", "path": "/shared-probe"}
+		change := incus.InstanceChange{SetDevices: map[string]incus.Device{"probe": device}}
+		if err := env.Client.UpdateInstance(ctx, env.Instance, change, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
+		}
+		t.Cleanup(func() {
+			_ = env.Client.UpdateInstance(ctx, env.Instance,
+				incus.InstanceChange{RemoveDevices: []string{"probe"}}, "")
+		})
+
+		device["path"] = "/changed-after-the-write"
+
+		inst, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if got := inst.Devices["probe"]["path"]; got != "/shared-probe" {
+			t.Errorf("device path = %q, want %q: the write shares state with the caller", got, "/shared-probe")
 		}
 	})
 

@@ -142,9 +142,20 @@ func (f *Fake) ListInstances(_ context.Context) ([]incus.Instance, error) {
 	if err := f.record("instances"); err != nil {
 		return nil, err
 	}
+	// What the real one builds: a name, a status and a config, and nothing
+	// shared with the state behind it. GetInstances does return devices and
+	// profiles; API.ListInstances drops them, so a caller reading a device
+	// off a listing here would read a field that is empty in production --
+	// and handing back the live maps would let a test change an instance
+	// through a listing of it.
 	out := make([]incus.Instance, 0, len(f.Instances))
 	for _, name := range slices.Sorted(maps.Keys(f.Instances)) {
-		out = append(out, *f.Instances[name])
+		inst := f.Instances[name]
+		out = append(out, incus.Instance{
+			Name:   inst.Name,
+			Status: inst.Status,
+			Config: maps.Clone(inst.Config),
+		})
 	}
 	return out, nil
 }
@@ -165,7 +176,9 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 	}
 	devices := map[string]incus.Device{}
 	for name, dev := range spec.Devices {
-		devices[name] = dev
+		// Cloned, as UpdateInstance does and as the real client cannot avoid
+		// doing: what the caller changes afterwards must not reach here.
+		devices[name] = maps.Clone(dev)
 	}
 	profiles := spec.Profiles
 	if spec.NoProfiles {
@@ -311,7 +324,9 @@ func (f *Fake) UpdateInstance(_ context.Context, name string, change incus.Insta
 		delete(inst.Devices, device)
 	}
 	for deviceName, device := range change.SetDevices {
-		inst.Devices[deviceName] = device
+		// Cloned: the real client serialises the request, so what the caller
+		// does to its own map afterwards cannot reach the instance.
+		inst.Devices[deviceName] = maps.Clone(device)
 	}
 	f.bumpETag(name)
 	return nil

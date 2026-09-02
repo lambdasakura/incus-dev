@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Problem is one thing validation found.
@@ -195,6 +197,10 @@ func validateShell(c *Config, ps *problems) {
 	}
 }
 
+// isControl reports whether a rune is a control character, which line-oriented
+// output cannot carry.
+func isControl(r rune) bool { return unicode.IsControl(r) }
+
 // checkAnsibleTags refuses a tag ansible-playbook would not read as a tag.
 //
 // Each list is joined with a comma and passed as one argv word, so a tag that
@@ -227,6 +233,17 @@ func checkAnsibleTags(path string, step *AnsibleStep, ps *problems) {
 func validateStepValues(c *Config, ps *problems) {
 	check := func(steps []Step, kind string) {
 		for i, s := range steps {
+			// The name is one field of one line of `idev provision --list`,
+			// which a script reads with cut. A tab in it shifts the columns
+			// and a newline makes one step into two rows.
+			if idx := strings.IndexFunc(s.Name, isControl); idx >= 0 {
+				// The rune, not the byte at that index: half of Cc is
+				// multi-byte, and s.Name[idx] would print its lead byte --
+				// a character the user never wrote.
+				found, _ := utf8.DecodeRuneInString(s.Name[idx:])
+				ps.add(fmt.Sprintf("%s[%d].name", kind, i),
+					"must not contain a control character (found %q)", found)
+			}
 			if s.Ansible != nil {
 				checkAnsibleTags(fmt.Sprintf("%s[%d].ansible", kind, i), s.Ansible, ps)
 			}

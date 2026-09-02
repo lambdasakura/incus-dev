@@ -353,7 +353,7 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 						"Delete instance %s AND its persistent volumes, with everything in them?",
 						app.InstanceName())
 				}
-				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(), prompt, isTerminal(os.Stdin))
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(), prompt, isTerminal(os.Stdin))
 				if err != nil {
 					return err
 				}
@@ -382,7 +382,7 @@ func newRebuildCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !force {
-				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),
 					fmt.Sprintf("Destroy and recreate instance %s?", app.InstanceName()),
 					isTerminal(os.Stdin))
 				if err != nil {
@@ -446,7 +446,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !force {
-				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),
 					fmt.Sprintf("Roll instance %s back to %s? Its current state will be lost.",
 						app.InstanceName(), args[0]), isTerminal(os.Stdin))
 				if err != nil {
@@ -473,7 +473,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !deleteForce {
-				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+				ok, err := confirm(cmd.InOrStdin(), cmd.ErrOrStderr(),
 					fmt.Sprintf("Delete snapshot %s?", args[0]), isTerminal(os.Stdin))
 				if err != nil {
 					return err
@@ -507,6 +507,9 @@ func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 }
 
 // confirm asks for confirmation before a destructive operation.
+//
+// The question goes to out, which is standard error: stdout carries results,
+// and a caller reading it must not have to strip a question out of them.
 func confirm(in io.Reader, out io.Writer, prompt string, atTerminal bool) (bool, error) {
 	_, _ = fmt.Fprintf(out, "%s [y/N]: ", prompt)
 

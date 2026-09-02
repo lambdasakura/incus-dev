@@ -335,6 +335,20 @@ type ExecOptions struct {
 }
 ```
 
+interfaceとして定義することで、以下を可能にする。
+
+- 単体テストでのfake実装（Incus daemon不要）
+- 将来的な実装差し替え
+
+interfaceには **実際に使う操作だけ** を並べる。
+instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で行う。
+差し替え時の負担がそのまま増えるため、使わない操作を含めない。
+
+config と device の書き込みを `UpdateInstance` 1つにまとめているのはこの規則による。
+Incus APIのPUTが元々1つであり、idev側で4つに割っていたものを戻した形である。
+
+---
+
 ### 5.7.1 実装方針
 
 Incus操作は公式Go client library

@@ -85,6 +85,19 @@ idev status --json
 [ "$(idev status --json | jq -r .exists)" = "true" ] || idev up
 ```
 
+標準出力には結果だけが載るので、そのまま取り込んで良い。
+`status --json` / `validate` / `provision --list` / `snapshot list` /
+`up --dry-run` の出力と、`idev exec` / `idev shell` が中継するコマンドの出力がこれにあたる。
+ログ・警告・エラー・確認プロンプト、そして `up` / `provision` / `rebuild` 中の
+provisioningステップの出力は、すべて標準エラー出力へ出る。
+
+一覧系の2つは1行1件のタブ区切りで、0件のときは何も出さない。
+
+```bash
+idev provision --list | wc -l     # ステップが無ければ 0
+idev snapshot list | cut -f1      # 名前が1行ずつ
+```
+
 ## 7.5 プロジェクトの指示ファイルへ書く例
 
 `CLAUDE.md` や `AGENTS.md` に以下のように書いておくと、

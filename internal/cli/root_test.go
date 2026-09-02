@@ -1067,3 +1067,34 @@ func TestDestructiveCommandsReportNobodyToAsk(t *testing.T) {
 		})
 	}
 }
+
+// The question is not a result.
+//
+// A caller reading stdout gets what the command produced; a prompt landing
+// there means `out=$(idev destroy)` collects the question, and a log that
+// keeps only stderr shows the refusal without ever showing what was asked.
+func TestTheConfirmationPromptGoesToStderr(t *testing.T) {
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	app, client := fakeApp(t, errOut)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+
+	root := newRootCommand("test", stub(app), stub(app))
+	root.SetArgs([]string{"destroy"})
+	root.SetIn(strings.NewReader("n\n"))
+	root.SetOut(out)
+	root.SetErr(errOut)
+
+	if err := root.ExecuteContext(context.Background()); err == nil {
+		t.Fatal("destroy succeeded despite being declined")
+	}
+	if strings.Contains(out.String(), "[y/N]") {
+		t.Errorf("stdout = %q, want the question on stderr", out)
+	}
+	if !strings.Contains(errOut.String(), "[y/N]") {
+		t.Errorf("stderr = %q, want it to carry the question", errOut)
+	}
+}

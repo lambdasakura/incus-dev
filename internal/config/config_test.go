@@ -1573,3 +1573,49 @@ func TestParseRefusesAnsibleTagsThatLookLikeFlags(t *testing.T) {
 		t.Errorf("Parse() error = %v, want ordinary tags accepted", err)
 	}
 }
+
+// A step name reaches `idev provision --list` as one field of one line, so a
+// tab in it shifts the columns and a newline splits one step into two rows.
+// Nothing stopped either: the schema asks only for a non-empty string.
+func TestParseRefusesControlCharactersInAStepName(t *testing.T) {
+	head := "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n"
+	for _, tt := range []struct{ name, value string }{
+		{"tab", `"install\tdeps"`},
+		{"newline", `"two\nlines"`},
+		{"carriage return", `"back\rup"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := head + "provision:\n  - name: " + tt.value + "\n    run: \"true\"\n"
+			_, err := config.Parse([]byte(body), config.Options{})
+			if err == nil {
+				t.Fatal("Parse() = nil error, want the control character refused")
+			}
+			if !strings.Contains(err.Error(), "name") {
+				t.Errorf("Parse() error = %q, want it to name the field", err)
+			}
+		})
+	}
+
+	// An ordinary name, including spaces and non-ASCII, still passes.
+	ok := head + "provision:\n  - name: \"install the deps ✓\"\n    run: \"true\"\n"
+	if _, err := config.Parse([]byte(ok), config.Options{}); err != nil {
+		t.Errorf("Parse() error = %v, want an ordinary name accepted", err)
+	}
+}
+
+// Half of the control-character range is multi-byte, and the index the search
+// returns is a byte index -- so the message printed the UTF-8 lead byte, a
+// character the user never wrote.
+func TestTheControlCharacterMessageNamesTheRune(t *testing.T) {
+	head := "schema: 1\nproject:\n  name: p\ninstance:\n  image: images:ubuntu/24.04\n"
+	body := head + "provision:\n  - name: \"install\\u0080deps\"\n    run: \"true\"\n"
+
+	_, err := config.Parse([]byte(body), config.Options{})
+	if err == nil {
+		t.Fatal("Parse() = nil error, want the control character refused")
+	}
+	// %q of U+0080 is the escape, not the lead byte of its encoding.
+	if !strings.Contains(err.Error(), `\u0080`) {
+		t.Errorf("Parse() error = %q, want it to name U+0080", err)
+	}
+}

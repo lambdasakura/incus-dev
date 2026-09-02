@@ -671,7 +671,7 @@ func TestAPIApplyConfig(t *testing.T) {
 	a, _ := newAPI(f)
 
 	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: map[string]string{"limits.cpu": "8"}, UnsetConfig: nil}, ""); err != nil {
-		t.Fatalf("ApplyConfig() error = %v", err)
+		t.Fatalf("UpdateInstance() error = %v", err)
 	}
 
 	got := f.lastUpdate.Config
@@ -695,7 +695,7 @@ func TestAPIUnsetConfig(t *testing.T) {
 	a, _ := newAPI(f)
 
 	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: nil, UnsetConfig: []string{"a"}}, ""); err != nil {
-		t.Fatalf("UnsetConfig() error = %v", err)
+		t.Fatalf("UpdateInstance() error = %v", err)
 	}
 	got := f.lastUpdate.Config
 	if _, ok := got["a"]; ok {
@@ -723,7 +723,7 @@ func TestAPIApplyDevicesDropsUndeclaredKeys(t *testing.T) {
 		"data": {"type": "disk", "source": "/srv/data", "path": "/data"},
 	}}, "")
 	if err != nil {
-		t.Fatalf("ApplyDevices() error = %v", err)
+		t.Fatalf("UpdateInstance() error = %v", err)
 	}
 
 	got := f.lastUpdate.Devices["data"]
@@ -749,7 +749,7 @@ func TestAPIApplyDevices(t *testing.T) {
 		"new":       {"type": "nic"},
 	}}, "")
 	if err != nil {
-		t.Fatalf("ApplyDevices() error = %v", err)
+		t.Fatalf("UpdateInstance() error = %v", err)
 	}
 
 	got := f.lastUpdate.Devices
@@ -778,7 +778,7 @@ func TestAPIRemoveDevices(t *testing.T) {
 	a, _ := newAPI(f)
 
 	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{RemoveDevices: []string{"gone"}}, ""); err != nil {
-		t.Fatalf("RemoveDevices() error = %v", err)
+		t.Fatalf("UpdateInstance() error = %v", err)
 	}
 	got := f.lastUpdate.Devices
 	if _, ok := got["gone"]; ok {
@@ -1307,7 +1307,7 @@ func TestAPIWithoutLogger(t *testing.T) {
 	a, _ := newAPI(f)
 
 	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, ""); err != nil {
-		t.Errorf("ApplyConfig() error = %v", err)
+		t.Errorf("UpdateInstance() error = %v", err)
 	}
 }
 

@@ -85,8 +85,10 @@ func (a *App) ListSnapshots(ctx context.Context) error {
 		return err
 	}
 	if len(snapshots) == 0 {
-		_, err := fmt.Fprintln(a.out, "no snapshots")
-		return err
+		// Nothing on stdout, for the same reason as provision --list: one row
+		// per snapshot, and none means none.
+		a.log.Info("No snapshots")
+		return nil
 	}
 
 	for _, s := range snapshots {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2021,15 +2022,21 @@ func TestListStepsWithoutSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	errOut := &bytes.Buffer{}
 	app := NewApp(AppOptions{
-		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{}, Out: out,
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: out, ErrOut: errOut,
 	})
 
 	if err := app.ListSteps(); err != nil {
 		t.Fatalf("ListSteps() error = %v", err)
 	}
-	if !strings.Contains(out.String(), "no provision steps") {
-		t.Errorf("output = %q", out.String())
+	// Said, but not as a row: stdout is one line per step.
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing", out)
+	}
+	if !strings.Contains(errOut.String(), "No provision steps") {
+		t.Errorf("stderr = %q", errOut)
 	}
 }
 
@@ -2046,6 +2053,8 @@ func TestListStepsWriteError(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, errBoom)
 	}
 
+	// With no steps there is nothing to write, so a broken stdout cannot
+	// fail: the note about there being none goes to stderr.
 	empty, err := config.Parse([]byte(rootYAML), config.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -2053,8 +2062,8 @@ func TestListStepsWriteError(t *testing.T) {
 	app = NewApp(AppOptions{
 		Config: empty, Client: incustest.New(), Runner: &runnertest.Fake{}, Out: errWriter{},
 	})
-	if err := app.ListSteps(); !errors.Is(err, errBoom) {
-		t.Errorf("error = %v, want %v", err, errBoom)
+	if err := app.ListSteps(); err != nil {
+		t.Errorf("error = %v, want none", err)
 	}
 }
 
@@ -2431,8 +2440,8 @@ func TestSnapshotOperations(t *testing.T) {
 	if err := app.ListSnapshots(ctx); err != nil {
 		t.Fatalf("ListSnapshots() error = %v", err)
 	}
-	if !strings.Contains(out.String(), "no snapshots") {
-		t.Errorf("output = %q", out.String())
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing for an empty list", out)
 	}
 
 	// Create with a name.
@@ -2544,9 +2553,10 @@ func TestListSnapshotsWriteError(t *testing.T) {
 		Out: errWriter{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	// When it is empty.
-	if err := app.ListSnapshots(context.Background()); !errors.Is(err, errBoom) {
-		t.Errorf("error = %v, want %v", err, errBoom)
+	// When it is empty there is nothing to write, so a broken stdout cannot
+	// fail.
+	if err := app.ListSnapshots(context.Background()); err != nil {
+		t.Errorf("error = %v, want none", err)
 	}
 	// When there is one.
 	client.SnapshotsByInstance = map[string][]incus.Snapshot{
@@ -3170,13 +3180,13 @@ func TestRebuildKeepsTheCarriedRecordWhenSomethingElseCreatedTheInstance(t *test
 	// lookup up makes next, with a record of its own that knows nothing of
 	// the old volume. The hook runs before each call, so this arms on the
 	// delete and fires on the lookup after it.
-	deleted := false
+	deleted, replaced := false, false
 	client.Hook = func(call string) error {
 		switch {
 		case strings.HasPrefix(call, "delete dev-example-project"):
 			deleted = true
-		case deleted && strings.HasPrefix(call, "instance dev-example-project"):
-			client.Hook = nil
+		case deleted && !replaced && strings.HasPrefix(call, "instance dev-example-project"):
+			replaced = true
 			client.AddInstance(&incus.Instance{
 				Name:     "dev-example-project",
 				Status:   "Running",
@@ -3224,13 +3234,13 @@ func TestAdoptingTheCarriedRecordStopsCarryingIt(t *testing.T) {
 		"default/dev-example-project-cache,default/dev-example-project-old"
 	client.Volumes["default/dev-example-project-old"] = true
 
-	deleted := false
+	deleted, replaced := false, false
 	client.Hook = func(call string) error {
 		switch {
 		case strings.HasPrefix(call, "delete dev-example-project"):
 			deleted = true
-		case deleted && strings.HasPrefix(call, "instance dev-example-project"):
-			client.Hook = nil
+		case deleted && !replaced && strings.HasPrefix(call, "instance dev-example-project"):
+			replaced = true
 			client.AddInstance(&incus.Instance{
 				Name:     "dev-example-project",
 				Status:   "Running",
@@ -3425,6 +3435,437 @@ func TestEveryWriteExplainsAChangedInstance(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "idev up") {
 				t.Errorf("Up() error = %q, want it to say what to do next", err)
+			}
+			// It must not say what was applied. This wraps writes at three
+			// points in a run -- after volumes are made, after the
+			// declaration has landed, after a stop and a start -- and there
+			// is no one answer that is true at all of them.
+			for _, claim := range []string{"left as it was", "nothing was applied"} {
+				if strings.Contains(err.Error(), claim) {
+					t.Errorf("Up() error = %q, want no claim about what was applied (%q)", err, claim)
+				}
+			}
+		})
+	}
+}
+
+// The two listings a script parses have one row per thing, always.
+//
+// "no provision steps declared" on stdout makes `provision --list | wc -l`
+// answer 1 for none, and `cut -f1` yield a step named "no provision steps
+// declared". Nothing is a legitimate answer, and the empty output says it.
+func TestEmptyListingsWriteNoRows(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	t.Run("provision --list", func(t *testing.T) {
+		out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+		a := NewApp(AppOptions{
+			Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+			Out: out, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+		})
+
+		if err := a.ListSteps(); err != nil {
+			t.Fatalf("ListSteps() error = %v", err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing: a caller counts rows", out)
+		}
+		if errOut.Len() == 0 {
+			t.Error("nothing was said about there being no steps")
+		}
+	})
+
+	t.Run("snapshot list", func(t *testing.T) {
+		out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+		client := incustest.New()
+		client.AddInstance(&incus.Instance{
+			Name:   "dev-example-project",
+			Status: "Running",
+			Config: map[string]string{managedProjectKey: "example-project"},
+		})
+		a := NewApp(AppOptions{
+			Config: cfg, Client: client, Runner: &runnertest.Fake{},
+			Out: out, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+		})
+
+		if err := a.ListSnapshots(context.Background()); err != nil {
+			t.Fatalf("ListSnapshots() error = %v", err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing: a caller counts rows", out)
+		}
+		if errOut.Len() == 0 {
+			t.Error("nothing was said about there being no snapshots")
+		}
+	})
+}
+
+// The carried record stops being carried the moment it is written, not when
+// the function that wrote it returns.
+//
+// reapplyInstance also settles the restart record, so a failure there left the
+// record on the instance and still in a.carried -- and rebuild then said it
+// was lost and offered to delete the volumes it names. That is the false
+// advice this whole line of fixes exists to remove, reached through the one
+// window the last one left open.
+func TestTheCarriedRecordIsClearedAsSoonAsItIsWritten(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+	client.Volumes["default/dev-example-project-old"] = true
+
+	deleted, replaced := false, false
+	client.Hook = func(call string) error {
+		switch {
+		case strings.HasPrefix(call, "delete dev-example-project"):
+			deleted = true
+		case deleted && !replaced && strings.HasPrefix(call, "instance dev-example-project"):
+			replaced = true
+			client.AddInstance(&incus.Instance{
+				Name:     "dev-example-project",
+				Status:   "Running",
+				Profiles: []string{"default"},
+				Config: map[string]string{
+					managedProjectKey: "example-project",
+					managedVolumesKey: "default/dev-example-project-cache",
+					managedRestartKey: "2026-01-01T00:00:00Z|security.nesting=false",
+				},
+			})
+		}
+		// The restart record is settled after the write that persists the
+		// carried one, and shares its call prefix, so it is told apart by the
+		// key it carries. Failing there must not make the record "lost".
+		if strings.HasPrefix(call, "config ") && strings.Contains(call, managedRestartKey) {
+			return errBoom
+		}
+		return nil
+	}
+
+	err := app(t, cfg, client).Rebuild(context.Background())
+	if err == nil {
+		t.Fatal("Rebuild() = nil error, want the failed restart write reported")
+	}
+	if strings.Contains(err.Error(), "storage volume delete") {
+		t.Errorf("Rebuild() error = %q, want no advice to delete a volume the instance now records", err)
+	}
+
+	got := client.Instances["dev-example-project"].Config[managedVolumesKey]
+	if !strings.Contains(got, "dev-example-project-old") {
+		t.Errorf("record = %q, want the carried volume written", got)
+	}
+}
+
+// clearRestartPending is a write like any other, and can lose to a 412 from
+// the read updateInstance falls back on. Its failure has to say what to do.
+func TestClearingTheRestartRecordExplainsAChangedInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	// The clear is reached only once nothing is owed, so the first run settles
+	// the declaration and records the restart, and the second clears it.
+	a := app(t, cfg, client)
+	if err := a.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("the settling run failed: %v", err)
+	}
+	client.Hook = func(call string) error {
+		if strings.HasPrefix(call, "unset ") && strings.Contains(call, managedRestartKey) {
+			return fmt.Errorf("update instance: %w", incus.ErrChanged)
+		}
+		return nil
+	}
+
+	err := a.Up(context.Background(), UpOptions{Restart: true})
+	if !errors.Is(err, incus.ErrChanged) {
+		t.Fatalf("Up() error = %v, want ErrChanged", err)
+	}
+	if !strings.Contains(err.Error(), "idev up") {
+		t.Errorf("Up() error = %q, want it to say what to do next", err)
+	}
+}
+
+// The advice about a lost volume record has been wrong four times, each in a
+// different place, and each fix closed the one window it was shown. They all
+// break the same invariant, so this asserts the invariant instead of the
+// paths: idev may say a volume is unnameable only when the instance is not
+// recording it.
+//
+// It fails rebuild at every call in turn, which is how a fifth window would be
+// found without waiting for someone to walk into it.
+func TestTheLostRecordAdviceMatchesWhatTheInstanceRecords(t *testing.T) {
+	const carried = "default/dev-example-project-old"
+
+	// Both halves of up: the one that creates the instance, and the one that
+	// finds one -- every window so far has been in the second, which a plain
+	// rebuild never reaches.
+	for _, world := range []struct {
+		name    string
+		arrange func(*incustest.Fake)
+	}{
+		{"up creates the instance", func(*incustest.Fake) {}},
+		{"something else creates it first", recreateAfterDelete},
+	} {
+		t.Run(world.name, func(t *testing.T) {
+			runLostRecordInvariant(t, world.arrange, carried)
+		})
+	}
+}
+
+// runLostRecordInvariant fails rebuild at each call in turn and checks the
+// invariant after each.
+func runLostRecordInvariant(t *testing.T, arrange func(*incustest.Fake), carried string) {
+	t.Helper()
+
+	var calls []string
+	{
+		client, cfg := rebuildFixture(t)
+		arrange(client)
+		_ = app(t, cfg, client).Rebuild(context.Background())
+		calls = append(calls, client.Calls...)
+	}
+	if len(calls) < 5 {
+		t.Fatalf("rebuild made only %d calls; the fixture is not exercising it", len(calls))
+	}
+
+	checked, swallowed := 0, 0
+	for i, at := range calls {
+		t.Run(fmt.Sprintf("%d %s", i, at), func(t *testing.T) {
+			client, cfg := rebuildFixture(t)
+			arrange(client)
+			outer := client.Hook
+			seen := 0
+			client.Hook = func(call string) error {
+				if outer != nil {
+					if err := outer(call); err != nil {
+						return err
+					}
+				}
+				seen++
+				if seen == i+1 {
+					return errBoom
+				}
+				return nil
+			}
+
+			err := app(t, cfg, client).Rebuild(context.Background())
+			if err == nil {
+				// Some failures are swallowed on purpose --
+				// warnStrandedInstances and pruneVolumeRecord both do that --
+				// and rebuild then succeeds. The invariant still has to hold:
+				// a run that succeeds while the record is lost is the worst
+				// case there is, because nothing at all is printed. One of
+				// these three calls is the VolumeExists on the carried volume
+				// itself, which is precisely where that would happen.
+				swallowed++
+			}
+
+			said := err != nil && strings.Contains(err.Error(), carried)
+			recorded := false
+			if inst, ok := client.Instances["dev-example-project"]; ok {
+				recorded = strings.Contains(inst.Config[managedVolumesKey], "dev-example-project-old")
+			}
+			if !client.Volumes[carried] {
+				t.Fatalf("the volume was deleted; rebuild keeps them, so this fixture no longer "+
+					"exercises what it says it does (err = %v)", err)
+			}
+
+			checked++
+			_ = err
+
+			switch {
+			case said && recorded:
+				t.Errorf("idev called %s unnameable while the instance records it:\n%v", carried, err)
+			case !said && !recorded:
+				t.Errorf("%s is on the pool, the instance does not record it, "+
+					"and idev did not name it: nothing will ever name it again (err = %v)", carried, err)
+			}
+		})
+	}
+
+	// An absolute floor, not a ratio. len(calls) comes from the same run, so a
+	// ratio rises back to 1.0 as the fixture shrinks and reports nothing --
+	// which is the direction that matters, because rebuild's second half is
+	// where the carried record lives. Raise this deliberately if the number
+	// of calls goes up.
+	const leastCalls = 12
+	t.Logf("%d of %d calls reached the invariant, %d of them with the failure swallowed",
+		checked, len(calls), swallowed)
+	if checked < leastCalls {
+		t.Errorf("only %d calls reached the invariant, want at least %d; the fixture is not "+
+			"exercising rebuild the way this test says it does", checked, leastCalls)
+	}
+}
+
+// recreateAfterDelete puts the instance back between rebuild's delete and the
+// lookup up makes next, which is what a second idev amounts to. It is the only
+// way up reaches its existing-instance branch during a rebuild.
+func recreateAfterDelete(client *incustest.Fake) {
+	deleted, replaced := false, false
+	client.Hook = func(call string) error {
+		switch {
+		case strings.HasPrefix(call, "delete dev-example-project"):
+			deleted = true
+		case deleted && !replaced && strings.HasPrefix(call, "instance dev-example-project"):
+			replaced = true
+			client.AddInstance(&incus.Instance{
+				Name:     "dev-example-project",
+				Status:   "Running",
+				Profiles: []string{"default"},
+				Config: map[string]string{
+					managedProjectKey: "example-project",
+					managedVolumesKey: "default/dev-example-project-cache",
+				},
+			})
+		}
+		return nil
+	}
+}
+
+// rebuildFixture is an instance carrying a volume that has left the
+// declaration, which is the case rebuild's carried record exists for.
+func rebuildFixture(t *testing.T) (*incustest.Fake, *config.Config) {
+	t.Helper()
+
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+	client.Volumes["default/dev-example-project-old"] = true
+	return client, cfg
+}
+
+// Which stream carries what, pinned where it can be reverted.
+//
+// The spec says provisioning output goes to stderr and only shell and exec
+// relay a container's stdout to stdout. That rule was written down and
+// defended by nothing: moving the executor's writers to a.out left the whole
+// suite green, and the integration harness reads CombinedOutput, so it cannot
+// see the difference either.
+func TestProvisioningOutputGoesToStderr(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"provision:\n  - run: \"true\"\n")
+
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		if opt.Stdout != nil {
+			_, _ = io.WriteString(opt.Stdout, "STEP-STDOUT\n")
+		}
+		if opt.Stderr != nil {
+			_, _ = io.WriteString(opt.Stderr, "STEP-STDERR\n")
+		}
+		return 0, nil
+	}
+
+	// Every command that runs the steps, because the manual names all three.
+	for _, tt := range []struct {
+		name string
+		run  func(*App) error
+	}{
+		{"provision", func(a *App) error { return a.Provision(context.Background(), provision.Selection{}) }},
+		{"up", func(a *App) error { return a.Up(context.Background(), UpOptions{}) }},
+		{"rebuild", func(a *App) error { return a.Rebuild(context.Background()) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out.Reset()
+			errOut.Reset()
+			a := NewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: out, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+			})
+			if err := tt.run(a); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+
+			// The result is the environment, not the log of building it.
+			if strings.Contains(out.String(), "STEP-") {
+				t.Errorf("stdout = %q, want no provisioning output: a caller captures stdout for results", out)
+			}
+			for _, want := range []string{"STEP-STDOUT", "STEP-STDERR"} {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("stderr = %q, want it to carry %s", errOut, want)
+				}
+			}
+		})
+	}
+}
+
+// exec is the other way round: the command's output is the result.
+func TestExecOutputGoesToStdout(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+	client.ExecFunc = func(_ string, _ []string, opt incus.ExecOptions) (int, error) {
+		if opt.Stdout != nil {
+			_, _ = io.WriteString(opt.Stdout, "CMD-STDOUT\n")
+		}
+		if opt.Stderr != nil {
+			_, _ = io.WriteString(opt.Stderr, "CMD-STDERR\n")
+		}
+		return 0, nil
+	}
+
+	// shell too: the manual names both, and they are the same path.
+	for _, tt := range []struct {
+		name string
+		run  func(*App) error
+	}{
+		{"exec", func(a *App) error { return a.Exec(context.Background(), []string{"true"}) }},
+		{"shell", func(a *App) error { return a.Shell(context.Background(), []string{"true"}) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out.Reset()
+			errOut.Reset()
+			a := NewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: out, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+			})
+			if err := tt.run(a); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+
+			if !strings.Contains(out.String(), "CMD-STDOUT") {
+				t.Errorf("stdout = %q, want the command's own stdout", out)
+			}
+			if strings.Contains(out.String(), "CMD-STDERR") {
+				t.Errorf("stdout = %q, want the command's stderr kept off it", out)
+			}
+			if !strings.Contains(errOut.String(), "CMD-STDERR") {
+				t.Errorf("stderr = %q, want the command's own stderr", errOut)
 			}
 		})
 	}

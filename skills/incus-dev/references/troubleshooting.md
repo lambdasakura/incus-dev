@@ -64,7 +64,9 @@ write that back if the instance has moved on since: the alternative is to erase
 what the other run recorded, which would leave volumes on the pool that no idev
 command can name again.
 
-Nothing was applied. Run `idev up` again once the other one has finished.
+Run `idev up` again once the other one has finished. It reads the instance as
+it then is and applies the whole declaration, so whatever this run had got
+through is settled by the next one.
 
 ### `instance <name> already belongs to project "<other>"`
 

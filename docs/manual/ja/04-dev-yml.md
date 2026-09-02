@@ -334,6 +334,9 @@ provision:
 
 書き方は [05-provisioning.md](05-provisioning.md) を参照。
 
+ステップの `name` に制御文字は使えない。タブや改行が入ると
+`idev provision --list` の行（1行1ステップ）が割れたり列がずれたりするためである。
+
 ---
 
 ## 4.9 パスの解決規則

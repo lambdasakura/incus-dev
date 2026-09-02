@@ -450,6 +450,24 @@ non-zero = failure
 
 通常出力は人間向けでよい。
 
+ただし、標準出力と標準エラー出力の役割は分ける。
+
+- **標準出力**はコマンドの結果だけを載せる。
+  `status` / `validate` / `provision --list` / `snapshot list` / `up --dry-run` の出力と、
+  `shell` / `exec` が中継するコンテナ内プロセスの標準出力がこれにあたる
+- ログ、警告、エラー、確認プロンプトは**標準エラー出力**へ出す
+- provisioningステップ（`run` / `ansible` / `galaxy`）の出力も**標準エラー出力**へ出す。
+  `up` / `provision` / `rebuild` の結果は環境そのものであって、途中の出力ではない。
+  `exec` は逆で、コマンドの出力こそが結果である
+
+結果が1行1件の形式（`provision --list` と `snapshot list`）である場合、
+0件は「0行」で表す。「該当なし」という文をそこへ書かない。
+`wc -l` が1を返し、`cut` がその文をデータとして拾ってしまうためである。
+0件であること自体は標準エラー出力へ出す。
+
+同じ理由で、行に埋め込まれる値には制御文字を許さない
+（`provision[].name` — [03-configuration.md](03-configuration.md) 参照）。
+
 将来的なAIやツール連携のため、
 
 ```bash

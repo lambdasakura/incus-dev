@@ -87,6 +87,21 @@ idev status --json
 [ "$(idev status --json | jq -r .exists)" = "true" ] || idev up
 ```
 
+Standard output carries the result and nothing else, so it is safe to capture:
+`status --json`, `validate`, `provision --list`, `snapshot list`, `up
+--dry-run`, and the output the command relays for `idev exec` and `idev shell`. Everything else --
+logs, warnings, errors, the confirmation prompts, and the output of
+provisioning steps during `up`, `provision` and `rebuild` -- goes to standard
+error.
+
+The two listings print one row per thing, tab-separated, and nothing at all
+when there is none:
+
+```bash
+idev provision --list | wc -l     # 0 when there are no steps
+idev snapshot list | cut -f1      # names, one per line
+```
+
 ## 7.5 What to put in the project's instruction file
 
 Something like this in `CLAUDE.md` or `AGENTS.md` stops an agent from trying to

@@ -80,7 +80,7 @@ func TestFakeConfigAndDevices(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := f.Instances["dev-x"].Config["a"]; ok {
-		t.Error("UnsetConfig() did not remove it")
+		t.Error("UpdateInstance() did not remove it")
 	}
 	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: nil}, ""); err != nil {
 		t.Fatalf("UnsetConfig(nil) error = %v", err)
@@ -116,13 +116,13 @@ func TestFakeConfigOnMissingInstance(t *testing.T) {
 	f := incustest.New()
 
 	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, ""); !errors.Is(err, incus.ErrInstanceNotFound) {
-		t.Errorf("ApplyConfig() error = %v", err)
+		t.Errorf("UpdateInstance() error = %v", err)
 	}
 	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{"d": {"type": "disk"}}}, ""); !errors.Is(err, incus.ErrInstanceNotFound) {
-		t.Errorf("ApplyDevices() error = %v", err)
+		t.Errorf("UpdateInstance() error = %v", err)
 	}
 	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"a"}}, ""); !errors.Is(err, incus.ErrInstanceNotFound) {
-		t.Errorf("UnsetConfig() error = %v", err)
+		t.Errorf("UpdateInstance() error = %v", err)
 	}
 }
 
@@ -356,7 +356,7 @@ func TestFakeApplyDevicesReplaces(t *testing.T) {
 		"data": {"type": "disk", "source": "/srv/data", "path": "/data"},
 	}}, "")
 	if err != nil {
-		t.Fatalf("ApplyDevices() error = %v", err)
+		t.Fatalf("UpdateInstance() error = %v", err)
 	}
 
 	got := f.Instances["dev-x"].Devices["data"]
@@ -380,5 +380,80 @@ func TestFakeDeleteVolumeRejectsWhatIsNotThere(t *testing.T) {
 	}
 	if f.Volumes["default/there"] {
 		t.Error("the volume was not removed")
+	}
+}
+
+// Every change to an instance moves its version on, so a reading taken before
+// one cannot be written against. The contract pins the start; these are the
+// rest, which no production path holds an etag across today and so nothing
+// else would notice going wrong.
+func TestEveryChangeMovesTheETag(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name   string
+		change func(*testing.T, *incustest.Fake)
+	}{
+		{"stop", func(t *testing.T, f *incustest.Fake) {
+			if err := f.StopInstance(ctx, "dev-x"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"restore a snapshot", func(t *testing.T, f *incustest.Fake) {
+			if err := f.CreateSnapshot(ctx, "dev-x", "s1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.RestoreSnapshot(ctx, "dev-x", "s1"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := incustest.New()
+			if err := f.CreateInstance(ctx, incus.InstanceSpec{Name: "dev-x", Image: "img"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.StartInstance(ctx, "dev-x"); err != nil {
+				t.Fatal(err)
+			}
+
+			before, err := f.Instance(ctx, "dev-x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.change(t, f)
+
+			after, err := f.Instance(ctx, "dev-x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.ETag == after.ETag {
+				t.Errorf("the etag did not move across a %s", tt.name)
+			}
+		})
+	}
+
+	// And creating one gives it an etag of its own, not the one a previous
+	// instance of the same name left behind.
+	f := incustest.New()
+	if err := f.CreateInstance(ctx, incus.InstanceSpec{Name: "dev-y", Image: "img"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.Instance(ctx, "dev-y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteInstance(ctx, "dev-y"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.CreateInstance(ctx, incus.InstanceSpec{Name: "dev-y", Image: "img"}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.Instance(ctx, "dev-y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ETag == second.ETag {
+		t.Error("a recreated instance kept the old etag")
 	}
 }

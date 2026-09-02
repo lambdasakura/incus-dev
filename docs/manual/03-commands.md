@@ -172,6 +172,10 @@ idev provision --step setup-go --step install-tools
 idev provision --from 2
 ```
 
+`--list` prints one tab-separated row per step, and nothing at all when there
+are none, so a script can count rows. That there are none is said on standard
+error, like everything else idev says.
+
 Repeating `--step` still runs the steps in **declaration order**, not in the
 order you listed them. Step numbers in failure messages are always positions in
 the whole list, even for a partial run.
@@ -357,7 +361,10 @@ idev snapshot delete before-upgrade
 ```
 
 Without a name, the current date and time are used (`20260831-142530`).
-`restore` and `delete` ask for confirmation (`--force` skips it).
+`restore` and `delete` ask for confirmation (`--force` skips it); the question
+goes to standard error, so capturing standard output is safe.
+
+`list` prints one row per snapshot, and nothing when there are none.
 
 `create` rejects a name containing `/` or whitespace, which Incus refuses
 anyway, and `.` or `..`, which on some storage drivers leave a snapshot the

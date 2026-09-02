@@ -258,10 +258,6 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
 			return err
 		}
-		// Only now is the carried record on the instance. Clearing it any
-		// earlier -- before the volumes are made, before the write -- would
-		// lose it to any failure in between, with nothing left to name it.
-		a.carried = nil
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.warnStrandedInstances(ctx)
 		a.log.Info("Creating instance " + a.instance)
@@ -336,8 +332,10 @@ func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
 // --from accept.
 func (a *App) ListSteps() error {
 	if len(a.cfg.Provision) == 0 {
-		_, err := fmt.Fprintln(a.out, "no provision steps declared")
-		return err
+		// Nothing on stdout: a caller counts the rows, and a sentence there
+		// is a row. Saying so belongs with the other things idev says.
+		a.log.Info("No provision steps declared")
+		return nil
 	}
 
 	for i, step := range a.cfg.Provision {
@@ -927,22 +925,27 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 	if err := a.client.UpdateInstance(ctx, a.instance, change, inst.ETag); err != nil {
 		return a.changedUnderfoot(err)
 	}
+	// The record rebuild was carrying is on the instance now. Anything that
+	// fails after this must not call it lost, or offer to delete the volumes
+	// the instance is at that moment recording.
+	a.carried = nil
+
 	return a.settleRestart(ctx, inst.IsRunning(), inst.LastUsedAt, before, desired, stale, opt)
 }
 
 // changedUnderfoot explains a write refused because the instance moved on.
 //
-// It says the instance was not changed, not that the run changed nothing:
-// ensureVolumes runs before this, so a declared volume may already have been
-// created. The next up adopts a declared volume by name, so running again is
-// still the whole of the answer.
+// It does not say what was or was not applied. The refused write itself
+// changed nothing, but this wraps writes at several points in a run: volumes
+// may already exist, the declaration may already be on the instance, and the
+// restart writes come after a stop and a start. Running up again is the whole
+// of the answer either way, so that is what it says.
 func (a *App) changedUnderfoot(err error) error {
-	if err == nil || !errors.Is(err, incus.ErrChanged) {
+	if !errors.Is(err, incus.ErrChanged) {
 		return err
 	}
 	return fmt.Errorf("%w\nsomething else changed %s while this run was working on it, "+
-		"most likely another idev; the instance was left as it was, "+
-		"so run 'idev up' again",
+		"most likely another idev; run 'idev up' again once it has finished",
 		err, a.instance)
 }
 

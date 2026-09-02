@@ -420,8 +420,8 @@ func (a *API) UpdateInstance(ctx context.Context, name string, change InstanceCh
 		for _, device := range change.RemoveDevices {
 			delete(put.Devices, device)
 		}
-		for name, device := range change.SetDevices {
-			put.Devices[name] = map[string]string(device)
+		for device, config := range change.SetDevices {
+			put.Devices[device] = map[string]string(config)
 		}
 	})
 }
