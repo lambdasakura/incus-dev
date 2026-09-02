@@ -1395,3 +1395,45 @@ func TestCheckPrerequisitesReadsTheProjectConfig(t *testing.T) {
 		t.Fatal("no ansible command was run; this test would pass whatever the root did")
 	}
 }
+
+// The Debian hint belongs to the bootstrap idev writes, not to any step that
+// happens to be called the same thing.
+//
+// It was chosen by comparing the step's display name, so a project's own step
+// named "bootstrap (default)" was told to declare a bootstrap it had already
+// declared -- and rewording the label would have dropped the hint from the
+// step that needs it, with nothing failing.
+func TestTheDefaultBootstrapHintFollowsWhoWroteTheStep(t *testing.T) {
+	failing := func() *runnertest.Fake { return &runnertest.Fake{} }
+
+	t.Run("a project's own step with that name", func(t *testing.T) {
+		cfg := parseConfig(t, "schema: 1\nproject:\n  name: p\ninstance:\n  image: img\n"+
+			"provision:\n  - name: \""+provision.DefaultBootstrapName+"\"\n    run: \"false\"\n")
+
+		client := newIncus()
+		client.code[""] = 1
+		err := newExecutorWith(failing(), client).Provision(
+			context.Background(), cfg, testEnv(), provision.Selection{})
+		if err == nil {
+			t.Fatal("Provision() = nil error, want the failing step reported")
+		}
+		if strings.Contains(err.Error(), "Debian") {
+			t.Errorf("error = %q, want no hint about idev's own bootstrap: the project wrote this step", err)
+		}
+	})
+
+	t.Run("the bootstrap idev writes", func(t *testing.T) {
+		cfg := parseConfig(t, "schema: 1\nproject:\n  name: p\ninstance:\n  image: img\n"+
+			"provision:\n  - ansible:\n      playbook: site.yml\n")
+
+		client := newIncus()
+		client.code[""] = 1
+		err := newExecutorWith(failing(), client).Bootstrap(context.Background(), cfg, testEnv())
+		if err == nil {
+			t.Fatal("Bootstrap() = nil error, want the failing step reported")
+		}
+		if !strings.Contains(err.Error(), "Debian") {
+			t.Errorf("error = %q, want the hint that names what to declare", err)
+		}
+	})
+}

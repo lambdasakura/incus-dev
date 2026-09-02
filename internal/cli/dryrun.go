@@ -257,7 +257,7 @@ func provisionActions(cfg *config.Config) []string {
 			detail = " " + step.Galaxy.Requirements
 		}
 		out = append(out, fmt.Sprintf("Provision step %d/%d: %s (%s%s)",
-			i+1, total, step.DisplayName(i+1), stepKind(step), detail))
+			i+1, total, step.DisplayName(i+1), step.Kind(), detail))
 	}
 	return out
 }

@@ -1619,3 +1619,27 @@ func TestTheControlCharacterMessageNamesTheRune(t *testing.T) {
 		t.Errorf("Parse() error = %q, want it to name U+0080", err)
 	}
 }
+
+// A step is one of three kinds, and the name of the kind is printed by
+// `provision --list` and by `up --dry-run`. Deciding it with a default arm
+// meant a step that is none of them called itself a run step -- which is what
+// a fourth kind would be until every dispatch site was found, and galaxy was
+// added after ansible, so a fourth is not hypothetical.
+func TestStepKindNamesOnlyWhatItIs(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		step config.Step
+		want string
+	}{
+		{"run", config.Step{Run: &config.RunStep{Script: "true"}}, "run"},
+		{"ansible", config.Step{Ansible: &config.AnsibleStep{Playbook: "p.yml"}}, "ansible"},
+		{"galaxy", config.Step{Galaxy: &config.GalaxyStep{Requirements: "r.yml"}}, "galaxy"},
+		{"none of them", config.Step{}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.step.Kind(); got != tt.want {
+				t.Errorf("Kind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

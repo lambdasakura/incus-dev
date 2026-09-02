@@ -140,14 +140,6 @@ func TestReadSecretErrors(t *testing.T) {
 	})
 }
 
-func TestStepKindGalaxy(t *testing.T) {
-	cfg := mustParse(t, planBase+"provision:\n  - galaxy:\n      requirements: r.yml\n")
-
-	if got := stepKind(cfg.Provision[0]); got != "galaxy" {
-		t.Errorf("stepKind() = %q, want galaxy", got)
-	}
-}
-
 func TestPlanActionsShowsGalaxyRequirements(t *testing.T) {
 	cfg := mustParse(t, planBase+"provision:\n  - galaxy:\n      requirements: .incus-dev/requirements.yml\n")
 

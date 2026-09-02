@@ -52,6 +52,25 @@ type GalaxyStep struct {
 	ExtraArgs    []string `json:"extra_args,omitempty"`
 }
 
+// Kind names which of the three a step is, or "" when it is none of them.
+//
+// One place decides it, because the answer is printed by `provision --list`
+// and by `up --dry-run` and the two must agree. A default arm would name a
+// step that is none of them after whichever kind the arm happened to pick,
+// which is what a fourth kind would look like everywhere it was missed --
+// galaxy was added after ansible, so a fourth is not hypothetical.
+func (s Step) Kind() string {
+	switch {
+	case s.Run != nil:
+		return "run"
+	case s.Ansible != nil:
+		return "ansible"
+	case s.Galaxy != nil:
+		return "galaxy"
+	}
+	return ""
+}
+
 // DisplayName returns the name to show in logs. index is 1-based.
 func (s Step) DisplayName(index int) string {
 	if s.Name != "" {

@@ -75,7 +75,12 @@ type Executor struct {
 
 // Bootstrap runs the bootstrap steps.
 func (e *Executor) Bootstrap(ctx context.Context, cfg *config.Config, env Env) error {
-	return e.RunSteps(ctx, BootstrapSteps(cfg), "bootstrap", env)
+	// Whether these steps are idev's own, which is what decides the hint a
+	// failure carries -- not what they are called. A project may name a step
+	// anything, including whatever idev calls its default.
+	ours := cfg.Bootstrap == nil
+	steps := BootstrapSteps(cfg)
+	return e.runSteps(ctx, steps, allIndices(steps), "bootstrap", env, ours)
 }
 
 // Provision runs the provision steps, or only the subset sel names.
@@ -84,23 +89,33 @@ func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env, s
 	if err != nil {
 		return err
 	}
-	return e.runSteps(ctx, cfg.Provision, indices, "provision", env)
+	return e.runSteps(ctx, cfg.Provision, indices, "provision", env, false)
 }
 
 // RunSteps runs the steps in order, stopping at the first failure.
+//
+// The steps are the project's, so a failure carries no hint about idev's own
+// bootstrap; Bootstrap says when they are idev's instead.
 func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind string, env Env) error {
+	return e.runSteps(ctx, steps, allIndices(steps), kind, env, false)
+}
+
+// allIndices selects every step, in declaration order.
+func allIndices(steps []config.Step) []int {
 	indices := make([]int, len(steps))
 	for i := range steps {
 		indices[i] = i
 	}
-	return e.runSteps(ctx, steps, indices, kind, env)
+	return indices
 }
 
 // runSteps runs the steps at the given indices, in declaration order.
 //
 // The label shows the position within the whole list. Showing "step 1/1" for a
 // partial run would leave no way to tell which step it was.
-func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []int, kind string, env Env) error {
+func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []int, kind string, env Env,
+	ours bool,
+) error {
 	total := len(steps)
 	for _, i := range indices {
 		step := steps[i]
@@ -112,7 +127,7 @@ func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []
 		e.log(label)
 
 		if err := e.runStep(ctx, step, env); err != nil {
-			if step.Name == DefaultBootstrapName {
+			if ours {
 				// The default bootstrap assumes a Debian family. When it fails,
 				// tell the project to declare its own (spec 06-provisioning.md
 				// 6.3.2).

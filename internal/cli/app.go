@@ -340,23 +340,11 @@ func (a *App) ListSteps() error {
 
 	for i, step := range a.cfg.Provision {
 		if _, err := fmt.Fprintf(a.out, "%d\t%s\t(%s)\n",
-			i+1, step.DisplayName(i+1), stepKind(step)); err != nil {
+			i+1, step.DisplayName(i+1), step.Kind()); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// stepKind returns a step's kind.
-func stepKind(step config.Step) string {
-	switch {
-	case step.Ansible != nil:
-		return "ansible"
-	case step.Galaxy != nil:
-		return "galaxy"
-	default:
-		return "run"
-	}
 }
 
 // DestroyOptions controls how idev destroy behaves.
