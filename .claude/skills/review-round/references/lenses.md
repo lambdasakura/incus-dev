@@ -1,7 +1,7 @@
 # The lenses, and what each one found
 
-Nineteen lenses have been run on this repository. This is the record, and it is
-meant to be re-used: each entry carries the question to put to an agent, so a
+Nineteen lenses have been run on this repository, each of them at least once.
+This is the record, and it is meant to be re-used: each entry carries the question to put to an agent, so a
 lens can be re-run without being reinvented, and a sweep can be assembled by
 picking rows.
 
@@ -25,6 +25,8 @@ run several at once, and when to stop.
 | Mutation testing | Copy to /tmp. Apply 20-40 targeted mutations one at a time (invert a condition, drop a call, swap `&&`/`||`, move a boundary, delete a branch). Report every survivor. | 24 behaviours executed by the tests and asserted by nothing, at 99% coverage | After any change to the tests |
 | Spec conformance | Read `docs/spec/`. For every promise it makes, find the code that keeps it, or report that nothing does. | Six rounds of drift, and a spec sentence describing behaviour the code never had | After any change to `docs/spec/` |
 | The test machinery, not the code | Review the tests and helpers as the subject. What can each assertion fail on? Which pass for the wrong reason? | Four rounds of defects in the guards themselves, including checks that could not fail | After any change to the tests |
+| API round-trip efficiency | Count the Incus calls each command makes. Which are redundant, and what does that cost on a slow daemon? | Eight redundancies, seven of them real: a write sent on every run with nothing to write, the same volume and the same instance asked about twice, one listing per profile, an image resolved twice per rebuild, and every write pre-reading the snapshots it never looks at | After any change to a command's call sequence |
+| Cross-package API design | Read the boundaries between `internal/*` as an API. What leaks, what is named wrongly, what would be hard to change? | Eight, including a belief about Incus held in `internal/cli` where no contract could check it, and a panicking constructor holding the obvious name | After a boundary moves |
 
 ## Spent, and unlikely to pay again soon
 
@@ -46,17 +48,10 @@ run several at once, and when to stop.
 | Two idevs at once | Two terminals, one project. Trace every read-modify-write on the instance's own records. | A lost update that orphaned volumes, eight runs in ten |
 | Driven by a program, not a person | Read the CLI as a caller: exit codes, which stream carries what, whether listings parse. | Zero rows printed as a sentence on stdout |
 
-## Never run
-
-| Lens | Ask | Why it is still here |
-| --- | --- | --- |
-| API round-trip efficiency | Count the Incus calls each command makes. Which are redundant, and what does that cost on a slow daemon? | Measured once in passing, no finding. Cheap to try. |
-| Cross-package API design | Read the boundaries between `internal/*` as an API. What leaks, what is named wrongly, what would be hard to change? | The layering rules in CLAUDE.md have never been reviewed as design. |
-
 ## Open by decision, not by oversight
 
-A lens that reports these has found nothing new. Both were measured, and both
-were left alone for a stated reason.
+A lens that reports these has found nothing new. Each was measured, and each
+was left alone for a stated reason.
 
 - **Seven `Client` methods bind a context and discard it.** The Incus client
   library offers no per-call context -- its `WithContext` mutates the shared
@@ -65,3 +60,12 @@ were left alone for a stated reason.
   The second-signal guard in `cmd/idev/main.go` is the escape.
 - **Nothing serialises two `idev provision` runs.** The collision fails loudly
   inside a step rather than silently, which is the failure mode to prefer.
+- **`ensureRunning` waits even for an instance already read as running.** The
+  wait is one exec probe: "Running" is the daemon's word about the container,
+  not about whether a command can run in it yet, and the probe is what makes
+  `idev shell` fail with a reason instead of an obscure error.
+- **Errors are worded where they are raised, below `internal/cli`.** The
+  layering rule is that the lower packages do not know the CLI's output
+  *format*; an error necessarily carries wording, and the package that raises
+  it is the one that knows what happened. What was missing was a check, and
+  `TestArchitecturalConstraintsHold` now reads every package's literals.

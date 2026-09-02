@@ -47,9 +47,10 @@ produces findings on the first pass.
 Every lens run here is catalogued, with the question to put to an agent and
 what it actually found:
 [references/lenses.md](.claude/skills/review-round/references/lenses.md).
-Pick from it rather than inventing one -- the two lenses never run are named
-there too, and so are the two things left open by decision, which a new lens
-will otherwise "find" every time.
+Pick from it rather than inventing one. Every lens in it has now been run at
+least once, so each row's Re-run column says what it is worth today; the four
+things left open by decision are named there too, and a new lens will otherwise
+"find" them every time.
 
 **Mutation testing is the highest-yield lens.** Copy the repo to `/tmp`, apply
 20-40 targeted mutations one at a time, run the suite, and record which

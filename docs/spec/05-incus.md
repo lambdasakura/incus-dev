@@ -375,6 +375,11 @@ project・imageの解決には `incus` コマンドと同じ設定
 image aliasは instance種別ごとに別のimageを指すため、解決の際は
 常にコンテナ用のimageを要求する（[03-configuration.md](03-configuration.md) 3.6.2）。
 
+解決結果は1回の実行の間だけ記憶する。`idev rebuild` は破棄前の確認で1度、
+作成でもう1度同じ参照を解決するため、image serverへの往復が2回になる。
+また上流のaliasがその間に動くと、確認したimageと作成するimageが食い違う。
+失敗は記憶しない（記憶すると2度目がimage nilかつerror nilになる）。
+
 ### 5.7.2 端末を伴う実行
 
 `idev shell` のようにTTYを割り当てる実行では、ホスト側の端末操作が要る
@@ -425,6 +430,20 @@ configとdeviceを1回の書き込みにまとめる理由は2つある。
 別々に書くと、記録がdeviceを落としたあとで削除に失敗した場合、
 deviceは接続されたまま記録から外れる。
 idevが外すのは記録が「ある」と言っているものだけなので、以後どの実行もそれを外さない。
+
+書き込みは既存の内容へマージするため、送る前に読む。この読み取りには
+writable部分（`GetInstance`）で足り、`Instance` が使うfull（`GetInstanceFull`）
+は要らない。fullには実行時状態・snapshot・backupが全て含まれ、
+書き込みはそのいずれも見ないためである。呼び出し側がETagを渡さなかった場合は
+この読み取りのETagで判定する。両者のETagが一致することは契約テストの
+「a write with no etag is not judged against one」が実daemonに対して確かめる。
+
+instanceの読み取りは、呼び出し側が既に持っているならそれを渡す
+（`ensureRunning`・`destroy`）。同じものを2度読むと往復が増えるうえ、
+2つの読み取りは食い違いうるのに判断するのは片方だけになる。
+既に書かれている内容と一致する書き込みは送らない（`internal/cli` の `settled`）。
+ただし比較対象はdaemonが返した内容であり、
+`adoptCarried` や `pruneVolumeRecord` が書き換えたあとの値ではない。
 1回の書き込みなら、全部適用されるか何も適用されないかのどちらかになる。
 
 `etag` が空文字列の場合は検査しない。
