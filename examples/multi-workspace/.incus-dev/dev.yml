@@ -1,0 +1,52 @@
+# Mount more than one host directory.
+#
+# workspace takes a map of them. Each key becomes a device name, and the entry
+# named "main" is the project's own tree: the shell starts there, provisioning
+# runs there, and it is what 'idev status' reports.
+#
+# For a host directory, prefer this over instance.devices: there you write
+# "type: disk" every time, and the meaning of "source" changes from a path to
+# a storage volume name as soon as a "pool" appears.
+schema: 1
+
+runtime:
+  # The map form needs idev 1.1.
+  version: "1.1"
+
+project:
+  name: multi-workspace-example
+
+instance:
+  image: images:ubuntu/24.04
+
+workspace:
+  # One instance has one mapping, so idmap lives here rather than inside a
+  # mount. It applies to every entry below.
+  idmap: auto
+
+  main:
+    source: .
+    target: /workspace
+  # Omitting main entirely gives the same thing: source ".", target
+  # "/workspace". Write it when you want a different source or target.
+
+  # A library developed alongside this project. In a real setup this is a
+  # sibling checkout -- source: ../shared-lib -- and the paths here point
+  # inside the example so that it runs as it stands.
+  shared-lib:
+    source: ./shared-lib
+    target: /shared-lib
+
+  # Test data the container reads and must not change.
+  fixtures:
+    source: ./fixtures
+    target: /fixtures
+    readonly: true
+
+provision:
+  - name: show what is mounted
+    run: |
+      set -eu
+      for dir in /workspace /shared-lib /fixtures; do
+          printf '%s: %s\n' "$dir" "$(ls -A "$dir" | wc -l) entries"
+      done

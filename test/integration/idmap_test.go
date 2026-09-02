@@ -292,6 +292,10 @@ func TestWorkspaceMapFormMountsEveryEntry(t *testing.T) {
   extra:
     source: DATA
     target: /data
+  reference:
+    source: DATA
+    target: /reference
+    readonly: true
 `, "DATA", data))
 
 	f.mustRun("up")
@@ -315,6 +319,14 @@ func TestWorkspaceMapFormMountsEveryEntry(t *testing.T) {
 	f.mustRun("shell", "--", "sh", "-c", "echo written > /data/from-container.txt")
 	if _, err := os.Stat(filepath.Join(data, "from-container.txt")); err != nil {
 		t.Errorf("the second mount could not be written: %v", err)
+	}
+
+	// readonly reaches the mount, not just the device map: examples and the
+	// spec both say a write fails there.
+	if out, err := f.run("exec", "--", "touch", "/reference/x"); err == nil {
+		t.Error("a readonly mount accepted a write")
+	} else if !strings.Contains(out, "Read-only") {
+		t.Errorf("the write failed for another reason: %v\n%s", err, out)
 	}
 
 	// The mapping is instance-wide, so it reached both disks.

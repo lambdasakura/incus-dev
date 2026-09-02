@@ -14,6 +14,7 @@ they are not embedded in the binary.
 | [ansible-based](ansible-based/) | Provisioned with Ansible |
 | [dev-user](dev-user/) | Provisioning creates an ordinary account; `idev shell` lands in it |
 | [volumes](volumes/) | Several persistent volumes that survive `idev rebuild` |
+| [multi-workspace](multi-workspace/) | Several host directories mounted, one of them read-only |
 
 You can run the following inside any of these directories.
 

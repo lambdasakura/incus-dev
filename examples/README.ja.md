@@ -14,6 +14,7 @@
 | [ansible-based](ansible-based/) | Ansibleで構成 |
 | [dev-user](dev-user/) | provisioningで一般ユーザーを作り、`idev shell` をそこへ入れる |
 | [volumes](volumes/) | `idev rebuild` を越えて残る永続volumeを複数持つ |
+| [multi-workspace](multi-workspace/) | ホストのディレクトリを複数マウントする（1つは読み取り専用） |
 
 各例のディレクトリで以下を実行できる。
 

@@ -263,6 +263,49 @@ mountはprovisioningより前に行われるため、`useradd --create-home` は
 
 ---
 
+## 10.3.3 workspaceを複数持つ
+
+`examples/multi-workspace/` が実物である。
+
+```yaml
+workspace:
+  idmap: auto
+  main:
+    source: .
+    target: /workspace
+  shared-lib:
+    source: ../shared-lib
+    target: /shared-lib
+  fixtures:
+    source: ./fixtures
+    target: /fixtures
+    readonly: true
+```
+
+キーがdevice名になる。ただし `main` が作るdeviceの名前は `workspace` である
+（3.7.2）。実daemonで確認すると次のようになる。
+
+```text
+$ incus config device list <instance>
+shared-lib
+workspace          <- main
+fixtures
+
+$ idev status
+Workspace:  /home/you/src/example -> /workspace
+Devices:    fixtures(disk), shared-lib(disk), workspace(disk)
+```
+
+`idev status` の `Workspace:` 行が指すのは `main` であり、
+追加したmountは `Devices:` の側に現れる（[04-cli.md](04-cli.md) 4.4）。
+
+`readonly: true` はIncus disk deviceの `readonly` にそのまま対応し、
+コンテナからの書き込みは `Read-only file system` で失敗する。
+
+`idmap` は `workspace` 直下にあり、全エントリへ等しく適用される（3.7.6）。
+
+---
+
 ## 10.4 併用と順序制御
 
 `run` と `ansible` は自由に混在でき、記述順に実行される。
