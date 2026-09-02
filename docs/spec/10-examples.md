@@ -223,6 +223,46 @@ workspaceにとって意味を持つのはuidであり、それは要求した�
 
 ---
 
+## 10.3.2 volumeを複数持つ
+
+`examples/volumes/` が実物である。
+
+```yaml
+volumes:
+  apt-cache:
+    path: /var/cache/apt/archives
+  go-mod:
+    path: /home/developer/go/pkg/mod
+    size: 20GiB
+  postgres-data:
+    path: /var/lib/postgresql/data
+```
+
+Incus上の名前は `<instance名>-<キー>` になるため、
+チェックアウトが違えば別のvolumeになる（3.13）。
+
+volumeはホストのディレクトリではない。`workspace` との使い分けは、
+ホスト側から編集したいものは `workspace`、
+コンテナだけが要るものは `volumes` である。
+
+一般アカウントで作業する構成と組み合わせる場合、**mount pointのchownが要る**。
+volumeは空でroot所有として現れるため、root以外は書き込めない。
+`examples/volumes/` のsetup.shがそれを行っている。
+
+homeの下にvolumeをmountする場合、home自体も同じ理由でroot所有になる。
+mountはprovisioningより前に行われるため、`useradd --create-home` は
+既にあるディレクトリを見つけ、所有者を変えない。
+
+実daemonで確認した挙動は次のとおり。
+
+| 操作 | volume |
+| --- | --- |
+| `idev rebuild` | 残る |
+| `idev destroy` | 残る |
+| `idev destroy --volumes` | 削除される |
+
+---
+
 ## 10.4 併用と順序制御
 
 `run` と `ansible` は自由に混在でき、記述順に実行される。

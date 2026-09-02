@@ -13,6 +13,7 @@ they are not embedded in the binary.
 | [shell-based](shell-based/) | Provisioned with shell scripts; no Ansible |
 | [ansible-based](ansible-based/) | Provisioned with Ansible |
 | [dev-user](dev-user/) | Provisioning creates an ordinary account; `idev shell` lands in it |
+| [volumes](volumes/) | Several persistent volumes that survive `idev rebuild` |
 
 You can run the following inside any of these directories.
 

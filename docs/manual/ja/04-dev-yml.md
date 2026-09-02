@@ -484,6 +484,18 @@ idevは作成したvolumeを覚えているので、宣言から消えたもの�
 ビルドキャッシュやデータベースの実体など、
 「環境は作り直したいが消したくないもの」に向く。
 
+### 一般ユーザーで使う場合
+
+volumeは空でroot所有として現れるため、root以外のアカウントは
+provisioningが手当てするまで書き込めない。mount pointを `chown` する。
+ホストのディレクトリではないので、コンテナの外は何も変わらない。
+
+homeの下にvolumeをmountする場合、そのhomeはmountによって作られる。
+mountはprovisioningより前なので、`useradd --create-home` は既にある
+ディレクトリを見つけ、所有者をrootのままにする。homeもchownする。
+
+`examples/volumes/` がその両方を行っている。
+
 ---
 
 ## 4.11 secrets

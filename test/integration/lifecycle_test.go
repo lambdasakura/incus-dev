@@ -429,6 +429,43 @@ volumes:
 	}
 }
 
+// A volume arrives empty and owned by root (spec 3.13).
+//
+// examples/volumes/ rests on this: an account that is not root cannot write to
+// a volume until provisioning gives it the mount point, and a home directory
+// with a volume under it is created by the mount rather than by useradd, so it
+// is root's too. Both are the daemon's doing, not idev's.
+func TestAVolumeArrivesOwnedByRoot(t *testing.T) {
+	f := newFixture(t, minimalYAML+`
+volumes:
+  cache:
+    path: /home/probe/cache
+    size: 64MiB
+`)
+	t.Cleanup(func() {
+		_, _ = runIncus("storage", "volume", "delete", "default", f.instanceName()+"-cache")
+	})
+
+	f.mustRun("up")
+	f.mustRun("exec", "--", "sh", "-c",
+		"adduser -D -H -u 4242 probe 2>/dev/null || useradd -M -u 4242 probe")
+
+	// The mount made the home directory, so useradd found it there.
+	if got := f.mustRun("exec", "--", "stat", "-c", "%u", "/home/probe"); strings.TrimSpace(got) != "0" {
+		t.Errorf("/home/probe is owned by uid %s inside, want root's 0", strings.TrimSpace(got))
+	}
+	if _, err := f.run("exec", "--user", "probe", "--", "touch", "/home/probe/cache/x"); err == nil {
+		t.Error("a non-root account could write to a fresh volume; " +
+			"examples/volumes/ chowns the mount point because it cannot")
+	}
+
+	// And that is all it takes to make it usable.
+	f.mustRun("exec", "--", "chown", "4242", "/home/probe/cache")
+	if out, err := f.run("exec", "--user", "probe", "--", "touch", "/home/probe/cache/x"); err != nil {
+		t.Errorf("the account still cannot write after the chown: %v\n%s", err, out)
+	}
+}
+
 // Secrets are injected from the host, and masked when displayed.
 func TestSecretInjection(t *testing.T) {
 	f := newFixture(t, minimalYAML+`

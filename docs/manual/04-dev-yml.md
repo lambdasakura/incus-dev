@@ -499,6 +499,18 @@ about both before it does.
 volumes it created, so `idev up` says which ones have left the declaration and
 `idev destroy --volumes` still removes them.
 
+### Volumes and a non-root user
+
+A volume arrives empty and owned by root, so an account that is not root cannot
+write to it until provisioning says otherwise. `chown` the mount point -- it is
+not a host directory, so nothing outside the container changes.
+
+If a volume is mounted somewhere under a home directory, the mount creates that
+home before provisioning runs, and `useradd --create-home` then finds it there
+and leaves it owned by root. Chown the home as well.
+
+`examples/volumes/` does both.
+
 ---
 
 ## 4.11 `secrets`

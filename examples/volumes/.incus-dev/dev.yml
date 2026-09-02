@@ -1,0 +1,58 @@
+# Data that survives 'idev rebuild'.
+#
+# A volume is an Incus storage volume idev creates and mounts. It is not a
+# host directory: nothing on your machine is shared into it, and 'idev
+# destroy' leaves it alone. That is the point -- rebuild the environment
+# without downloading every dependency again, or losing the database.
+#
+# Use workspace for host directories (your source tree, a dataset you want to
+# edit from both sides). Use volumes for what only the container needs.
+schema: 1
+
+runtime:
+  version: "1.1"
+
+project:
+  name: volumes-example
+
+instance:
+  image: images:ubuntu/24.04
+
+workspace:
+  source: .
+  target: /workspace
+  idmap: shift
+
+volumes:
+  # Package caches: the reason a rebuild is cheap.
+  apt-cache:
+    path: /var/cache/apt/archives
+  go-mod:
+    path: /home/developer/go/pkg/mod
+    size: 20GiB
+  # State a service keeps. Losing it on rebuild would mean seeding it again.
+  postgres-data:
+    path: /var/lib/postgresql/data
+    # pool: fast-ssd     # optional; the pool named "default" is used otherwise
+
+provision:
+  - name: base packages
+    run: |
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends sudo golang-go postgresql
+
+  # A volume arrives empty and owned by root, so an account that is not root
+  # cannot write to it until something says otherwise. Volumes are not host
+  # directories, so this chown changes nothing outside the container.
+  - name: developer account and volume ownership
+    run: sh /workspace/.incus-dev/scripts/setup.sh
+    env:
+      DEV_USER: developer
+      DEV_UID: "1000"
+      DEV_GID: "1000"
+
+shell:
+  user: developer
+  command: /bin/bash
+  cwd: /workspace

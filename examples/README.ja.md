@@ -13,6 +13,7 @@
 | [shell-based](shell-based/) | シェルスクリプトで構成（Ansible不要） |
 | [ansible-based](ansible-based/) | Ansibleで構成 |
 | [dev-user](dev-user/) | provisioningで一般ユーザーを作り、`idev shell` をそこへ入れる |
+| [volumes](volumes/) | `idev rebuild` を越えて残る永続volumeを複数持つ |
 
 各例のディレクトリで以下を実行できる。
 
