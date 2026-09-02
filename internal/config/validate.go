@@ -59,6 +59,7 @@ func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateVolumes(c, ps)
 	validateSecrets(c, ps)
 	validateStepValues(c, ps)
+	validateWorkspaceShape(raw, ps)
 	validateWorkspace(c, ps)
 	validateMountPaths(c, ps)
 
@@ -157,6 +158,10 @@ func validateVolumes(c *Config, ps *problems) {
 		}
 		if _, conflict := c.Instance.Devices[name]; conflict {
 			ps.add(path, "conflicts with instance.devices.%s", name)
+		}
+		if _, conflict := c.Workspace.mount(name); conflict {
+			ps.add(path, "conflicts with workspace.%s: one instance cannot have "+
+				"two devices of that name", name)
 		}
 	}
 }
@@ -430,12 +435,75 @@ func hasRootDisk(devices map[string]StringMap) bool {
 }
 
 func validateWorkspace(c *Config, ps *problems) {
-	ws := c.WorkspaceOrDefault()
-	if !filepath.IsAbs(ws.Target) {
-		ps.add("workspace.target", "must be an absolute path in the container, got %q", ws.Target)
-	} else if isContainerRoot(ws.Target) {
-		ps.add("workspace.target", "%s", rootIsNotAMountTarget)
+	// The section holds it in both forms, so one check covers both. It used
+	// to be an enum in the schema, which could not reach the map form
+	// without reporting every branch that failed.
+	if mode := c.WorkspaceOrDefault().IDMap; !slices.Contains(IDMapModes, mode) {
+		modes := make([]string, 0, len(IDMapModes))
+		for _, m := range IDMapModes {
+			modes = append(modes, string(m))
+		}
+		ps.add("workspace.idmap", "must be one of %s, got %q",
+			strings.Join(modes, ", "), mode)
 	}
+
+	mounts := c.Mounts()
+	for _, name := range sortedKeys(mounts) {
+		mount := mounts[name]
+		target := c.mountPath(name, "target")
+
+		switch {
+		case mount.Target == "":
+			// Only main has a default. Letting the rest share /workspace
+			// would have two mounts fight over one directory.
+			ps.add(target, "is required: a mount other than %q has no default "+
+				"container path", MainMountName)
+		case !filepath.IsAbs(mount.Target):
+			ps.add(target, "must be an absolute path in the container, got %q", mount.Target)
+		case isContainerRoot(mount.Target):
+			ps.add(target, "%s", rootIsNotAMountTarget)
+		}
+
+		if name == MainMountName {
+			continue
+		}
+		validateMountName(c, name, ps)
+	}
+}
+
+// validateMountName checks a mount name against the device name space it
+// joins (spec 3.7.7).
+func validateMountName(c *Config, name string, ps *problems) {
+	path := "workspace." + name
+
+	switch {
+	case name == WorkspaceDeviceName:
+		ps.add(path, "%q is the device name %q produces; declare the project's "+
+			"own tree as %q instead", WorkspaceDeviceName, MainMountName, MainMountName)
+	case strings.HasPrefix(name, "-"):
+		ps.add(path, "device name must not start with %q", "-")
+	case strings.Contains(name, listSeparator):
+		ps.add(path, "device name must not contain %q", listSeparator)
+	case len(name) > maxDeviceNameLength:
+		// The same cap the schema puts on instance.devices keys. Without it
+		// the name reaches Incus and is refused there, after the run has
+		// already created volumes.
+		ps.add(path, "device name must be at most %d characters, got %d",
+			maxDeviceNameLength, len(name))
+	}
+	if _, conflict := c.Instance.Devices[name]; conflict {
+		ps.add(path, "conflicts with instance.devices.%s: one instance cannot "+
+			"have two devices of that name", name)
+	}
+}
+
+// mountPath is where a mount's field was written, which differs between the
+// two forms of the workspace section (spec 3.7).
+func (c *Config) mountPath(name, field string) string {
+	if c.Workspace != nil && c.Workspace.mapForm {
+		return "workspace." + name + "." + field
+	}
+	return "workspace." + field
 }
 
 // rootIsNotAMountTarget explains the one absolute path these cannot take.
@@ -477,7 +545,10 @@ func validateMountPaths(c *Config, ps *problems) {
 		claimed[path] = field
 	}
 
-	claim("workspace.target", c.WorkspaceOrDefault().Target)
+	mounts := c.Mounts()
+	for _, name := range sortedKeys(mounts) {
+		claim(c.mountPath(name, "target"), mounts[name].Target)
+	}
 
 	for _, name := range sortedKeys(c.Volumes) {
 		path := c.Volumes[name].Path
@@ -497,12 +568,15 @@ func validateMountPaths(c *Config, ps *problems) {
 }
 
 func validatePaths(c *Config, ps *problems) {
-	ws := c.WorkspaceOrDefault()
-	src := c.ResolvePath(ws.Source)
-	if info, err := os.Stat(src); err != nil {
-		ps.add("workspace.source", "%v", err)
-	} else if !info.IsDir() {
-		ps.add("workspace.source", "%s is not a directory", src)
+	mounts := c.Mounts()
+	for _, name := range sortedKeys(mounts) {
+		src := c.ResolvePath(mounts[name].Source)
+		path := c.mountPath(name, "source")
+		if info, err := os.Stat(src); err != nil {
+			ps.add(path, "%v", err)
+		} else if !info.IsDir() {
+			ps.add(path, "%s is not a directory", src)
+		}
 	}
 
 	for _, name := range sortedKeys(c.Instance.Devices) {
@@ -558,3 +632,71 @@ func checkStepPaths(c *Config, steps []Step, key string, ps *problems) {
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }
+
+// validateWorkspaceShape checks the workspace section against the form it is
+// written in (spec 3.7.2).
+//
+// The schema only says it is an object. Expressing both forms there made every
+// mistake report each branch's failure -- "additional properties 'main' not
+// allowed" alongside "workspace.main.idmap: false schema" -- which names
+// neither the mistake nor what to do about it.
+func validateWorkspaceShape(raw map[string]any, ps *problems) {
+	section, ok := raw["workspace"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	mapForm := false
+	for _, value := range section {
+		if _, isObject := value.(map[string]any); isObject {
+			mapForm = true
+			break
+		}
+	}
+
+	for _, name := range sortedKeys(section) {
+		entry, isObject := section[name].(map[string]any)
+
+		if !mapForm {
+			if !slices.Contains(singleFormFields, name) {
+				ps.add("workspace."+name, "unknown field; the one-mount form takes %s",
+					strings.Join(singleFormFields, ", "))
+			}
+			continue
+		}
+
+		if !isObject {
+			if name == idmapKey {
+				continue
+			}
+			// The section declares mounts, so a bare source or target has no
+			// mount to belong to.
+			ps.add("workspace."+name, "belongs to a mount, and workspace declares "+
+				"several here; move it into one of them")
+			continue
+		}
+		for _, field := range sortedKeys(entry) {
+			switch {
+			case field == idmapKey:
+				ps.add("workspace."+name+"."+idmapKey,
+					"belongs to the instance, not to a mount: raw.idmap is one "+
+						"config key and cannot differ per disk. Write it as workspace.idmap")
+			case !slices.Contains(mountFields, field):
+				ps.add("workspace."+name+"."+field, "unknown field; a mount takes %s",
+					strings.Join(mountFields, ", "))
+			}
+		}
+	}
+}
+
+// singleFormFields are the keys of the one-mount form, and mountFields those
+// of one entry in the map form. They differ by idmap, which belongs to the
+// section rather than to a mount (spec 3.7.6).
+// maxDeviceNameLength is Incus's cap on a device name, which the schema
+// carries for instance.devices keys.
+const maxDeviceNameLength = 63
+
+var (
+	singleFormFields = []string{"idmap", "readonly", "source", "target"}
+	mountFields      = []string{"readonly", "source", "target"}
+)

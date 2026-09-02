@@ -253,36 +253,39 @@ storage pool名とnetwork名はホスト依存になる点に注意する。
 
 ## 6.9 複数のリポジトリをマウントする
 
-`instance.devices` に追加すれば、workspace以外のディレクトリも共有できる。
-workspaceと同じuid/gid対応付けが自動的に適用される。
+`workspace` に並べる。`main` は自分のtreeであり、省略すれば補われる。
 
 ```yaml
-instance:
-  devices:
-    other-repo:
-      type: disk
-      source: ../other-repo      # project root基準
-      path: /other-repo
+runtime:
+  version: "1.1"
+workspace:
+  other-repo:
+    source: ../other-repo      # project root基準
+    target: /other-repo
 ```
+
+workspaceと同じuid/gid対応付けが自動的に適用される。
 
 ---
 
 ## 6.10 追加のデータをマウントする
 
 ```yaml
-instance:
-  devices:
-    dataset:
-      type: disk
-      source: /srv/dataset        # ホスト側の絶対パス
-      path: /data
-      readonly: "true"
-
-    assets:
-      type: disk
-      source: ./assets            # project root基準
-      path: /assets
+runtime:
+  version: "1.1"
+workspace:
+  dataset:
+    source: /srv/dataset        # ホスト側の絶対パス
+    target: /data
+    readonly: true
+  assets:
+    source: ./assets            # project root基準
+    target: /assets
 ```
+
+`instance.devices` にも `disk` は書ける。`nic` や `proxy`、pool付きの `disk`
+はそちらにしか書けない。ただしホストのディレクトリを単に共有するなら上の形式が
+短く、`pool` を足したときに意味が変わることもない（4.5）。
 
 ---
 

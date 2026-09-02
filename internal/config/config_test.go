@@ -433,7 +433,9 @@ func TestRuntimeVersionCompatibility(t *testing.T) {
 		{"1.0", true},
 		{"1", true},
 		{"1.0.0", true},
-		{"1.99", false}, // a minor newer than the current one cannot be satisfied
+		{"1.1", true},  // the map form of workspace, which this idev provides
+		{"1.2", false}, // a minor newer than the current one cannot be satisfied
+		{"1.99", false},
 		{"2.0", false},
 		{"0.9", false},
 		{"abc", false},
@@ -1639,6 +1641,166 @@ func TestStepKindNamesOnlyWhatItIs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.step.Kind(); got != tt.want {
 				t.Errorf("Kind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The map form of workspace declares more than one host mount (spec 3.7.2).
+func TestWorkspaceMapFormDeclaresEveryMount(t *testing.T) {
+	c := parse(t, minimal+`
+workspace:
+  idmap: shift
+  main:
+    source: .
+    target: /workspace
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+  dataset:
+    source: /srv/dataset
+    target: /data
+    readonly: true
+`)
+
+	want := map[string]config.Mount{
+		"main":       {Source: ".", Target: "/workspace"},
+		"other-repo": {Source: "../other-repo", Target: "/other-repo"},
+		"dataset":    {Source: "/srv/dataset", Target: "/data", Readonly: true},
+	}
+	if diff := cmp.Diff(want, c.Mounts()); diff != "" {
+		t.Errorf("Mounts() mismatch (-want +got):\n%s", diff)
+	}
+	if got := c.WorkspaceOrDefault(); got.Source != "." || got.Target != "/workspace" {
+		t.Errorf("WorkspaceOrDefault() = %+v, want the main entry", got)
+	}
+	if got := c.WorkspaceOrDefault().IDMap; got != config.IDMapShift {
+		t.Errorf("IDMap = %q, want the section's value to reach every caller", got)
+	}
+}
+
+// main is defaulted, so adding one mount does not mean restating the project's
+// own tree (spec 3.7.2).
+func TestWorkspaceMapFormDefaultsMain(t *testing.T) {
+	c := parse(t, minimal+`
+workspace:
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+`)
+
+	main, ok := c.Mounts()["main"]
+	if !ok {
+		t.Fatalf("Mounts() = %+v, want main filled in", c.Mounts())
+	}
+	if main.Source != "." || main.Target != "/workspace" {
+		t.Errorf("main = %+v, want the same defaults as an omitted workspace", main)
+	}
+}
+
+// The single form is one mount named main, so everything downstream sees one
+// shape (spec 3.7.1).
+func TestWorkspaceSingleFormIsOneMountNamedMain(t *testing.T) {
+	c := parse(t, minimal+`
+workspace:
+  source: ./src
+  target: /src
+  idmap: raw
+`)
+
+	want := map[string]config.Mount{"main": {Source: "./src", Target: "/src"}}
+	if diff := cmp.Diff(want, c.Mounts()); diff != "" {
+		t.Errorf("Mounts() mismatch (-want +got):\n%s", diff)
+	}
+	if got := c.WorkspaceOrDefault().IDMap; got != config.IDMapRaw {
+		t.Errorf("IDMap = %q, want raw", got)
+	}
+}
+
+// An omitted workspace is the same one mount (spec 3.7.1).
+func TestWorkspaceOmittedIsOneMountNamedMain(t *testing.T) {
+	want := map[string]config.Mount{"main": {Source: ".", Target: "/workspace"}}
+	if diff := cmp.Diff(want, parse(t, minimal).Mounts()); diff != "" {
+		t.Errorf("Mounts() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// What the map form refuses, and why each one matters (spec 3.7.2, 3.7.6,
+// 3.7.7).
+func TestWorkspaceMapFormRefusals(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			"idmap inside a mount",
+			"workspace:\n  main:\n    source: .\n    target: /workspace\n    idmap: raw\n",
+			"idmap",
+		},
+		{
+			"an entry named workspace",
+			"workspace:\n  workspace:\n    source: .\n    target: /workspace\n",
+			"declare the project's own tree as",
+		},
+		{
+			"a mount with no target",
+			"workspace:\n  other:\n    source: ../other\n",
+			"has no default container path",
+		},
+		{
+			"source left at the section level",
+			"workspace:\n  source: .\n  other:\n    source: ../other\n    target: /other\n",
+			"source",
+		},
+		{
+			"an unknown field in a mount",
+			"workspace:\n  other:\n    source: ../other\n    target: /other\n    shift: \"true\"\n",
+			"unknown field",
+		},
+		{
+			"an unknown field in the one-mount form",
+			"workspace:\n  source: .\n  targt: /workspace\n",
+			"unknown field",
+		},
+		{
+			"an idmap value that is not a mode",
+			"workspace:\n  idmap: magic\n  other:\n    source: ../other\n    target: /other\n",
+			"auto, raw, shift, none",
+		},
+		{
+			"a name that collides with a device",
+			"  devices:\n    other:\n      type: gpu\nworkspace:\n  other:\n" +
+				"    source: ../other\n    target: /other\n",
+			"workspace.other: conflicts with instance.devices.other",
+		},
+		{
+			"a name that collides with a volume",
+			"volumes:\n  cache:\n    path: /cache\nworkspace:\n  cache:\n" +
+				"    source: ../cache\n    target: /c\n",
+			"volumes.cache: conflicts with workspace.cache",
+		},
+		{
+			"a name longer than a device name may be",
+			"workspace:\n  " + strings.Repeat("x", 64) + ":\n    source: ../x\n    target: /x\n",
+			"at most 63 characters",
+		},
+		{
+			"a name starting with a dash",
+			"workspace:\n  -x:\n    source: ../x\n    target: /x\n",
+			"device name must not start with",
+		},
+		{
+			"two mounts on one container path",
+			"workspace:\n  a:\n    source: ../a\n    target: /same\n" +
+				"  b:\n    source: ../b\n    target: /same\n",
+			"/same",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := parseErr(t, minimal+tt.body)
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to name %q", err, tt.want)
 			}
 		})
 	}

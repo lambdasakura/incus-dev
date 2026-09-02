@@ -254,36 +254,40 @@ Note that the storage pool and network names then become host-specific.
 
 ## 6.9 Mounting several repositories
 
-Add them to `instance.devices` and directories other than the workspace are
-shared too. They get the same uid/gid mapping as the workspace, automatically.
+Declare them under `workspace`. `main` is your own tree and is filled in when
+you leave it out.
 
 ```yaml
-instance:
-  devices:
-    other-repo:
-      type: disk
-      source: ../other-repo      # from the project root
-      path: /other-repo
+runtime:
+  version: "1.1"
+workspace:
+  other-repo:
+    source: ../other-repo      # from the project root
+    target: /other-repo
 ```
+
+They get the same uid/gid mapping as the workspace, automatically.
 
 ---
 
 ## 6.10 Mounting extra data
 
 ```yaml
-instance:
-  devices:
-    dataset:
-      type: disk
-      source: /srv/dataset        # absolute path on the host
-      path: /data
-      readonly: "true"
-
-    assets:
-      type: disk
-      source: ./assets            # from the project root
-      path: /assets
+runtime:
+  version: "1.1"
+workspace:
+  dataset:
+    source: /srv/dataset        # absolute path on the host
+    target: /data
+    readonly: true
+  assets:
+    source: ./assets            # from the project root
+    target: /assets
 ```
+
+`instance.devices` still takes a `disk`, and is where a `nic`, a `proxy` or a
+pool-backed disk goes. For a plain host directory the form above is shorter and
+does not change meaning when a `pool` appears (4.5).
 
 ---
 

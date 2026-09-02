@@ -286,8 +286,8 @@ The same rules apply to the keys of `instance.config`.
 
 ## 4.6 `workspace`
 
-How the project working tree is mounted into the container. Omit it and the
-defaults are used.
+How host directories are mounted into the container. Omit it and the defaults
+are used.
 
 ```yaml
 workspace:
@@ -297,6 +297,50 @@ workspace:
 ```
 
 It is a bind mount, not a copy, so edits on the host are visible immediately.
+
+### Mounting more than one directory
+
+Write the mounts as a map instead. Each key becomes a device name.
+
+```yaml
+workspace:
+  idmap: auto          # belongs to the instance, so it stays at this level
+  main:
+    source: .
+    target: /workspace
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+  dataset:
+    source: /srv/dataset
+    target: /data
+    readonly: true
+```
+
+`main` is the project's own tree: the shell's working directory, where
+provisioning runs, and what `idev status` shows all mean that one. Omit it and
+it is filled in with the same defaults as above, so adding a second directory
+does not mean restating your own:
+
+```yaml
+workspace:
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+```
+
+Notes:
+
+- `target` has no default except on `main`. Two mounts sharing `/workspace`
+  would fight over one directory
+- `idmap` cannot be written inside a mount. Incus keeps one `raw.idmap` per
+  instance, so it cannot differ per disk
+- `main` is applied as the device named `workspace`, which is why `workspace`
+  cannot be a mount name. Every other key is its own device name
+- A mount name cannot collide with a key of `instance.devices` or `volumes`,
+  start with `-`, or contain `,`
+- A project using this form should set `runtime.version: "1.1"` (4.3). An
+  older idev cannot read it, and the pin is what says so
 
 ### `idmap`
 
@@ -317,8 +361,8 @@ directory.
 Either way the workspace is readable and writable; the only difference is who
 owns what the container creates.
 
-Whatever is chosen here is applied the same way to host directories mounted
-through `instance.devices`.
+Whatever is chosen here is applied the same way to every mount above, and to
+host directories mounted through `instance.devices`.
 
 If your team cannot standardise host configuration, leaving it at `auto` is the
 right call.

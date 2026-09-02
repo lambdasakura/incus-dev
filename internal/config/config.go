@@ -10,7 +10,12 @@ const SchemaVersion = 1
 
 // RuntimeVersion is the runtime compatibility version this CLI provides.
 // It is checked against runtime.version in dev.yml (spec 03-configuration.md 3.4).
-const RuntimeVersion = "1.0"
+//
+// 1.1 added the map form of workspace (spec 3.7.2). A dev.yml written in it is
+// one an older idev cannot read at all -- the schema refuses the entry names --
+// so a project using it pins 1.1 to be told which idev it needs rather than
+// which keys are unknown.
+const RuntimeVersion = "1.1"
 
 // Defaults (spec 03-configuration.md 3.6.3 and 3.7).
 const (
@@ -38,6 +43,10 @@ const ConfigDir = ".incus-dev"
 // WorkspaceDeviceName is the reserved name of the workspace disk device.
 const WorkspaceDeviceName = "workspace"
 
+// MainMountName is the workspace entry that declares the project's own tree
+// (spec 3.7.2).
+const MainMountName = "main"
+
 // IDMapMode is how uids and gids are mapped for the workspace.
 type IDMapMode string
 
@@ -54,6 +63,9 @@ const (
 	// IDMapNone sets nothing up.
 	IDMapNone IDMapMode = "none"
 )
+
+// IDMapModes are every value workspace.idmap accepts (spec 3.7.6).
+var IDMapModes = []IDMapMode{IDMapAuto, IDMapRaw, IDMapShift, IDMapNone}
 
 // Config is the whole of dev.yml.
 type Config struct {
@@ -207,16 +219,47 @@ func (c *Config) IncusProject() string {
 	return c.Incus.Project
 }
 
-// Workspace declares how the working tree is mounted.
-type Workspace struct {
-	Source string    `json:"source,omitempty"`
-	Target string    `json:"target,omitempty"`
-	IDMap  IDMapMode `json:"idmap,omitempty"`
+// Mount is one host directory bind mounted into the container (spec 3.7).
+type Mount struct {
+	Source   string `json:"source,omitempty"`
+	Target   string `json:"target,omitempty"`
+	Readonly bool   `json:"readonly,omitempty"`
 }
 
-// WorkspaceOrDefault returns the workspace declaration with defaults filled in.
-func (c *Config) WorkspaceOrDefault() Workspace {
-	ws := Workspace{
+// Workspace is the workspace section as the file holds it (spec 3.7).
+//
+// Two forms reach it -- one mount written inline, or a map of them -- and it
+// keeps neither: both become Mounts, so nothing downstream has to know which
+// one the project wrote. IDMap sits here rather than on a Mount because
+// raw.idmap is one instance config key and cannot differ per disk (spec
+// 3.7.6).
+type Workspace struct {
+	IDMap  IDMapMode
+	Mounts map[string]Mount
+	// mapForm records which form the file used, so validation can report the
+	// problem at the path the author wrote rather than at the normalised one.
+	mapForm bool
+}
+
+// WorkspaceMount is one resolved mount, with the section's idmap alongside.
+//
+// The idmap belongs to the instance, not to this mount; it travels here
+// because every caller that asks for the workspace also decides the mapping
+// from it.
+type WorkspaceMount struct {
+	Source   string
+	Target   string
+	Readonly bool
+	IDMap    IDMapMode
+}
+
+// WorkspaceOrDefault returns the project's own tree with defaults filled in.
+//
+// That is the mount named main (spec 3.7.2): the shell's working directory,
+// the provisioning directory, what status shows and what user.incus-dev.root
+// records all mean this one, not the extra mounts beside it.
+func (c *Config) WorkspaceOrDefault() WorkspaceMount {
+	ws := WorkspaceMount{
 		Source: DefaultWorkspaceSource,
 		Target: DefaultWorkspaceTarget,
 		IDMap:  IDMapAuto,
@@ -224,16 +267,57 @@ func (c *Config) WorkspaceOrDefault() Workspace {
 	if c.Workspace == nil {
 		return ws
 	}
-	if c.Workspace.Source != "" {
-		ws.Source = c.Workspace.Source
-	}
-	if c.Workspace.Target != "" {
-		ws.Target = c.Workspace.Target
-	}
 	if c.Workspace.IDMap != "" {
 		ws.IDMap = c.Workspace.IDMap
 	}
+	main, ok := c.Workspace.Mounts[MainMountName]
+	if !ok {
+		return ws
+	}
+	if main.Source != "" {
+		ws.Source = main.Source
+	}
+	if main.Target != "" {
+		ws.Target = main.Target
+	}
+	ws.Readonly = main.Readonly
 	return ws
+}
+
+// Mounts returns every host mount with defaults filled in, keyed by entry
+// name.
+//
+// main is always present: a project that declares only extra mounts still
+// gets its own tree (spec 3.7.2).
+func (c *Config) Mounts() map[string]Mount {
+	main := c.WorkspaceOrDefault()
+	out := map[string]Mount{
+		MainMountName: {Source: main.Source, Target: main.Target, Readonly: main.Readonly},
+	}
+	if c.Workspace == nil {
+		return out
+	}
+	for name, m := range c.Workspace.Mounts {
+		if name == MainMountName {
+			continue
+		}
+		out[name] = m
+	}
+	return out
+}
+
+// MountDeviceName is the Incus device name a mount is applied under.
+//
+// The key is the device name everywhere but main, which keeps the name
+// workspace: instances made by an older idev already carry a device called
+// that, and the single form goes on naming it so for compatibility. Deriving
+// the name from the key would give one mount two names depending on which
+// form declared it (spec 3.7.2).
+func MountDeviceName(entry string) string {
+	if entry == MainMountName {
+		return WorkspaceDeviceName
+	}
+	return entry
 }
 
 // WorkspaceSourcePath returns the absolute path of the workspace source.

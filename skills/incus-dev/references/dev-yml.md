@@ -136,7 +136,36 @@ How uids and gids are mapped when sharing a host directory into the container.
 | `shift` | none | root |
 | `none` | none | (not writable) |
 
-The same mapping is applied to disks added through `instance.devices`.
+The same mapping is applied to every workspace mount and to disks added
+through `instance.devices`.
+
+## Mounting more than one host directory
+
+Write `workspace` as a map. Each key is a device name; `main` is the project's
+own tree and is filled in when omitted.
+
+```yaml
+runtime:
+  version: "1.1"               # the map form needs idev 1.1
+workspace:
+  idmap: auto                  # instance-wide, so it stays at this level
+  main:
+    source: .
+    target: /workspace
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+  dataset:
+    source: /srv/dataset
+    target: /data
+    readonly: true
+```
+
+- `target` has no default except on `main`
+- `idmap` cannot go inside a mount: Incus keeps one `raw.idmap` per instance
+- `main` is applied as the device named `workspace`, so `workspace` is not a
+  usable mount name; every other key is its own device name
+- a mount name cannot collide with `instance.devices` or `volumes`
 
 A `disk` under `instance.devices` with a `pool` is not a host mount: there
 `source` names a storage volume on that pool, and idev neither resolves nor

@@ -31,8 +31,14 @@ instance:
 // newApp creates a project and returns an App built on fakes.
 func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Buffer) {
 	t.Helper()
+	return newAppIn(t, t.TempDir(), yamlBody)
+}
 
-	root := t.TempDir()
+// newAppIn is newApp with the project root named, for a test that has to put
+// something else in the tree first.
+func newAppIn(t *testing.T, root, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Buffer) {
+	t.Helper()
+
 	path := filepath.Join(root, ".incus-dev", "dev.yml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -1181,5 +1187,53 @@ func TestRebuildReadsTheInstanceOnceBeforeDestroying(t *testing.T) {
 	if n != 3 {
 		t.Errorf("read the instance %d times, want 3 (the record before the delete, "+
 			"the lookup after it, and the status of the new one): %v", n, client.Calls)
+	}
+}
+
+// Every workspace mount reaches the instance as a disk device (spec 3.7.8).
+//
+// main keeps the device name workspace, so an instance made before the map
+// form existed is not remounted the moment a project adds a second directory.
+func TestUpAppliesEveryWorkspaceMount(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app, client, _ := newAppIn(t, root, baseYAML+`
+workspace:
+  idmap: shift
+  other:
+    source: ./assets
+    target: /assets
+    readonly: true
+`)
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	devices := client.Instances["dev-example-project"].Devices
+	main, ok := devices["workspace"]
+	if !ok {
+		t.Fatalf("devices = %v, want main applied as the device %q", devices, "workspace")
+	}
+	if main["path"] != "/workspace" || main["source"] != root {
+		t.Errorf("workspace device = %v, want the project root at /workspace", main)
+	}
+
+	other, ok := devices["other"]
+	if !ok {
+		t.Fatalf("devices = %v, want the second mount applied under its own name", devices)
+	}
+	if other["path"] != "/assets" || other["source"] != filepath.Join(root, "assets") {
+		t.Errorf("other device = %v, want ./assets resolved from the project root", other)
+	}
+	if other["readonly"] != "true" {
+		t.Errorf("other device = %v, want readonly carried through", other)
+	}
+	// The mapping is instance-wide, so it reaches every host mount alike.
+	if main["shift"] != "true" || other["shift"] != "true" {
+		t.Errorf("devices = %v, want shift on both mounts", devices)
 	}
 }

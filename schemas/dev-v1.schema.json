@@ -57,13 +57,9 @@
       }
     },
     "workspace": {
+      "comment": "Two forms reach this key (spec 3.7): one mount written inline, or a map of them. Telling them apart, and the rules of each, live in internal/config so that a file which is neither gets a message naming what to do rather than a list of every branch that failed.",
       "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "source": { "type": "string", "minLength": 1 },
-        "target": { "type": "string", "minLength": 1 },
-        "idmap": { "enum": ["auto", "raw", "shift", "none"] }
-      }
+      "minProperties": 1
     },
     "shell": {
       "type": "object",

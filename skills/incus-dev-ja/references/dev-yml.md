@@ -133,7 +133,36 @@ Debian系以外のimageでは失敗するので、その場合は `bootstrap` �
 | `shift` | 不要 | root |
 | `none` | 不要 | （書き込み不可） |
 
-`instance.devices` で追加したdiskにも同じ対応付けが適用される。
+workspaceの全mountと、`instance.devices` で追加したdiskにも
+同じ対応付けが適用される。
+
+## ホストのディレクトリを複数マウントする
+
+`workspace` をマップとして書く。キーがdevice名になり、`main` が
+プロジェクト自身のtreeで、省略すれば補われる。
+
+```yaml
+runtime:
+  version: "1.1"               # 複数形式には idev 1.1 が要る
+workspace:
+  idmap: auto                  # instance全体の設定なのでこの位置
+  main:
+    source: .
+    target: /workspace
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+  dataset:
+    source: /srv/dataset
+    target: /data
+    readonly: true
+```
+
+- `target` に既定があるのは `main` だけ
+- `idmap` はmountの中に書けない（Incusの `raw.idmap` はinstanceに1つ）
+- `main` は `workspace` という名前のdeviceになるため、`workspace` はmount名に
+  使えない。他のキーはそのままdevice名になる
+- mount名は `instance.devices` や `volumes` のキーと衝突できない
 
 ただし `instance.devices` の `disk` に `pool` を書いた場合はホストのマウントではない。
 その `source` はそのpool上のstorage volume名であり、idevはパスとして解決も検査もしない。

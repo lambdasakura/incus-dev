@@ -265,3 +265,63 @@ func expandIDMap(entries []idmapEntry) []string {
 	slices.Sort(out)
 	return out
 }
+
+// The map form of workspace mounts every entry, and the daemon agrees about
+// which device carries which (spec 3.7.2, 3.7.8).
+//
+// The unit tests check what idev asks for. This checks what the container
+// actually has, and in particular that main is still the device named
+// workspace: an instance made before the map form existed has a device by
+// that name, and idev must not rename it out from under a running project.
+func TestWorkspaceMapFormMountsEveryEntry(t *testing.T) {
+	f := newFixture(t, idmapYAML)
+
+	data := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "host.txt"), []byte("from host\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, filepath.Join(f.root, ".incus-dev", "dev.yml"),
+		strings.ReplaceAll(strings.ReplaceAll(idmapYAML, "{{PROJECT}}", f.project),
+			"{{IMAGE}}", testImage)+
+			strings.ReplaceAll(`workspace:
+  idmap: shift
+  extra:
+    source: DATA
+    target: /data
+`, "DATA", data))
+
+	f.mustRun("up")
+
+	// The project's own tree, under the name it has always had.
+	if got := f.mustRun("shell", "--", "sh", "-c", "test -d /workspace && echo ok"); !strings.Contains(got, "ok") {
+		t.Errorf("main is not mounted at /workspace: %q", got)
+	}
+	if got := incusOut(t, "config", "device", "get", f.instance, "workspace", "path"); strings.TrimSpace(got) != "/workspace" {
+		t.Errorf("the device %q is not main's mount: %q", "workspace", got)
+	}
+	if out, err := runIncus("config", "device", "get", f.instance, "main", "path"); err == nil {
+		t.Errorf("a device named main exists (%q); main is applied as %q so an "+
+			"instance from an older idev is not remounted", out, "workspace")
+	}
+
+	// The second entry, under its own name.
+	if got := f.mustRun("shell", "--", "cat", "/data/host.txt"); !strings.Contains(got, "from host") {
+		t.Errorf("the second mount cannot be read: %q", got)
+	}
+	f.mustRun("shell", "--", "sh", "-c", "echo written > /data/from-container.txt")
+	if _, err := os.Stat(filepath.Join(data, "from-container.txt")); err != nil {
+		t.Errorf("the second mount could not be written: %v", err)
+	}
+
+	// The mapping is instance-wide, so it reached both disks.
+	for _, device := range []string{"workspace", "extra"} {
+		if got := incusOut(t, "config", "device", "get", f.instance, device, "shift"); strings.TrimSpace(got) != "true" {
+			t.Errorf("device %s shift = %q, want the section's idmap applied to every mount",
+				device, got)
+		}
+	}
+}

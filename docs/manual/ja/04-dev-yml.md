@@ -276,7 +276,7 @@ idevに作成・維持させたいvolumeは、ここではなく `volumes`（4.1
 
 ## 4.6 `workspace`
 
-プロジェクトのworking treeをコンテナへマウントする設定。省略時は既定値が使われる。
+ホストのディレクトリをコンテナへマウントする設定。省略時は既定値が使われる。
 
 ```yaml
 workspace:
@@ -286,6 +286,50 @@ workspace:
 ```
 
 コピーではなくbind mountなので、ホスト側の編集が即座に反映される。
+
+### 複数のディレクトリをマウントする
+
+マップとして書く。キーがそのままdevice名になる。
+
+```yaml
+workspace:
+  idmap: auto          # instance全体の設定なので、この位置のまま
+  main:
+    source: .
+    target: /workspace
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+  dataset:
+    source: /srv/dataset
+    target: /data
+    readonly: true
+```
+
+`main` がプロジェクト自身のtreeである。shellの作業ディレクトリ、
+provisioningの実行場所、`idev status` の表示は、すべてこれを指す。
+省略すれば上と同じ既定で補われるので、
+ディレクトリを1つ足すために自分のtreeを書き直す必要はない。
+
+```yaml
+workspace:
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+```
+
+注意点：
+
+- `target` に既定があるのは `main` だけである。
+  2つのmountが `/workspace` を共有すると同じ場所を奪い合う
+- `idmap` はmountの中に書けない。Incusの `raw.idmap` はinstanceに1つであり、
+  diskごとに変えられない
+- `main` は `workspace` という名前のdeviceとして適用される。
+  そのため `workspace` はmount名に使えない。他のキーはそのままdevice名になる
+- mount名は `instance.devices` や `volumes` のキーと衝突できず、
+  `-` で始められず、`,` を含められない
+- この形式を使うプロジェクトは `runtime.version: "1.1"` を指定する（4.3）。
+  古いidevはこのdev.ymlを読めず、それを伝えるのがこの指定である
 
 ### `idmap`
 
@@ -304,7 +348,7 @@ workspace:
 `auto` は `raw` が使えるならそれを、使えなければ `shift` へ退避し、警告を表示する。
 どちらでもworkspaceは読み書きできる。違いは生成物の所有者だけである。
 
-ここで決まった方式は、`instance.devices` でマウントした
+ここで決まった方式は、上の全mountにも、`instance.devices` でマウントした
 ホストのディレクトリにも同じように適用される。
 
 チーム内でホスト設定を揃えられない場合は `auto` のままにしておくとよい。

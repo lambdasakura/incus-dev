@@ -113,7 +113,10 @@ func splitVolume(ref string) (pool, name string, ok bool) {
 
 // managedDeviceNames returns the devices idev creates.
 func managedDeviceNames(cfg *config.Config) []string {
-	names := []string{config.WorkspaceDeviceName}
+	var names []string
+	for name := range cfg.Mounts() {
+		names = append(names, config.MountDeviceName(name))
+	}
 	names = append(names, slices.Collect(maps.Keys(cfg.Instance.Devices))...)
 	names = append(names, slices.Collect(maps.Keys(cfg.Volumes))...)
 	slices.Sort(names)
@@ -205,15 +208,21 @@ func desiredDevices(cfg *config.Config, plan idmapPlan, instance string) map[str
 		}
 	}
 
-	ws := cfg.WorkspaceOrDefault()
-	workspace := incus.Device{
-		"type":   "disk",
-		"source": cfg.WorkspaceSourcePath(),
-		"path":   ws.Target,
-	}
-	applyShift(workspace, plan)
+	// Every host mount, main included. main lands under the device name
+	// "workspace" rather than its key (spec 3.7.2).
+	for name, mount := range cfg.Mounts() {
+		device := incus.Device{
+			"type":   "disk",
+			"source": cfg.ResolvePath(mount.Source),
+			"path":   mount.Target,
+		}
+		if mount.Readonly {
+			device["readonly"] = "true"
+		}
+		applyShift(device, plan)
 
-	out[config.WorkspaceDeviceName] = workspace
+		out[config.MountDeviceName(name)] = device
+	}
 	return out
 }
 
