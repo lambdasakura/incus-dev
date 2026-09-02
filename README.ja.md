@@ -13,17 +13,23 @@ Linuxホストだけ。`idev` は単一の静的バイナリで、実行時の�
 
 ### 1. idevを導入する
 
-[最新リリース](../../releases/latest)から自分のプラットフォーム向けの
-アーカイブを取得する。
+**安定版はまだ無い。** 公開しているのは
+[`edge`](../../releases/tag/edge) で、`main` が動くたびに作り直される
+現在の `main` である。安定性も、`dev.yml` の形式が今のままであることも保証しない。
 
 ```bash
-VERSION=0.1.0        # 使いたいリリース
-curl -LO https://github.com/lambdasakura/incus-dev/releases/download/v$VERSION/incus-dev_${VERSION}_linux_amd64.tar.gz
-tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz
-sudo install -m 0755 incus-dev_${VERSION}_linux_amd64/idev /usr/local/bin/idev
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/incus-dev_edge_linux_amd64.tar.gz
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/checksums.txt
+sha256sum --check --ignore-missing checksums.txt
 
-idev --version
+tar -xzf incus-dev_edge_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_edge_linux_amd64/idev /usr/local/bin/idev
+
+idev --version        # edge-<commit>。ビルド元のコミット
 ```
+
+URLは変わらないので、同じコマンドを再実行すれば更新できる。
+`arm64` も同じ場所にある。
 
 `go install` を含む他の導入方法は[後述](#導入)。
 
@@ -147,18 +153,21 @@ root:<gid>:1
 
 ## 導入
 
-各[リリース](../../releases)に Linux の amd64・arm64 バイナリと、
-検証用の `checksums.txt` を添付している。
+[`edge`](../../releases/tag/edge) に Linux の amd64・arm64 バイナリと、
+検証用の `checksums.txt` を添付している。`main` が動くたびに置き換わる。
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
+tar -xzf incus-dev_edge_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_edge_linux_amd64/idev /usr/local/bin/idev
 ```
+
+バージョンを打った[リリース](../../releases)はまだ無い。
+出したときは同じ場所に、ファイル名がバージョン入りの形で並ぶ。
 
 Goツールチェインがあればダウンロードは要らない。
 ただしこの方法で入れたバイナリは `idev --version` が `dev` を返す。
-バージョンはリリース時に埋め込まれるためである。
+バージョンはビルド時に埋め込まれるためである。
 
 ```bash
 go install github.com/lambdasakura/incus-dev/cmd/idev@latest

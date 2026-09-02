@@ -1,0 +1,106 @@
+# Publishes the tip of main as a prerelease called "edge".
+#
+# There is no stable version yet, so nothing here declares one. GitHub cannot
+# hold a Release without a tag, so "edge" is a tag -- but a moving pointer at
+# the current main, not a version anyone should read meaning into. Cutting a
+# real release is still a matter of pushing a v* tag (release.yml).
+#
+# Actions are pinned by commit SHA, not by a tag: a tag can be moved to point
+# at something else, and this workflow holds contents: write. dependabot keeps
+# the pins current.
+name: Edge
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time: two pushes in quick succession would otherwise race to
+  # replace the same release, and the loser could leave it holding the older
+  # binaries.
+  group: edge
+  cancel-in-progress: false
+
+jobs:
+  edge:
+    name: edge
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to move the tag and replace the release.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # GoReleaser reads the history to work out the snapshot version.
+          fetch-depth: 0
+          # Otherwise the write-scoped token is left in .git/config for every
+          # later step, including the third-party action. gh takes its token
+          # from the environment.
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # The same gate a tag gets. ci.yml runs on this push too, but it is a
+      # separate workflow: nothing makes this job wait for it, so publishing
+      # without checking here would publish whatever was pushed.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version-file: .golangci-lint-version
+
+      - name: Test
+        run: make tidy test
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          # Pinned, so this builds with the same GoReleaser the release does.
+          version: "2.18.0"
+          # --snapshot: no tag is being released, and the archives are named
+          # after "edge" rather than a version so the download URL holds still.
+          args: release --snapshot --clean
+
+      - name: Replace the edge release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+
+          # Deleted with its tag and made again, rather than edited: that is
+          # the one sequence that leaves both the tag and every asset pointing
+          # at this commit, whatever the previous run left behind.
+          gh release delete edge --cleanup-tag --yes || true
+
+          gh release create edge \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "edge (main)" \
+            --notes "$(cat <<'NOTES'
+          Built from the current `main`. **This is not a release.** It is
+          replaced whenever `main` moves, and it carries no promise about
+          stability or about the configuration format staying as it is.
+
+          `idev --version` reports `edge-<commit>`, which is the code this was
+          built from.
+
+          ## Installation
+
+          ```bash
+          curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/incus-dev_edge_linux_amd64.tar.gz
+          curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          tar xzf incus-dev_edge_linux_amd64.tar.gz
+          ```
+
+          Put `idev` on your `PATH`. The manual is in the archive, beside the
+          binary: see `docs/manual/01-installation.md` for the rest of the
+          setup.
+          NOTES
+          )" \
+            dist/*.tar.gz \
+            dist/checksums.txt

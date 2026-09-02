@@ -15,17 +15,24 @@ else: `idev` is a single static binary with no runtime dependencies.
 
 ### 1. Install idev
 
-Take the archive for your platform from the
-[latest release](../../releases/latest).
+**There is no stable release yet.** What is published is
+[`edge`](../../releases/tag/edge): the current `main`, rebuilt whenever it
+moves. It carries no promise about stability or about `dev.yml` staying as it
+is.
 
 ```bash
-VERSION=0.1.0        # the release you want
-curl -LO https://github.com/lambdasakura/incus-dev/releases/download/v$VERSION/incus-dev_${VERSION}_linux_amd64.tar.gz
-tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz
-sudo install -m 0755 incus-dev_${VERSION}_linux_amd64/idev /usr/local/bin/idev
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/incus-dev_edge_linux_amd64.tar.gz
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/checksums.txt
+sha256sum --check --ignore-missing checksums.txt
 
-idev --version
+tar -xzf incus-dev_edge_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_edge_linux_amd64/idev /usr/local/bin/idev
+
+idev --version        # edge-<commit>, the code it was built from
 ```
+
+The URL does not change, so re-running the same commands updates it. `arm64`
+is published beside `amd64`.
 
 Other ways to install, including `go install`, are [below](#installing).
 
@@ -151,17 +158,21 @@ root:<gid>:1
 
 ## Installing
 
-Every [release](../../releases) carries a Linux binary for amd64 and arm64,
-plus a `checksums.txt` to check it against.
+[`edge`](../../releases/tag/edge) carries a Linux binary for amd64 and arm64,
+plus a `checksums.txt` to check it against. It is replaced whenever `main`
+moves.
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
+tar -xzf incus-dev_edge_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_edge_linux_amd64/idev /usr/local/bin/idev
 ```
 
+There is no versioned [release](../../releases) yet. When there is, it appears
+in the same place with the version in the file names.
+
 With a Go toolchain, no download is needed. A binary built this way reports
-`dev` for `idev --version`, because the version is stamped in at release time.
+`dev` for `idev --version`, because the version is stamped in at build time.
 
 ```bash
 go install github.com/lambdasakura/incus-dev/cmd/idev@latest

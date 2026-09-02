@@ -31,7 +31,12 @@ builds:
 
 archives:
   - id: idev
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # A snapshot is named "edge" rather than after its version, so the edge
+    # release's download URL does not change on every push to main. The
+    # version, which carries the commit, is still what `idev --version`
+    # reports.
+    name_template: >-
+      {{ .ProjectName }}_{{ if .IsSnapshot }}edge{{ else }}{{ .Version }}{{ end }}_{{ .Os }}_{{ .Arch }}
     formats:
       - tar.gz
     # Unpacking must not scatter idev, the READMEs, docs/ and examples/ into
@@ -56,7 +61,10 @@ checksum:
   name_template: checksums.txt
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-next"
+  # What a build off main reports for `idev --version`. The commit is in it
+  # because a rolling build has no other way to say which code it is, and a
+  # bug report against "edge" alone cannot be placed in the history.
+  version_template: "edge-{{ .ShortCommit }}"
 
 changelog:
   sort: asc

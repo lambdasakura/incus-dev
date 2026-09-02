@@ -44,18 +44,28 @@ Incusへ接続できていれば、instanceがまだ無くても状態が表示�
 
 ## 1.3 idevの導入
 
-### リリースから導入する（推奨）
+### edgeビルドから導入する（推奨）
 
-各リリースには Linux の amd64・arm64 向けアーカイブと
-`checksums.txt` が添付されている。
-自分のアーキテクチャ向けのものを取得し、検証してから
-`PATH` の通った場所へ置く。
+バージョンを打ったリリースはまだ無い。`edge` は現在の `main` であり、
+`main` が動くたびに作り直される。Linux の amd64・arm64 向けアーカイブと
+`checksums.txt` が付く。URLは変わらないので、同じコマンドで更新できる。
 
 ```bash
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/incus-dev_edge_linux_amd64.tar.gz
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/checksums.txt
+
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
+tar -xzf incus-dev_edge_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_edge_linux_amd64/idev /usr/local/bin/idev
+
+idev --version        # edge-<commit>。ビルド元のコミット
 ```
+
+転がり続けるビルドなので、安定性は保証しない。`dev.yml` の形式が
+変わることもある。変わった場合は `idev validate` が知らせる。
+
+バージョンを打ったリリースは同じ場所に、ファイル名がバージョン入りの形で並ぶ。
+`idev --version` もそれを返すようになる。
 
 **idev はLinux専用である。** 動作しているマシンのIncusを操作するものであり、
 Incusのclient libraryはLinux以外でローカル接続を拒否する。

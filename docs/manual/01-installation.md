@@ -45,17 +45,29 @@ If it cannot, it says so
 
 ## 1.3 Installing idev
 
-### From a release (recommended)
+### From the edge build (recommended)
 
-Every release ships a Linux archive for amd64 and arm64, plus a
-`checksums.txt`. Download the one for your architecture, check it, and put the
-binary on your `PATH`.
+There is no versioned release yet. `edge` is the current `main`, rebuilt
+whenever it moves, with a Linux archive for amd64 and arm64 and a
+`checksums.txt`. Its download URL does not change, so the same commands update
+it.
 
 ```bash
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/incus-dev_edge_linux_amd64.tar.gz
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/edge/checksums.txt
+
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-dev_<version>_linux_amd64.tar.gz
-sudo install -m 0755 incus-dev_<version>_linux_amd64/idev /usr/local/bin/idev
+tar -xzf incus-dev_edge_linux_amd64.tar.gz
+sudo install -m 0755 incus-dev_edge_linux_amd64/idev /usr/local/bin/idev
+
+idev --version        # edge-<commit>, the code it was built from
 ```
+
+Being a rolling build, it carries no promise about stability, and `dev.yml`
+may change under you. `idev validate` tells you when it has.
+
+Versioned releases will appear in the same place, with the version in the file
+names, and `idev --version` reporting it.
 
 **idev is for Linux.** It operates the Incus on the machine it runs on, and the
 Incus client refuses a local connection on any other platform, so nothing that
