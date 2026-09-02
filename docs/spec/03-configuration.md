@@ -622,6 +622,11 @@ idev_incus_project: default
 ```
 
 `idev_` および `IDEV_` プレフィックスはidevが予約する。
+プロジェクトがこのプレフィックスで**新しい**名前を定義してはならない。
+
+ただし、idevが渡した値をステップ側が上書きすることは許す。
+`run` ステップの `env`、`ansible` ステップのvarsのいずれでも、
+プロジェクト側の指定が勝つ（[06-provisioning.md](06-provisioning.md) 6.4）。
 
 ---
 
@@ -632,6 +637,8 @@ idev_incus_project: default
 | `workspace.source` | project root |
 | `devices.*.source`（相対パスの場合） | project root |
 | `provision[].ansible.playbook` / `vars` / `inventory` | project root |
+| `provision[].galaxy.requirements` | project root |
+| `secrets.*.file` | project root（`~` はホームへ展開する） |
 | `provision[].run` 内のパス | コンテナ内の絶対パス（利用者が記述） |
 
 project rootの外を指すパスは警告してよいが、禁止はしない。

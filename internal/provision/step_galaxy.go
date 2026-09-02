@@ -13,7 +13,7 @@ import (
 // .incus-dev/ (spec 06-provisioning.md 6.5.5). Where they land is Ansible's
 // default.
 func (e *Executor) execGalaxy(ctx context.Context, step *config.GalaxyStep, env Env) error {
-	if err := e.checkPrerequisites(ctx); err != nil {
+	if err := e.checkGalaxy(ctx); err != nil {
 		return err
 	}
 

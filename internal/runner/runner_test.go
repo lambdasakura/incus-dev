@@ -359,6 +359,9 @@ func TestCollapseMultilineArgs(t *testing.T) {
 		{"single line is left alone", "echo hi", `"echo hi"`},
 		{"multiple lines are folded", "one\ntwo\nthree", `"one … (+2 lines)"`},
 		{"a trailing newline is not counted", "one\ntwo\n", `"one … (+1 lines)"`},
+		// A YAML block scalar always ends in a newline, so this is what every
+		// one-line `run: |` step looks like.
+		{"one line with a trailing newline is left alone", "apt-get update\n", `"apt-get update"`},
 	}
 
 	for _, tt := range tests {
@@ -440,5 +443,30 @@ func TestRunLabelsAnInterruption(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "provision step 2/3") {
 		t.Errorf("error = %v, want it to name the step", err)
+	}
+}
+
+// A command that succeeded is reported as success even if something it started
+// outlives it.
+//
+// WaitDelay bounds two things: a child that outlives a cancelled context, and
+// a child whose output pipe stays open after it exits. The second gives
+// exec.ErrWaitDelay with an exit code of zero, which is not a failure of the
+// command.
+func TestRunSucceedsDespiteALingeringChild(t *testing.T) {
+	var out lockedWriter
+	out.onWrite = func() {}
+
+	res, err := runner.New().Run(context.Background(), runner.Command{
+		Name:   "sh",
+		Args:   []string{"-c", "sleep 5 & echo hello; exit 0"},
+		Stdout: &out,
+	})
+
+	if err != nil {
+		t.Errorf("Run() error = %v, want the command's own success reported", err)
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", res.ExitCode)
 	}
 }

@@ -13,6 +13,9 @@ const (
 	InstanceNamePrefix = "dev-"
 	// maxInstanceNameLength is the longest name Incus accepts.
 	maxInstanceNameLength = 63
+	// maxSuffixLength is how much of the name a suffix may take, so that the
+	// prefix and part of the project name always fit beside it.
+	maxSuffixLength = 32
 )
 
 // InstanceName derives an Incus instance name from a project name,
@@ -27,15 +30,31 @@ func InstanceName(projectName string) string {
 // It tells several checkouts on one machine apart (spec 05-incus.md 5.1), so
 // the suffix is what must survive: a long project name is shortened to make
 // room for it rather than the other way round.
+//
+// The suffix can be anything — project.scope: branch passes a git branch name
+// straight through — so an oversized one is replaced by a hash of itself,
+// which keeps two long branches apart while leaving room for the prefix and
+// something of the project name.
 func InstanceNameWithSuffix(projectName, suffix string) string {
 	if suffix == "" {
 		return instanceName(projectName)
 	}
 
-	tail := "-" + normalize(suffix)
-	head := truncate(InstanceNamePrefix+normalize(projectName), maxInstanceNameLength-len(tail))
+	tail := normalize(suffix)
+	if tail == "" || len(tail) > maxSuffixLength {
+		// A suffix with no letters or digits — a branch named in Japanese, say
+		// — would otherwise be dropped, putting two checkouts on one instance.
+		// One that is too long would be cut, which can make two of them equal.
+		tail = shortHash(suffix)
+	}
 
-	return strings.TrimRight(head, "-") + tail
+	head := normalize(projectName)
+	if head == "" {
+		head = shortHash(projectName)
+	}
+	head = truncate(head, maxInstanceNameLength-len(InstanceNamePrefix)-1-len(tail))
+
+	return InstanceNamePrefix + strings.TrimRight(head, "-") + "-" + tail
 }
 
 // ShortHash returns a short hexadecimal string that distinguishes a name.
@@ -74,6 +93,9 @@ func normalize(name string) string {
 }
 
 // truncate shortens a name to at most n bytes.
+//
+// n is always positive at the call sites: a suffix is capped at
+// maxSuffixLength, which leaves room for the prefix and part of the name.
 func truncate(name string, n int) string {
 	if len(name) > n {
 		return name[:n]

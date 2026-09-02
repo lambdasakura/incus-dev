@@ -340,6 +340,26 @@ func TestParseErrors(t *testing.T) {
 			want: "idmap",
 		},
 		{
+			name: "a comma in a config key",
+			yaml: minimal + "  config:\n    \"a,b\": \"1\"\n",
+			want: ",",
+		},
+		{
+			name: "a comma in a device name",
+			yaml: minimal + "  devices:\n    \"gpu,extra\":\n      type: gpu\n",
+			want: ",",
+		},
+		{
+			name: "an env key with an equals sign",
+			yaml: minimal + "\nprovision:\n  - run: \"true\"\n    env:\n      \"A=B\": \"1\"\n",
+			want: "=",
+		},
+		{
+			name: "an empty extra_args entry",
+			yaml: minimal + "\nprovision:\n  - ansible:\n      playbook: p.yml\n      extra_args: [\"\"]\n",
+			want: "extra_args",
+		},
+		{
 			name: "an object as a config value",
 			yaml: minimal + "  config:\n    limits.cpu:\n      nested: 1\n",
 			want: "config",

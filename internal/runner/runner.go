@@ -83,13 +83,15 @@ func (c Command) String() string {
 // the failure if it flowed into the error as it is, so only the first line is
 // shown.
 func Collapse(arg string) string {
+	// A YAML block scalar always ends in a newline, so a one-line `run: |`
+	// step arrives here with a trailing one and nothing after it.
 	first, rest, found := strings.Cut(arg, "\n")
-	if !found {
-		return arg
+	rest = strings.TrimRight(rest, "\n")
+	if !found || rest == "" {
+		return first
 	}
 
-	lines := strings.Count(strings.TrimRight(rest, "\n"), "\n") + 1
-	return fmt.Sprintf("%s … (+%d lines)", first, lines)
+	return fmt.Sprintf("%s … (+%d lines)", first, strings.Count(rest, "\n")+1)
 }
 
 // Result is the outcome of a run.
@@ -196,6 +198,13 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 		Stderr:   stderr.Bytes(),
 	}
 	if err == nil {
+		return res, nil
+	}
+
+	// WaitDelay also fires when the command itself finished cleanly and only
+	// its output pipe stayed open, held by something it started. The command
+	// succeeded; only the waiting was cut short.
+	if errors.Is(err, exec.ErrWaitDelay) && res.ExitCode == 0 && ctx.Err() == nil {
 		return res, nil
 	}
 

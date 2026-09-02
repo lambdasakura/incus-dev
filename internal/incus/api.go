@@ -295,8 +295,14 @@ func (a *API) UnsetConfig(ctx context.Context, name string, keys []string) error
 	})
 }
 
-// ApplyDevices sets the declared devices, updating only what differs on an
-// existing device and recreating it when its type changed.
+// ApplyDevices sets the declared devices.
+//
+// A declared device is replaced rather than merged into: every device idev
+// passes here is one it owns entirely — the workspace, a volume, or an
+// instance.devices entry — so the declaration is the whole truth about it. A
+// merge would leave a key that has left the declaration on the instance
+// forever, and Incus rejects some of the combinations that produces, such as a
+// disk naming both a pool and a host path (spec 05-incus.md 5.4.4).
 func (a *API) ApplyDevices(ctx context.Context, name string, devices map[string]Device) error {
 	if len(devices) == 0 {
 		return nil
@@ -308,12 +314,7 @@ func (a *API) ApplyDevices(ctx context.Context, name string, devices map[string]
 			put.Devices = map[string]map[string]string{}
 		}
 		for devName, want := range devices {
-			current, exists := put.Devices[devName]
-			if !exists || current == nil || Device(current).Type() != want.Type() {
-				put.Devices[devName] = maps.Clone(want)
-				continue
-			}
-			maps.Copy(current, want)
+			put.Devices[devName] = maps.Clone(want)
 		}
 	})
 }

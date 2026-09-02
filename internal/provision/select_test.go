@@ -196,3 +196,50 @@ func TestSelectFallsBackToThePosition(t *testing.T) {
 		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
 	}
 }
+
+// A step's own name and the placeholder for an unnamed one are different
+// things, so one must not match the other.
+//
+// DisplayName returns "step N" for an unnamed step, and matching against it
+// put both in one namespace: a step named "step 2" then also matched the
+// unnamed step at position 2.
+func TestSelectDoesNotMatchThePlaceholderOfAnotherStep(t *testing.T) {
+	yaml := base + `
+provision:
+  - name: "step 2"
+    run: "true"
+  - run: "true"
+  - name: third
+    run: "true"
+`
+
+	t.Run("only", func(t *testing.T) {
+		got := selectSteps(t, yaml, provision.Selection{Only: []string{"step 2"}})
+		if diff := cmp.Diff([]int{0}, got); diff != "" {
+			t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("from", func(t *testing.T) {
+		got := selectSteps(t, yaml, provision.Selection{From: "step 2"})
+		if diff := cmp.Diff([]int{0, 1, 2}, got); diff != "" {
+			t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+// The placeholder still names an unnamed step.
+func TestSelectMatchesThePlaceholderOfAnUnnamedStep(t *testing.T) {
+	yaml := base + `
+provision:
+  - name: setup
+    run: "true"
+  - run: "true"
+`
+
+	got := selectSteps(t, yaml, provision.Selection{Only: []string{"step 2"}})
+
+	if diff := cmp.Diff([]int{1}, got); diff != "" {
+		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+	}
+}

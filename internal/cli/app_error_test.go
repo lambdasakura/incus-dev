@@ -563,6 +563,43 @@ provision:
 	}
 }
 
+// up --dry-run makes the same host-side checks up does.
+//
+// Spec 04-cli.md 4.7 leans on this: it is why validate has no --check-host
+// flag. A preflight that passes while up fails on the next line is worse than
+// none.
+func TestPlanChecksAnsiblePrerequisites(t *testing.T) {
+	root := t.TempDir()
+	playbook := filepath.Join(root, ".incus-dev", "ansible", "site.yml")
+	if err := os.MkdirAll(filepath.Dir(playbook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playbook, []byte("---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Parse([]byte(rootYAML+`
+provision:
+  - name: playbook step
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+`), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = root
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(),
+		Runner: &runnertest.Fake{Err: map[string]error{"ansible-playbook": errBoom}},
+		Out:    &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err == nil {
+		t.Error("Plan() = nil error, want the same prerequisite failure up reports")
+	}
+}
+
 // provision checks the same prerequisites, and only for the steps selected.
 func TestProvisionChecksPrerequisitesOfSelectedSteps(t *testing.T) {
 	root := t.TempDir()

@@ -26,6 +26,9 @@ type fakeConsole struct {
 	restored bool
 	stopped  bool
 	resized  chan struct{}
+	// onSize runs at the start of Size, so a test can act on the moment the
+	// handler asks for it.
+	onSize func()
 }
 
 func newFakeConsole() *fakeConsole {
@@ -33,6 +36,9 @@ func newFakeConsole() *fakeConsole {
 }
 
 func (c *fakeConsole) Size() (int, int, error) {
+	if c.onSize != nil {
+		c.onSize()
+	}
 	if c.sizeErr != nil {
 		return 0, 0, c.sizeErr
 	}
@@ -324,14 +330,30 @@ func TestControlStopsOnSendError(t *testing.T) {
 func TestControlWithoutSize(t *testing.T) {
 	console := newFakeConsole()
 	console.sizeErr = errAPI
+
 	resized := make(chan struct{}, 1)
 	resized <- struct{}{}
 
-	control{ctx: context.Background(), done: make(chan struct{}), console: console, resized: resized}.handle(
-		func(any) error {
-			t.Error("sent something despite not knowing the size")
+	// Interrupt the run the moment the handler asks for the size, so what
+	// happens after the failed read is what this observes.
+	ctx, cancel := context.WithCancel(context.Background())
+	console.onSize = cancel
+
+	var sent []any
+	control{ctx: ctx, done: make(chan struct{}), console: console, resized: resized,
+		sent: make(chan struct{})}.handle(
+		func(v any) error {
+			sent = append(sent, v)
 			return nil
 		})
+
+	// No resize without a size to send — and the handler is still there to
+	// forward the interruption, which a local failure to read the size says
+	// nothing about.
+	want := []any{api.InstanceExecControl{Command: "signal", Signal: int(syscall.SIGTERM)}}
+	if diff := cmp.Diff(want, sent); diff != "" {
+		t.Errorf("sent mismatch (-want +got):\n%s", diff)
+	}
 }
 
 // Raw mode is not possible on streams that are not a terminal.

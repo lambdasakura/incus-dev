@@ -32,46 +32,95 @@ const (
 // created, started and bootstrapped, so the user waits through all of that to
 // be told Ansible is not installed (spec 06-provisioning.md 6.5.1).
 func (e *Executor) CheckPrerequisites(ctx context.Context, steps []config.Step) error {
+	var hasAnsible, hasGalaxy, galaxyFirst bool
 	for _, step := range steps {
-		if step.Ansible != nil || step.Galaxy != nil {
-			return e.checkPrerequisites(ctx)
+		switch {
+		case step.Galaxy != nil:
+			// Only a galaxy step that runs before the first ansible step can
+			// install what that step needs.
+			galaxyFirst = galaxyFirst || !hasAnsible
+			hasGalaxy = true
+		case step.Ansible != nil:
+			hasAnsible = true
 		}
 	}
-	return nil
+
+	if hasGalaxy {
+		if err := e.checkGalaxy(ctx); err != nil {
+			return err
+		}
+	}
+	if !hasAnsible {
+		return nil
+	}
+	if err := e.checkPlaybook(ctx); err != nil {
+		return err
+	}
+	if galaxyFirst {
+		// The connection plugin is in community.general, which is what that
+		// galaxy step is usually there to install. Requiring it now would make
+		// that impossible, so leave it to the ansible step itself.
+		return nil
+	}
+	return e.checkPlugin(ctx)
 }
 
-// checkPrerequisites verifies, once, that the prerequisites for ansible steps
-// are in place.
+// checkPlaybook verifies, once, that ansible-playbook can be run.
 //
-// Without them, ansible-playbook's own output makes the cause hard to see, so
-// stop early and say what to do (spec 06-provisioning.md 6.5.1).
-func (e *Executor) checkPrerequisites(ctx context.Context) error {
-	e.ansibleCheck.Do(func() {
+// Without it, ansible's own output makes the cause hard to see, so stop early
+// and say what to do (spec 06-provisioning.md 6.5.1).
+func (e *Executor) checkPlaybook(ctx context.Context) error {
+	e.playbookCheck.Do(func() {
 		if _, err := e.Runner.Run(ctx, runner.Command{
 			Name: "ansible-playbook",
 			Args: []string{"--version"},
 		}); err != nil {
-			e.ansibleErr = fmt.Errorf(
+			e.playbookErr = fmt.Errorf(
 				"ansible-playbook is required for ansible steps but could not be run: %w\n"+
 					"install Ansible on this host, or use run steps instead", err)
-			return
 		}
+	})
+	return e.playbookErr
+}
 
+// checkPlugin verifies, once, that the connection plugin is installed.
+func (e *Executor) checkPlugin(ctx context.Context) error {
+	e.pluginCheck.Do(func() {
 		if _, err := e.Runner.Run(ctx, runner.Command{
 			Name: "ansible-doc",
 			Args: []string{"-t", "connection", ConnectionPlugin},
 		}); err != nil {
-			e.ansibleErr = fmt.Errorf(
+			e.pluginErr = fmt.Errorf(
 				"the %s connection plugin is required but was not found: %w\n"+
 					"install it with: ansible-galaxy collection install community.general", ConnectionPlugin, err)
 		}
 	})
-	return e.ansibleErr
+	return e.pluginErr
+}
+
+// checkGalaxy verifies, once, that ansible-galaxy can be run.
+func (e *Executor) checkGalaxy(ctx context.Context) error {
+	e.galaxyCheck.Do(func() {
+		if _, err := e.Runner.Run(ctx, runner.Command{
+			Name: "ansible-galaxy",
+			Args: []string{"--version"},
+		}); err != nil {
+			e.galaxyErr = fmt.Errorf(
+				"ansible-galaxy is required for galaxy steps but could not be run: %w\n"+
+					"install Ansible on this host", err)
+		}
+	})
+	return e.galaxyErr
 }
 
 // execAnsible runs ansible-playbook on the host (spec 06-provisioning.md 6.5).
 func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, env Env) error {
-	if err := e.checkPrerequisites(ctx); err != nil {
+	if err := e.checkPlaybook(ctx); err != nil {
+		return err
+	}
+	// Checked here rather than up front when a galaxy step may have installed
+	// it in the meantime.
+	if err := e.checkPlugin(ctx); err != nil {
 		return err
 	}
 

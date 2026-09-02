@@ -189,6 +189,18 @@ func validateStepValues(c *Config, ps *problems) {
 						"must not start with %q", "-")
 				}
 			}
+			for _, k := range sortedKeys(s.Run.Env) {
+				path := fmt.Sprintf("%s[%d].env.%s", kind, i, k)
+				if strings.Contains(k, "=") {
+					// The name and the value are one string to Incus, so an
+					// "=" here defines a different variable than it looks like.
+					ps.add(path, "name must not contain %q", "=")
+				}
+			}
+			if s.Run.Cwd != "" && !filepath.IsAbs(s.Run.Cwd) {
+				ps.add(fmt.Sprintf("%s[%d].cwd", kind, i),
+					"must be an absolute path in the container, got %q", s.Run.Cwd)
+			}
 		}
 	}
 
@@ -253,6 +265,24 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 // reservedEnvPrefix is the prefix of the environment variables idev injects.
 const reservedEnvPrefix = "IDEV_"
 
+// listSeparator is what idev joins its recorded key and device lists with
+// (user.incus-dev.managed / .devices), so a name holding one would be read
+// back as two.
+const listSeparator = ","
+
+// checkKeyShape rejects a key idev or Incus cannot carry.
+func checkKeyShape(path, key string, ps *problems) {
+	if strings.HasPrefix(key, "-") {
+		ps.add(path, "key must not start with %q", "-")
+	}
+	if strings.Contains(key, "=") {
+		ps.add(path, "key must not contain %q", "=")
+	}
+	if strings.Contains(key, listSeparator) {
+		ps.add(path, "key must not contain %q", listSeparator)
+	}
+}
+
 // profileNamePattern is the shape of a valid Incus profile name.
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -275,26 +305,17 @@ func validateInstance(c *Config, ps *problems) {
 	// Report key shapes Incus will not accept before we try to apply them. It
 	// rejects keys starting with "-" and keys containing "=".
 	for _, k := range sortedKeys(c.Instance.Config) {
-		if strings.HasPrefix(k, "-") {
-			ps.add("instance.config."+k, "key must not start with %q", "-")
-		}
-		if strings.Contains(k, "=") {
-			ps.add("instance.config."+k, "key must not contain %q", "=")
-		}
+		checkKeyShape("instance.config."+k, k, ps)
 	}
 	for _, name := range sortedKeys(c.Instance.Devices) {
 		if strings.HasPrefix(name, "-") {
 			ps.add("instance.devices."+name, "device name must not start with %q", "-")
 		}
+		if strings.Contains(name, listSeparator) {
+			ps.add("instance.devices."+name, "device name must not contain %q", listSeparator)
+		}
 		for _, k := range sortedKeys(c.Instance.Devices[name]) {
-			if strings.HasPrefix(k, "-") {
-				ps.add(fmt.Sprintf("instance.devices.%s.%s", name, k),
-					"key must not start with %q", "-")
-			}
-			if strings.Contains(k, "=") {
-				ps.add(fmt.Sprintf("instance.devices.%s.%s", name, k),
-					"key must not contain %q", "=")
-			}
+			checkKeyShape(fmt.Sprintf("instance.devices.%s.%s", name, k), k, ps)
 		}
 	}
 

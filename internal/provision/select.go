@@ -71,9 +71,20 @@ func Select(steps []config.Step, sel Selection) ([]int, error) {
 // step actually named "2" unreachable, and asking for it would silently run
 // whatever sits second instead.
 func match(steps []config.Step, ref string) ([]int, error) {
+	// A step's own name first. The placeholder an unnamed step is shown as
+	// ("step 2") is a separate namespace: matching both at once let a step
+	// actually named "step 2" pull in the unnamed step at position 2.
 	var out []int
 	for i, s := range steps {
-		if s.DisplayName(i+1) == ref {
+		if s.Name == ref {
+			out = append(out, i)
+		}
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	for i, s := range steps {
+		if s.Name == "" && s.DisplayName(i+1) == ref {
 			out = append(out, i)
 		}
 	}

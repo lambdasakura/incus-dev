@@ -145,6 +145,12 @@ device）には一切触れない。
 記録を持たない古いinstanceに対しては、idev自身が設定したidmapキー
 （`raw.idmap`）のみを対象とする。
 
+deviceの**中のキー**については、宣言をそのまま置き換える。
+idevが適用するdeviceはworkspace・volume・`instance.devices` のいずれかであり、
+どれも宣言が内容の全体だからである。マージにすると、宣言から消えたキーが
+instance側に残り続け、`pool` と ホストパスの `source` を同時に持つdiskのように
+Incusが拒否する組み合わせができて、`dev.yml` をどう直しても復旧できなくなる。
+
 完全にクリーンな状態が必要な場合は `idev rebuild` を使用する。
 
 ### 5.4.5 再起動を要する設定

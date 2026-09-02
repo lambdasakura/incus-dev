@@ -645,6 +645,35 @@ func TestAPIUnsetConfig(t *testing.T) {
 	}
 }
 
+// A key dropped from a device's declaration is removed with it.
+//
+// Merging instead leaves it behind forever, and some combinations Incus then
+// rejects: a disk naming both a pool and a host path is one, and no edit to
+// dev.yml can undo it (spec 05-incus.md 5.4.4).
+func TestAPIApplyDevicesDropsUndeclaredKeys(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{Devices: map[string]map[string]string{
+		"data": {"type": "disk", "pool": "fast", "source": "myvol", "path": "/data"},
+	}})
+	a, _ := newAPI(f)
+
+	// The same device, now a host-path mount: no pool any more.
+	err := a.ApplyDevices(context.Background(), "dev-x", map[string]Device{
+		"data": {"type": "disk", "source": "/srv/data", "path": "/data"},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDevices() error = %v", err)
+	}
+
+	got := f.lastUpdate.Devices["data"]
+	if _, ok := got["pool"]; ok {
+		t.Errorf("data = %v, want the pool gone with the declaration", got)
+	}
+	if got["source"] != "/srv/data" {
+		t.Errorf("data = %v, want the new source", got)
+	}
+}
+
 func TestAPIApplyDevices(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{Devices: map[string]map[string]string{
@@ -663,8 +692,11 @@ func TestAPIApplyDevices(t *testing.T) {
 	}
 
 	got := f.lastUpdate.Devices
-	if got["workspace"]["path"] != "/workspace2" || got["workspace"]["shift"] != "true" {
-		t.Errorf("workspace = %v, want undeclared keys kept", got["workspace"])
+	if got["workspace"]["path"] != "/workspace2" {
+		t.Errorf("workspace = %v, want the declared path", got["workspace"])
+	}
+	if _, ok := got["workspace"]["shift"]; ok {
+		t.Errorf("workspace = %v, want a key that left the declaration gone", got["workspace"])
 	}
 	if got["data"]["type"] != "proxy" {
 		t.Errorf("data = %v, want it recreated when the type changed", got["data"])

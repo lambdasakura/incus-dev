@@ -145,7 +145,7 @@
       "required": ["requirements"],
       "properties": {
         "requirements": { "type": "string", "minLength": 1 },
-        "extra_args": { "type": "array", "items": { "type": "string" } }
+        "extra_args": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "ansible": {
@@ -158,7 +158,7 @@
         "inventory": { "type": "string", "minLength": 1 },
         "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "skip_tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "extra_args": { "type": "array", "items": { "type": "string" } }
+        "extra_args": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     }
   }

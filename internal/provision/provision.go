@@ -62,9 +62,15 @@ type Executor struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// The prerequisites for ansible steps are checked once.
-	ansibleCheck sync.Once
-	ansibleErr   error
+	// Each prerequisite is probed once. They are separate because they are
+	// needed by different steps: a galaxy step runs ansible-galaxy, and the
+	// connection plugin may be the very thing it installs.
+	playbookCheck sync.Once
+	playbookErr   error
+	pluginCheck   sync.Once
+	pluginErr     error
+	galaxyCheck   sync.Once
+	galaxyErr     error
 }
 
 // Bootstrap runs the bootstrap steps.

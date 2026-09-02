@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
 func TestResolveSecrets(t *testing.T) {
@@ -151,5 +153,38 @@ func TestInstanceNameForRequiresBranchFunc(t *testing.T) {
 
 	if _, err := instanceNameFor(cfg, nil); err == nil {
 		t.Error("error = nil, want a failure without a branchFunc")
+	}
+}
+
+// A secret file named relatively is found from anywhere in the project.
+//
+// Discovery walks upwards, so running idev from a subdirectory is the normal
+// case; resolving against the working directory made it work from the root and
+// fail one level down (spec 03-configuration.md 3.11).
+func TestSecretFileIsRelativeToTheProject(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".incus-dev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".incus-dev", "token"), []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+
+	cfg := &config.Config{
+		Root:    root,
+		Secrets: map[string]config.Secret{"TOK": {File: ".incus-dev/token"}},
+	}
+
+	got, err := resolveSecrets(cfg, func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatalf("resolveSecrets() error = %v", err)
+	}
+	if got["TOK"] != "s3cret" {
+		t.Errorf("TOK = %q, want s3cret", got["TOK"])
 	}
 }

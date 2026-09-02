@@ -31,6 +31,11 @@ func (a *App) Plan(ctx context.Context) error {
 	if err := a.checkProfiles(ctx); err != nil {
 		return err
 	}
+	// The same host-side checks up makes, so the preflight does not pass while
+	// up fails on one of them (spec 04-cli.md 4.7).
+	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Provision); err != nil {
+		return err
+	}
 
 	current, err := a.client.Instance(ctx, a.instance)
 	switch {

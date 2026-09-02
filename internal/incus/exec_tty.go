@@ -145,7 +145,10 @@ func (c control) handle(send func(any) error) {
 			}
 			width, height, err := c.console.Size()
 			if err != nil {
-				return
+				// A local failure to read the size says nothing about the
+				// control websocket. Returning here would give up forwarding
+				// an interruption for the rest of the run.
+				continue
 			}
 			if err := send(resizeMessage(width, height)); err != nil {
 				return

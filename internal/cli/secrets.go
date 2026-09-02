@@ -27,7 +27,7 @@ func resolveSecrets(cfg *config.Config, lookupEnv func(string) (string, bool)) (
 	for _, name := range slices.Sorted(maps.Keys(cfg.Secrets)) {
 		secret := cfg.Secrets[name]
 
-		value, err := readSecret(secret, lookupEnv)
+		value, err := readSecret(cfg, secret, lookupEnv)
 		switch {
 		case err == nil:
 			out[name] = value
@@ -45,7 +45,7 @@ func resolveSecrets(cfg *config.Config, lookupEnv func(string) (string, bool)) (
 }
 
 // readSecret reads one secret.
-func readSecret(secret config.Secret, lookupEnv func(string) (string, bool)) (string, error) {
+func readSecret(cfg *config.Config, secret config.Secret, lookupEnv func(string) (string, bool)) (string, error) {
 	if secret.Env != "" {
 		value, ok := lookupEnv(secret.Env)
 		if !ok {
@@ -58,6 +58,10 @@ func readSecret(secret config.Secret, lookupEnv func(string) (string, bool)) (st
 	if err != nil {
 		return "", err
 	}
+	// Relative to the project, as every other path in dev.yml is
+	// (spec 03-configuration.md 3.11). Discovery walks upwards, so the working
+	// directory is usually not the project root.
+	path = cfg.ResolvePath(path)
 	data, err := os.ReadFile(path) //nolint:gosec // reading the file the user named is the point
 	if err != nil {
 		return "", err

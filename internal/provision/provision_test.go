@@ -909,6 +909,111 @@ func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 	}
 }
 
+// A galaxy step is what installs community.general, so requiring it up front
+// would make the documented pattern impossible.
+//
+// The manual pairs a galaxy step with an ansible step precisely so nothing
+// outside .incus-dev/ has to be arranged first (manual 5.4).
+func TestGalaxyStepIsNotGatedOnWhatItInstalls(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "site.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The plugin is missing until the galaxy step installs it.
+	installed := false
+	f := &runnertest.Fake{}
+	f.Handler = func(c runner.Command) (runner.Result, error) {
+		cmd := c.String()
+		switch {
+		case strings.HasPrefix(cmd, "ansible-galaxy install"):
+			installed = true
+		case strings.HasPrefix(cmd, "ansible-doc") && !installed:
+			return runner.Result{ExitCode: 1}, errors.New("not found")
+		}
+		return runner.Result{}, nil
+	}
+
+	e := newExecutor(f)
+	env := testEnv()
+	env.ProjectRoot = root
+
+	if err := e.CheckPrerequisites(context.Background(), cfg.Provision); err != nil {
+		t.Fatalf("CheckPrerequisites() error = %v, want the galaxy step left to install it", err)
+	}
+	if err := e.Provision(context.Background(), cfg, env, provision.Selection{}); err != nil {
+		t.Fatalf("Provision() error = %v", err)
+	}
+	if !installed {
+		t.Error("the galaxy step never ran")
+	}
+}
+
+// A galaxy step only excuses the plugin check when it runs first.
+//
+// Ordered the other way round it cannot install anything in time, so the check
+// belongs up front — otherwise the instance is created, started and
+// bootstrapped before the ansible step reports the missing plugin.
+func TestPluginIsCheckedWhenGalaxyRunsAfterAnsible(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "site.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+  - name: collections
+    galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{Err: map[string]error{"ansible-doc": errors.New("not found")}}
+
+	err = newExecutor(f).CheckPrerequisites(context.Background(), cfg.Provision)
+	if err == nil || !strings.Contains(err.Error(), "community.general") {
+		t.Errorf("error = %v, want the missing plugin reported up front", err)
+	}
+}
+
+// A galaxy step needs ansible-galaxy, which is the tool it actually runs.
+func TestGalaxyStepChecksAnsibleGalaxy(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "---\n")
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
+provision:
+  - galaxy:
+      requirements: .incus-dev/ansible/requirements.yml
+`)
+	cfg, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{Err: map[string]error{"ansible-galaxy --version": errors.New("not found")}}
+
+	err = newExecutor(f).CheckPrerequisites(context.Background(), cfg.Provision)
+	if err == nil || !strings.Contains(err.Error(), "ansible-galaxy") {
+		t.Errorf("error = %v, want the missing ansible-galaxy reported", err)
+	}
+}
+
 // The prerequisites are checked once.
 func TestAnsiblePrerequisiteCheckedOnce(t *testing.T) {
 	root := t.TempDir()
@@ -995,12 +1100,13 @@ provision:
 		t.Fatal(err)
 	}
 
-	f := &runnertest.Fake{Err: map[string]error{"ansible-playbook --version": errors.New("not found")}}
+	// A galaxy step runs ansible-galaxy, so that is what it needs.
+	f := &runnertest.Fake{Err: map[string]error{"ansible-galaxy --version": errors.New("not found")}}
 	env := testEnv()
 	env.ProjectRoot = root
 
 	err = newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{})
-	if err == nil || !strings.Contains(err.Error(), "ansible") {
+	if err == nil || !strings.Contains(err.Error(), "ansible-galaxy") {
 		t.Errorf("error = %v, want the missing prerequisite reported", err)
 	}
 }

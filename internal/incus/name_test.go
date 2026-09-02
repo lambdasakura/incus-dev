@@ -72,6 +72,71 @@ func TestInstanceNameWithSuffixKeepsTheSuffix(t *testing.T) {
 	}
 }
 
+// Whatever the suffix, the result is a name Incus accepts.
+//
+// project.scope: branch passes the branch name straight through, so a long or
+// an odd one must not produce something Incus rejects — and must not crash.
+func TestInstanceNameWithSuffixStaysValid(t *testing.T) {
+	longBranch := "feature/an-extremely-long-descriptive-branch-name-that-keeps-going-and-going"
+
+	for _, tt := range []struct{ name, project, suffix string }{
+		{"a long branch", "proj", longBranch},
+		{"a long project and a long branch", strings.Repeat("p", 60), longBranch},
+		{"a suffix with nothing to keep", "my-project", "_"},
+		{"a suffix of hyphens", "my-project", "..."},
+		{"a suffix exactly at the limit", "my-project", strings.Repeat("b", 63)},
+		{"neither part has anything to keep", "...", "___"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := incus.InstanceNameWithSuffix(tt.project, tt.suffix)
+
+			if len(got) > 63 {
+				t.Errorf("len(%q) = %d, want <= 63", got, len(got))
+			}
+			if !strings.HasPrefix(got, "dev-") {
+				t.Errorf("InstanceNameWithSuffix() = %q, want it to start with dev-", got)
+			}
+			if strings.HasSuffix(got, "-") {
+				t.Errorf("InstanceNameWithSuffix() = %q, want it not to end with -", got)
+			}
+		})
+	}
+}
+
+// A suffix with no letters or digits still tells checkouts apart.
+//
+// project.scope: branch passes the branch name straight through, and a branch
+// named in Japanese normalises to nothing — dropping it would put two
+// unrelated branches on one instance, which is what the scope exists to
+// prevent.
+func TestInstanceNameWithSuffixKeepsANonAlphanumericSuffix(t *testing.T) {
+	plain := incus.InstanceName("my-project")
+
+	a := incus.InstanceNameWithSuffix("my-project", "機能追加")
+	b := incus.InstanceNameWithSuffix("my-project", "日本語")
+
+	if a == b {
+		t.Errorf("both branches became %q, want one instance each", a)
+	}
+	for _, got := range []string{a, b} {
+		if got == plain {
+			t.Errorf("InstanceNameWithSuffix() = %q, want it apart from the unscoped %q", got, plain)
+		}
+	}
+}
+
+// Two long branches still get an instance each.
+func TestInstanceNameWithSuffixKeepsLongSuffixesApart(t *testing.T) {
+	base := "feature/a-very-long-branch-name-that-goes-past-what-a-name-can-hold-"
+
+	a := incus.InstanceNameWithSuffix("proj", base+"one")
+	b := incus.InstanceNameWithSuffix("proj", base+"two")
+
+	if a == b {
+		t.Errorf("both branches became %q, want one instance each", a)
+	}
+}
+
 // The generated name always satisfies what Incus accepts.
 func TestInstanceNameDistinguishesNonAlphanumericNames(t *testing.T) {
 	// Names with no letters or digits must not collapse into one instance name.
