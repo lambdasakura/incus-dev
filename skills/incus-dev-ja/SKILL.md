@@ -52,6 +52,8 @@ IPv4をIPv6より優先し、毎回同じものを返す。アドレスが無い
 全アドレスとそのinterfaceは `idev status --json` にある。
 
 `idev exec` と `idev shell -- <cmd>` の違いは擬似端末の有無だけ。
+そのため `idev exec -- /bin/sh` は対話シェルにならない（プロンプトも職制御も無い）。
+対話シェルは `idev shell`。
 **スクリプトやCIからは `idev exec` を使う**（端末の有無で挙動が変わらない）。
 どちらもコンテナ内コマンドの終了コードをそのまま返すので、
 `idev exec -- make test || exit 1` がそのまま使える。

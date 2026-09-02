@@ -648,3 +648,40 @@ provision:
 		}
 	}
 }
+
+// exec gets no terminal and shell does, seen from inside the container (spec
+// 04-cli.md 4.3.1).
+//
+// The unit test checks that idev sets TTY on one and not the other. Whether
+// the daemon then gives the process a terminal is the daemon's part, and it is
+// what a user sees: `idev exec -- /bin/sh` prints no prompt because there is
+// no terminal there, which reads as a defect until you know it is the point.
+func TestExecHasNoTerminalAndShellDoes(t *testing.T) {
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skip("script(1) is needed to give idev a terminal to pass on")
+	}
+
+	f := newFixture(t, minimalYAML)
+	f.mustRun("up")
+
+	// Both under a pty, so idev has one to pass on and the difference is
+	// idev's decision rather than the caller's environment.
+	// The exit code is not checked: tty(1) exits 1 when there is no terminal,
+	// and idev passes the container command's code straight through, so the
+	// case this is here to see is a non-zero one.
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("script", "-qec", idevBin+" "+strings.Join(args, " "), "/dev/null")
+		cmd.Dir = f.root
+		cmd.Env = os.Environ()
+		out, _ := cmd.CombinedOutput()
+		return string(out)
+	}
+
+	if got := run("exec", "--", "tty"); !strings.Contains(got, "not a tty") {
+		t.Errorf("idev exec reported %q, want no terminal", strings.TrimSpace(got))
+	}
+	if got := run("shell", "--", "tty"); !strings.Contains(got, "/dev/pts/") {
+		t.Errorf("idev shell reported %q, want a terminal", strings.TrimSpace(got))
+	}
+}

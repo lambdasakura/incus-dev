@@ -55,7 +55,8 @@ there is no address -- an empty substitution would leave `ssh` connecting to
 the local user. Every address, with its interface, is in `idev status --json`.
 
 The only difference between `idev exec` and `idev shell -- <cmd>` is the
-pseudo-terminal. **From scripts and CI, use `idev exec`** — its behaviour does
+pseudo-terminal, so `idev exec -- /bin/sh` is not an interactive shell: no
+prompt, no job control. Use `idev shell` for that. **From scripts and CI, use `idev exec`** — its behaviour does
 not change with the presence of a terminal. Both pass the container command's
 exit code straight through, so `idev exec -- make test || exit 1` works as it
 is.

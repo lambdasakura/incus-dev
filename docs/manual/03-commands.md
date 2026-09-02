@@ -244,6 +244,19 @@ The only difference from `idev shell` is that it never allocates a
 pseudo-terminal, even when attached to one. In CI and in scripts, use `exec`:
 its behaviour does not vary with the environment.
 
+**So `idev exec -- /bin/sh` is not an interactive shell.** The shell finds no
+terminal, prints no prompt, and has no job control, though it still reads your
+commands and prints their output:
+
+```console
+$ idev exec -- /bin/sh
+ls
+bin  etc  workspace
+```
+
+That is `idev shell`'s job. Use `exec` for a command you name, `shell` for a
+shell you sit in.
+
 A command is required. Without one it fails, pointing you at `idev shell`.
 
 ---
