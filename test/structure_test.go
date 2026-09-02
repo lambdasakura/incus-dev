@@ -2,6 +2,7 @@ package test
 
 import (
 	"encoding/json"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -231,6 +232,8 @@ func TestConfigDirNamesAgree(t *testing.T) {
 // repo-wide, and no test looked. An architecture held up by a document alone
 // stops being true quietly.
 func TestArchitecturalConstraintsHold(t *testing.T) {
+	nonASCII := regexp.MustCompile(`[^\x00-\x7F]`)
+
 	// Imports come from the parser rather than a pattern: a single-line
 	// `import "os/exec"` does not look like one inside a block.
 	t.Run("os/exec outside internal/runner", func(t *testing.T) {
@@ -265,6 +268,34 @@ func TestArchitecturalConstraintsHold(t *testing.T) {
 					"derived. Anything a user runs calls NewApp and reports the error",
 					path)
 			}
+		})
+	})
+
+	// internal/cli has a test for this, but it reads the cobra tree, so it
+	// only sees text the CLI layer owns. Errors and log lines written in
+	// internal/incus, internal/provision and internal/runner reach the same
+	// terminal and were never checked.
+	//
+	// Literals only: the comments in this repository are English prose and use
+	// dashes and quotation marks that no user ever sees.
+	t.Run("user-facing text is ASCII", func(t *testing.T) {
+		forEachSourceFile(t, func(path, dir string, body []byte) {
+			file, err := parser.ParseFile(token.NewFileSet(), path, body, 0)
+			if err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				if found := nonASCII.FindString(lit.Value); found != "" {
+					t.Errorf("%s: a string literal contains the non-ASCII %q: %s. "+
+						"A terminal that cannot render it shows a replacement "+
+						"character where the message was", path, found, lit.Value)
+				}
+				return true
+			})
 		})
 	})
 

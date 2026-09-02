@@ -91,7 +91,7 @@ func Collapse(arg string) string {
 		return first
 	}
 
-	return fmt.Sprintf("%s … (+%d lines)", first, strings.Count(rest, "\n")+1)
+	return fmt.Sprintf("%s ... (+%d lines)", first, strings.Count(rest, "\n")+1)
 }
 
 // Result is the outcome of a run.

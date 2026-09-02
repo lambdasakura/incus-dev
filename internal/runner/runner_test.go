@@ -358,8 +358,8 @@ func TestCollapseMultilineArgs(t *testing.T) {
 		want string
 	}{
 		{"single line is left alone", "echo hi", `"echo hi"`},
-		{"multiple lines are folded", "one\ntwo\nthree", `"one … (+2 lines)"`},
-		{"a trailing newline is not counted", "one\ntwo\n", `"one … (+1 lines)"`},
+		{"multiple lines are folded", "one\ntwo\nthree", `"one ... (+2 lines)"`},
+		{"a trailing newline is not counted", "one\ntwo\n", `"one ... (+1 lines)"`},
 		// A YAML block scalar always ends in a newline, so this is what every
 		// one-line `run: |` step looks like.
 		{"one line with a trailing newline is left alone", "apt-get update\n", `"apt-get update"`},
