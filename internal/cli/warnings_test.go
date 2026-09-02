@@ -1559,3 +1559,34 @@ func TestStrandedWarningsSayWhichKind(t *testing.T) {
 		})
 	}
 }
+
+// An instance from an older idev, belonging to a different checkout, is not
+// stranded -- it is that checkout's environment. Advising its deletion would
+// destroy a colleague's running work.
+func TestALegacyInstanceFromAnotherCheckoutIsLeftAlone(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project-other",
+		Status: "Running",
+		Config: map[string]string{
+			legacyProjectKey: "example-project",
+			// The root marker an older idev wrote, under its own prefix.
+			"user.incus-devkit.root": "/home/u/another-checkout",
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "dev-example-project-other") {
+		t.Errorf("output = %q, want another checkout's environment left alone", errOut.String())
+	}
+}

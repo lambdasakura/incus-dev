@@ -44,16 +44,25 @@ func TestFakeMeetsTheClientContract(t *testing.T) {
 	// reports on itself, so a rewrite of it could report a full contract
 	// while doing nothing; the call log cannot be produced without the
 	// checks running.
+	if contract.Filtered() {
+		return
+	}
+	// Every operation the Client declares, not a sample: an operation the
+	// contract never exercises is one where the fake and the daemon can
+	// disagree unnoticed, which is the whole reason this package exists.
 	for _, want := range []string{
-		"create dev-contract", "start dev-contract", "delete dev-contract",
-		"volume create default", "volume delete default",
-		"snapshot create dev-contract", "exec dev-contract",
-		"config dev-contract", "devices dev-contract",
+		"instance ", "instances", "create ", "start ", "stop ", "delete ",
+		"config ", "unset ", "devices ", "removedevices ",
+		"profile ", "image check",
+		"volume exists", "volume create", "volume delete",
+		"snapshot create", "snapshot list", "snapshot restore", "snapshot delete",
+		"exec ", "waitready ",
 	} {
 		if !slices.ContainsFunc(f.Calls, func(c string) bool {
 			return strings.HasPrefix(c, want)
 		}) {
-			t.Errorf("the fake was never asked to %q; the contract did not run", want)
+			t.Errorf("the contract never exercises %q; the fake and the daemon "+
+				"can disagree there unnoticed", want)
 		}
 	}
 }

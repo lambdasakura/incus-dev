@@ -12,9 +12,9 @@ NO_INCUS := INCUS_SOCKET=/nonexistent/incus.socket
 
 # One place for the linter version, so make lint, GitHub CI and GitLab CI
 # cannot end up running three different linters.
-LINT_VERSION := $(shell cat .golangci-lint-version)
+LINT_VERSION = $(shell cat .golangci-lint-version)
 
-.PHONY: build test test-integration cover cover-html lint fmt check tidy clean install tools
+.PHONY: build test test-integration cover cover-html lint strict-lint vuln fmt check tidy clean install tools
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
@@ -32,8 +32,10 @@ test-integration:
 # failure to read the profile came out as a pass with no total printed.
 # The contract package is assertions, not product code: it is the same suite
 # run against the fake and against the real daemon, so the daemon-only half
-# never executes here (spec 08-testing.md 8.3.1).
-COVERPKG := $(shell go list ./... | grep -v /internal/incus/contract | paste -sd,)
+# never executes here (spec 08-testing.md 8.3.2).
+# Recursive, not simple: a := would shell out to go list on every make
+# invocation, including ones that never measure coverage.
+COVERPKG = $(shell go list ./... | grep -v /internal/incus/contract | paste -sd,)
 
 cover:
 	$(NO_INCUS) go test ./... -coverpkg=$(COVERPKG) -coverprofile=$(COVER)
@@ -74,7 +76,10 @@ fmt:
 # is a deliberate migration rather than a bump -- so the list says what it
 # knows instead of a flat "no fix".
 vuln:
-	@command -v jq >/dev/null 2>&1 || { echo "jq is required by 'make vuln'"; exit 1; }
+	@if ! command -v jq >/dev/null 2>&1; then \
+		echo "jq is required by 'make vuln'"; \
+		exit 1; \
+	fi
 	@go run golang.org/x/vuln/cmd/govulncheck@latest -format json ./... > $(VULN)
 	@jq -s -r -f scripts/vuln.jq $(VULN) > $(VULN).called
 	@echo "vulnerabilities this code calls:"; cat $(VULN).called
@@ -94,7 +99,10 @@ tools:
 check: tidy strict-lint test
 
 strict-lint:
-	@command -v golangci-lint >/dev/null 2>&1 || { 		echo "golangci-lint is required by 'make check'; run 'make tools'"; exit 1; }
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "golangci-lint is required by 'make check'; run 'make tools'"; \
+		exit 1; \
+	fi
 	golangci-lint run ./...
 
 tidy:

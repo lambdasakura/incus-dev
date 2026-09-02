@@ -5,7 +5,7 @@ description: Use when asked to code-review the incus-dev repository, to run a re
 
 # Running a review round on incus-dev
 
-Fifteen rounds have run on this repository. What they showed:
+Two dozen rounds have run on this repository. What they showed:
 
 - **Coverage says nothing.** Every round ran at 99% line coverage. Every round
   found real defects, including data loss and an instance that could not be
@@ -33,6 +33,7 @@ produces findings on the first pass. Lenses already used, and what each found:
 | Secret handling, from the inside | nothing — a clean result |
 | Build, dependency and release | a release archive missing files its own docs use |
 | Regression check on the last round | something every single time |
+| The test machinery, not the code | four rounds of defects in the guards themselves |
 
 Untried lenses worth a round: API round-trip efficiency (measured once, no
 finding), cross-package API design, error-message quality end to end,

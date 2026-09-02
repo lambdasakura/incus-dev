@@ -21,6 +21,9 @@ type Fake struct {
 	SnapshotsByInstance map[string][]incus.Snapshot
 	// Volumes are the storage volumes that exist, as "pool/name".
 	Volumes map[string]bool
+	// snapshotConfig is what each snapshot captured, keyed "instance/name",
+	// so a restore can put it back.
+	snapshotConfig map[string]map[string]string
 	// Pools are the storage pools that exist. A pool with no row holds
 	// nothing, which Incus reports differently from a missing volume.
 	Pools []string
@@ -356,6 +359,15 @@ func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) erro
 	}
 	f.SnapshotsByInstance[instance] = append(f.SnapshotsByInstance[instance],
 		incus.Snapshot{Name: snapshot})
+	// What the instance held, so RestoreSnapshot can put it back the way the
+	// daemon does. Without it the fake accepted a restore and changed
+	// nothing, which no test noticed for eighteen rounds.
+	if inst, ok := f.Instances[instance]; ok {
+		if f.snapshotConfig == nil {
+			f.snapshotConfig = map[string]map[string]string{}
+		}
+		f.snapshotConfig[instance+"/"+snapshot] = maps.Clone(inst.Config)
+	}
 	return nil
 }
 
@@ -369,7 +381,22 @@ func (f *Fake) Snapshots(_ context.Context, instance string) ([]incus.Snapshot, 
 
 // RestoreSnapshot records a restore.
 func (f *Fake) RestoreSnapshot(_ context.Context, instance, snapshot string) error {
-	return f.record("snapshot restore %s %s", instance, snapshot)
+	if err := f.record("snapshot restore %s %s", instance, snapshot); err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(f.SnapshotsByInstance[instance], func(s incus.Snapshot) bool {
+		return s.Name == snapshot
+	}) {
+		return fmt.Errorf("%s has no snapshot named %q", instance, snapshot)
+	}
+	// Only a snapshot this fake took captured the config; one a test
+	// registered directly restores to nothing, which is what it asked for.
+	if config, ok := f.snapshotConfig[instance+"/"+snapshot]; ok {
+		if inst, ok := f.Instances[instance]; ok {
+			inst.Config = maps.Clone(config)
+		}
+	}
+	return nil
 }
 
 // DeleteSnapshot removes a snapshot.

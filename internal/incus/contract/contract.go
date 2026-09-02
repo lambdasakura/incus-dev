@@ -17,6 +17,7 @@ package contract
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"strings"
 	"testing"
@@ -152,7 +153,7 @@ func Run(t *testing.T, env Env) []string {
 //
 // A check deleted and replaced in the same edit keeps the count, which no
 // cheap guard catches -- but that is a deliberate act, not an oversight.
-const Checks = 23
+const Checks = 25
 
 // Critical are the checks that exist because the fake once disagreed with
 // Incus and a defect reached a user through the gap.
@@ -162,12 +163,32 @@ var Critical = []string{
 	"ApplyDevices replaces a device rather than merging",
 	"snapshots round-trip and a duplicate name is refused",
 	"Exec refuses an instance that is not there",
+	"RestoreSnapshot puts back what the snapshot held",
+}
+
+// Filtered reports whether -run narrowed the run to some of the subtests.
+//
+// The whole-contract assertions cannot hold then, and failing would bury the
+// check the reader was narrowing to.
+func Filtered() bool {
+	f := flag.Lookup("test.run")
+	if f == nil {
+		return false
+	}
+	// The part after the first "/" is the subtest pattern. An empty one
+	// matches every subtest, so it narrows nothing -- and treating it as a
+	// filter is how this guard would stop guarding.
+	_, subtest, ok := strings.Cut(f.Value.String(), "/")
+	return ok && strings.TrimSpace(subtest) != ""
 }
 
 // Verify reports what is wrong with the checks Run performed, or nil.
 //
 // Both suites call it, so the assertion cannot drift between them.
 func Verify(ran []string) error {
+	if Filtered() {
+		return nil
+	}
 	if len(ran) != Checks {
 		return fmt.Errorf("ran %d checks, want %d; if you added or removed one, "+
 			"update contract.Checks rather than this assertion:\n  %s",
@@ -369,6 +390,41 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		}
 		if !errors.Is(err, incus.ErrSnapshotExists) {
 			t.Errorf("error = %v, want ErrSnapshotExists", err)
+		}
+	})
+
+	check("RestoreSnapshot puts back what the snapshot held", func(t *testing.T) {
+		const name = "contract-restore"
+
+		if err := env.Client.ApplyConfig(ctx, env.Instance,
+			map[string]string{"user.contract": "before"}); err != nil {
+			t.Fatalf("ApplyConfig() error = %v", err)
+		}
+		if err := env.Client.CreateSnapshot(ctx, env.Instance, name); err != nil {
+			t.Fatalf("CreateSnapshot() error = %v", err)
+		}
+		t.Cleanup(func() { _ = env.Client.DeleteSnapshot(ctx, env.Instance, name) })
+
+		if err := env.Client.ApplyConfig(ctx, env.Instance,
+			map[string]string{"user.contract": "after"}); err != nil {
+			t.Fatalf("ApplyConfig() error = %v", err)
+		}
+		if err := env.Client.RestoreSnapshot(ctx, env.Instance, name); err != nil {
+			t.Fatalf("RestoreSnapshot() error = %v", err)
+		}
+
+		inst, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := inst.Config["user.contract"]; got != "before" {
+			t.Errorf("user.contract = %q, want the snapshot's value back", got)
+		}
+	})
+
+	check("RestoreSnapshot refuses one that is not there", func(t *testing.T) {
+		if err := env.Client.RestoreSnapshot(ctx, env.Instance, "contract-nope"); err == nil {
+			t.Error("RestoreSnapshot() = nil error for a snapshot that does not exist")
 		}
 	})
 

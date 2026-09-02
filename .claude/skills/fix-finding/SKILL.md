@@ -5,8 +5,8 @@ description: Use when acting on a review finding, a bug report, or a failing beh
 
 # Fixing a finding in incus-dev
 
-Fifteen rounds of review of this repository produced 21 fixes. In almost every
-round, the previous round's fix introduced a new defect. This is what those
+Two dozen rounds of review of this repository have produced upwards of thirty
+fixes. In almost every round, the previous round's fix introduced a new defect. This is what those
 failures had in common, and what stops them.
 
 ## 1. Reproduce it first, in this repository
@@ -70,7 +70,33 @@ existing instance, an instance made by an older version. One fix in this
 history refused Incus mutations after cancellation, which read as safety and
 in fact stranded volumes permanently; it was reverted a round later.
 
-## 5. Check the test can fail
+## 5. If the check reads a file another tool owns, ask the tool
+
+Four rounds running, the defect was in the test machinery rather than in the
+code it guards: a hand-written parser for the Makefile and for the workflows,
+wrong in both directions each time it was patched.
+
+| Question | Do not | Do |
+| --- | --- | --- |
+| what `check` depends on | read `Makefile` | `make -np`, sliced at its `# Files` banner |
+| which steps CI runs | match `run:` lines | unmarshal with `sigs.k8s.io/yaml` |
+| whether a step runs `make vuln` | parse the shell | require a line of `make` plus words that are all real targets |
+
+The last row is the general move. A check that has to tell a command from a
+sentence about a command cannot win on syntax — quoting defeats it, and each
+patch reopens the other direction. Take the **vocabulary** from the tool
+instead: `make vuln runs nightly` offers `runs`, which make does not know, so
+it is prose, and prose cannot pass however it is quoted.
+
+Two things follow. Prefer the strict, loud reading: `make vuln || true` failing
+this test is correct, because swallowing the failure is how a gate gets
+neutered without being removed, and a false alarm is cheaper here than a silent
+pass. And let the helper take its directory as a parameter, so it can be
+pointed at a fixture — `-n` echoes the default goal's recipe *before* `-p`
+prints the database, and that was undetectable while the helper could only read
+this repository.
+
+## 6. Check the test can fail
 
 A test that passes before the fix asserts nothing. Revert the fix, watch the
 test fail, restore it:
@@ -86,7 +112,7 @@ Do this for integration tests too. It is the single most effective check in
 this repository's history: a sweep of it across the suite found 24 behaviours
 that were executed but never asserted, at 99% line coverage.
 
-## 6. Verify by exit code, never by reading output
+## 7. Verify by exit code, never by reading output
 
 ```bash
 make check   >/dev/null 2>&1; echo "check exit=$?"      # 0 or it failed
@@ -102,7 +128,7 @@ Run `make test-integration` when the change touches Incus behaviour, and read
 its exit code the same way. Save the full log — a failure two hundred lines up
 is gone if the command ended in `| tail -3`.
 
-## 7. One topic per commit, staged explicitly
+## 8. One topic per commit, staged explicitly
 
 `git add -A` swept unrelated work into one commit three times in this history,
 each needing a `reset --soft` to split. Stage the files for the topic:
@@ -114,7 +140,7 @@ git add internal/cli/app.go internal/cli/app_test.go && git commit
 The message says **why**, not what. Reference the spec as `spec 04-cli.md 4.7`.
 See `## コミット` in CLAUDE.md.
 
-## 8. Say what you did not fix
+## 9. Say what you did not fix
 
 If part of a finding is genuinely not fixable, say what information is missing
 and where it would have to come from. Three things were called unknowable in

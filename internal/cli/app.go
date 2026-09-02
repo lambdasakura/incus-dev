@@ -1065,6 +1065,12 @@ func (a *App) warnImageChanged(inst *incus.Instance) {
 // them -- so the only thing idev can usefully do is say it is there.
 const legacyProjectKey = "user.incus-devkit.project"
 
+// legacyRootKey is the checkout that idev recorded before the rename. Read
+// alongside the current one: without it, an older instance belonging to a
+// different checkout looks stranded, and idev advises deleting a live
+// environment that is somebody's working tree.
+const legacyRootKey = "user.incus-devkit.root"
+
 // warnStrandedInstances says so when this project already has an instance
 // under a name idev no longer derives.
 //
@@ -1089,7 +1095,11 @@ func (a *App) warnStrandedInstances(ctx context.Context) {
 		if project != a.cfg.Project.Name && legacy != a.cfg.Project.Name {
 			continue
 		}
-		if root := inst.Config[managedRootKey]; root != "" && root != a.cfg.Root {
+		root := inst.Config[managedRootKey]
+		if root == "" {
+			root = inst.Config[legacyRootKey]
+		}
+		if root != "" && root != a.cfg.Root {
 			// Another checkout of the same project, which is what
 			// project.scope is for. Not stranded.
 			continue

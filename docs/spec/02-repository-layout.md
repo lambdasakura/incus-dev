@@ -67,6 +67,7 @@ incus-dev/
 │   │   ├── exec_tty.go         # 端末を伴う実行
 │   │   ├── wait.go             # 起動待ち
 │   │   ├── name.go             # instance命名規則
+│   │   ├── contract/           # Client実装が満たすべき挙動（8.3.2）
 │   │   └── incustest/          # テスト用fake
 │   │
 │   ├── provision/              # bootstrap / provision ステップの実行
@@ -106,17 +107,20 @@ incus-dev/
 │   └── ansible-based/
 │
 ├── scripts/                    # ビルド・検査用。バイナリには入らない
-│   └── vuln.jq                 # make vuln の判定（8.4.0）
+│   └── vuln.jq                 # make vuln の判定（8.4.4）
 │
 ├── .claude/skills/             # 開発者向け作業手順（利用者向けの skills/ とは別）
 │
 └── test/
     ├── examples_test.go        # examples/ が読めることの確認
     ├── skills_test.go          # skills/ と .claude/skills/ の確認
+    ├── spec_test.go            # 仕様書のClientインターフェース記載との突合
     ├── structure_test.go       # REQ-007の資産検査、パッケージ依存方向、
     │                           # 外部コマンドとos.Exitの局在、Makefile/CIのゲート
     └── integration/            # //go:build integration
-        └── contract_test.go    # 実daemonに対する Client 契約（8.3.2）
+        ├── contract_test.go    # 実daemonに対する Client 契約（8.3.2）
+        ├── regression_test.go  # 指摘を受けて直したものの再発防止（8.3.1）
+        └── ...                 # lifecycle / idmap / ansible / main
 ```
 
 利用者向け文書は英語と日本語の両方を保つ。英語が既定のパスで、
