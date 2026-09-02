@@ -332,17 +332,14 @@ func (f *Fake) UpdateInstance(_ context.Context, name string, change incus.Insta
 	return nil
 }
 
-// ProfileExists reports whether the name is in Profiles.
-func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
-	if err := f.record("profile %s", name); err != nil {
-		return false, err
+// ProfileNames returns Profiles.
+func (f *Fake) ProfileNames(_ context.Context) ([]string, error) {
+	if err := f.record("profiles %v", f.Profiles); err != nil {
+		return nil, err
 	}
-	for _, p := range f.Profiles {
-		if p == name {
-			return true, nil
-		}
-	}
-	return false, nil
+	// Cloned: the caller holds the result while it decides what is missing,
+	// and the real client returns a fresh slice of its own.
+	return slices.Clone(f.Profiles), nil
 }
 
 // CheckImage reports whether the image resolves.

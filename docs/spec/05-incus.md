@@ -299,7 +299,10 @@ type Client interface {
 
     UpdateInstance(ctx context.Context, name string, change InstanceChange, etag string) error
 
-    ProfileExists(ctx context.Context, name string) (bool, error)
+    // Incusには単一のprofileの存在を問う呼び出しが無く、どの答えも
+    // 名前一覧を絞り込んだものになる。名前ごとに問うと同じ一覧を
+    // 何度も取得することになるため、一覧を返す。
+    ProfileNames(ctx context.Context) ([]string, error)
 
     // CheckImage は image 参照が解決できるかを、何も作らずに確かめる。
     CheckImage(ctx context.Context, ref string) error

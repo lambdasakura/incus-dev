@@ -239,6 +239,10 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
+		// What the daemon holds, before adoptCarried and pruneVolumeRecord
+		// edit inst.Config in place. The write below is skipped only if it
+		// would change nothing, and that question is about the daemon.
+		asRead := maps.Clone(inst.Config)
 		// rebuild stashed the record because it was deleting the instance
 		// that held it, and something has put one back in the meantime.
 		// Dropping it here would lose the volumes rebuild promised to keep,
@@ -253,7 +257,7 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 		a.pruneVolumeRecord(ctx, inst)
 		a.warnUnrecorded(inst, plan)
 		a.warnChanges(inst, remountsHere)
-		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
+		if err := a.reapplyInstance(ctx, inst, asRead, plan, opt); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
@@ -280,7 +284,9 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 	// mount is in place either way.
 	a.log.Info(fmt.Sprintf("Mounting workspace %s -> %s", a.cfg.WorkspaceSourcePath(), ws.Target))
 
-	if err := a.ensureRunning(ctx); err != nil {
+	// nil: the instance may have been created, or restarted, since the
+	// reading above.
+	if err := a.ensureRunning(ctx, nil); err != nil {
 		return err
 	}
 	if err := a.runProvisioning(ctx, env, provision.Selection{}); err != nil {
@@ -317,10 +323,11 @@ func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
 		return err
 	}
 
-	if _, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp); err != nil {
+	inst, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp)
+	if err != nil {
 		return err
 	}
-	if err := a.ensureRunning(ctx); err != nil {
+	if err := a.ensureRunning(ctx, inst); err != nil {
 		return err
 	}
 	return a.runProvisioning(ctx, env, sel)
@@ -357,19 +364,30 @@ type DestroyOptions struct {
 // recreated instance, so deleting them is the user's explicit call
 // (spec 04-cli.md 4.5).
 func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
-	return a.destroy(ctx, opt, false)
+	return a.destroy(ctx, opt, false, nil)
 }
 
 // destroy deletes the instance. carrying says the volume record is being taken
 // to a replacement instance, which changes what is worth telling the user.
-func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) error {
+//
+// inst is the reading the caller already has, or nil to read it here. rebuild
+// has one: it read the instance to take the volume record off it, and nothing
+// happens between that and this.
+func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool,
+	inst *incus.Instance,
+) error {
 	// rebuild recreates the instance mounted from this checkout; a plain
 	// destroy takes away an environment the other one is using.
 	eff := sharedEnvironment
 	if carrying {
 		eff = remountsHere
 	}
-	inst, err := a.managedInstance(ctx, eff, adviseNothing)
+	var err error
+	if inst == nil {
+		inst, err = a.managedInstance(ctx, eff, adviseNothing)
+	} else {
+		inst, err = a.checkManaged(inst, eff)
+	}
 	if err != nil {
 		return err
 	}
@@ -593,7 +611,7 @@ func (a *App) Rebuild(ctx context.Context) error {
 
 		// rebuild keeps the persistent volumes, since surviving a rebuild is
 		// exactly what they are for.
-		if err := a.destroy(ctx, DestroyOptions{}, true); err != nil {
+		if err := a.destroy(ctx, DestroyOptions{}, true, inst); err != nil {
 			return err
 		}
 	case !errors.Is(err, incus.ErrInstanceNotFound):
@@ -662,10 +680,11 @@ func (a *App) Exec(ctx context.Context, argv []string) error {
 
 // execInContainer runs a command inside the container.
 func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) error {
-	if _, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp); err != nil {
+	inst, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp)
+	if err != nil {
 		return err
 	}
-	if err := a.ensureRunning(ctx); err != nil {
+	if err := a.ensureRunning(ctx, inst); err != nil {
 		return err
 	}
 
@@ -875,10 +894,8 @@ func (a *App) Validate() error {
 }
 
 // reapplyInstance re-applies what was declared to an existing instance.
-func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan, opt UpOptions) error {
+func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, asRead map[string]string, plan idmapPlan, opt UpOptions) error {
 	desired := desiredConfig(a.cfg, plan, inst.Config, a.instance)
-	// Keep the state from before applying; afterwards the difference is gone.
-	before := maps.Clone(inst.Config)
 
 	// One write, judged against the reading all of this was decided from.
 	//
@@ -908,15 +925,54 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 		SetDevices:    devices,
 		RemoveDevices: staleDev,
 	}
-	if err := a.client.UpdateInstance(ctx, a.instance, change, inst.ETag); err != nil {
+	// A write the instance would not notice is still a write. It is judged
+	// against the ETag of the reading above, so every unnecessary one is a
+	// chance to lose a race with another idev and fail a run that had nothing
+	// to do -- and it lands in the daemon's log as a change, which makes the
+	// log useless for finding when something did change.
+	if settled(asRead, inst.Devices, change) {
+		a.log.Debug("instance already matches dev.yml; nothing to write")
+	} else if err := a.client.UpdateInstance(ctx, a.instance, change, inst.ETag); err != nil {
 		return a.changedUnderfoot(err)
 	}
-	// The record rebuild was carrying is on the instance now. Anything that
+	// The record rebuild was carrying is on the instance now -- written just
+	// above, or already there, which is what settled means. Anything that
 	// fails after this must not call it lost, or offer to delete the volumes
 	// the instance is at that moment recording.
 	a.carried = nil
 
-	return a.settleRestart(ctx, inst.IsRunning(), inst.LastUsedAt, before, desired, stale, opt)
+	return a.settleRestart(ctx, inst.IsRunning(), inst.LastUsedAt, asRead, desired, stale, opt)
+}
+
+// settled reports whether change would leave the instance as it already is.
+//
+// config and devices must be what the daemon returned, not what the caller has
+// been working on: adoptCarried and pruneVolumeRecord edit inst.Config in
+// place, so by the time the change is built the instance value no longer says
+// what is stored. Comparing against it would call a real change settled and
+// drop the volume record on the floor.
+func settled(config map[string]string, devices map[string]incus.Device, change incus.InstanceChange) bool {
+	for _, key := range change.UnsetConfig {
+		if _, ok := config[key]; ok {
+			return false
+		}
+	}
+	for key, value := range change.SetConfig {
+		if have, ok := config[key]; !ok || have != value {
+			return false
+		}
+	}
+	for _, name := range change.RemoveDevices {
+		if _, ok := devices[name]; ok {
+			return false
+		}
+	}
+	for name, device := range change.SetDevices {
+		if have, ok := devices[name]; !ok || !maps.Equal(have, device) {
+			return false
+		}
+	}
+	return true
 }
 
 // changedUnderfoot explains a write refused because the instance moved on.
@@ -1318,10 +1374,24 @@ func (a *App) pruneVolumeRecord(ctx context.Context, inst *incus.Instance) {
 		return
 	}
 
+	declared := declaredVolumes(a.cfg, a.instance)
+
 	var kept []string
 	for _, ref := range splitList(recorded) {
 		pool, name, ok := splitVolume(ref)
 		if !ok {
+			continue
+		}
+		// A declared volume is never a stale record, so there is nothing to
+		// ask the daemon. up has already created it by the time this runs,
+		// and the preview reaches here saying what up would do, which is to
+		// create it. Asking anyway costs a round trip per declared volume in
+		// both, and would have the preview show up dropping a record up keeps.
+		//
+		// It is kept rather than skipped for what this function says it does;
+		// desiredConfig starts the record from the declared list either way.
+		if slices.Contains(declared, ref) {
+			kept = append(kept, ref)
 			continue
 		}
 		exists, err := a.client.VolumeExists(ctx, pool, name)
@@ -1433,13 +1503,20 @@ func (a *App) instanceSpec(plan idmapPlan) incus.InstanceSpec {
 
 // checkProfiles verifies the named profiles exist. idev never creates one.
 func (a *App) checkProfiles(ctx context.Context) error {
+	declared := a.cfg.ProfileNames()
+	if len(declared) == 0 {
+		return nil
+	}
+	// One listing for all of them: an answer per name is the same list
+	// fetched again and filtered, and two fetches can disagree.
+	have, err := a.client.ProfileNames(ctx)
+	if err != nil {
+		return err
+	}
+
 	var missing []string
-	for _, name := range a.cfg.ProfileNames() {
-		ok, err := a.client.ProfileExists(ctx, name)
-		if err != nil {
-			return err
-		}
-		if !ok {
+	for _, name := range declared {
+		if !slices.Contains(have, name) {
 			missing = append(missing, name)
 		}
 	}
@@ -1474,6 +1551,11 @@ func (a *App) managedInstance(ctx context.Context, eff checkoutEffect, advice mi
 	if err != nil {
 		return nil, err
 	}
+	return a.checkManaged(inst, eff)
+}
+
+// checkManaged confirms idev manages an instance already read.
+func (a *App) checkManaged(inst *incus.Instance, eff checkoutEffect) (*incus.Instance, error) {
 	if !isManagedBy(inst.Config, a.cfg.Project.Name) {
 		return nil, a.unmanagedError(inst)
 	}
@@ -1511,10 +1593,16 @@ func (a *App) unmanagedError(inst *incus.Instance) error {
 }
 
 // ensureRunning starts the instance and waits until commands can run.
-func (a *App) ensureRunning(ctx context.Context) error {
-	inst, err := a.client.Instance(ctx, a.instance)
-	if err != nil {
-		return err
+//
+// inst is the reading the caller already has. Pass nil where there is none, or
+// where something has happened since -- up creates the instance, and restarts
+// it -- and this reads it for itself.
+func (a *App) ensureRunning(ctx context.Context, inst *incus.Instance) error {
+	if inst == nil {
+		var err error
+		if inst, err = a.client.Instance(ctx, a.instance); err != nil {
+			return err
+		}
 	}
 	if !inst.IsRunning() {
 		a.log.Info("Starting instance " + a.instance)
@@ -1522,7 +1610,7 @@ func (a *App) ensureRunning(ctx context.Context) error {
 			return err
 		}
 	}
-	err = a.client.WaitReady(ctx, a.instance, incus.WaitOptions{})
+	err := a.client.WaitReady(ctx, a.instance, incus.WaitOptions{})
 	if errors.Is(err, incus.ErrNetworkNotReady) {
 		// Some configurations never show an address, so do not stop here.
 		// Leave it as a clue for when a step that needs the network fails.

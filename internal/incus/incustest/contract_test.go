@@ -53,7 +53,7 @@ func TestFakeMeetsTheClientContract(t *testing.T) {
 	for _, want := range []string{
 		"instance ", "instances", "create ", "start ", "stop ", "delete ",
 		"config ", "unset ", "devices ", "removedevices ",
-		"profile ", "image check",
+		"profiles", "image check",
 		"volume exists", "volume create", "volume delete",
 		"snapshot create", "snapshot list", "snapshot restore", "snapshot delete",
 		"exec ", "waitready ",

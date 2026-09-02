@@ -257,7 +257,12 @@ type Client interface {
 	// does not have, or devices nothing records.
 	UpdateInstance(ctx context.Context, name string, change InstanceChange, etag string) error
 
-	ProfileExists(ctx context.Context, name string) (bool, error)
+	// ProfileNames lists the profiles on the host.
+	//
+	// The whole list rather than one name at a time: Incus has no call that
+	// answers for a single profile, so every such answer is this list
+	// filtered, and asking per name fetches it again for each one.
+	ProfileNames(ctx context.Context) ([]string, error)
 
 	// CheckImage reports whether an image reference resolves, without
 	// creating anything.

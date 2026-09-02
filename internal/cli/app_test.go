@@ -908,3 +908,278 @@ func TestShellPassesTerm(t *testing.T) {
 		t.Errorf("Term = %q, want xterm-256color", got.Term)
 	}
 }
+
+// A second up writes nothing when nothing has changed.
+//
+// The write is guarded by the ETag of the reading it was decided from, so
+// every unnecessary one is an opportunity to lose a race with another idev and
+// fail a run that had nothing to do. It also lands in the daemon's log as a
+// change, which makes the log useless for finding when something did change.
+func TestUpWritesNothingWhenNothingChanged(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+`
+  config:
+    limits.cpu: "16"
+`)
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("first Up() error = %v", err)
+	}
+
+	mark := len(client.Calls)
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("second Up() error = %v", err)
+	}
+
+	for _, call := range client.Calls[mark:] {
+		for _, write := range []string{"config ", "devices ", "unset ", "removedevices "} {
+			if strings.HasPrefix(call, write) {
+				t.Errorf("the second up wrote %q, but nothing had changed since the "+
+					"first: %v", call, client.Calls[mark:])
+			}
+		}
+	}
+}
+
+// The skip is decided against what the daemon holds, not against the working
+// copy.
+//
+// adoptCarried and pruneVolumeRecord edit inst.Config in place before the
+// change is built, so the instance value no longer says what is stored.
+// Comparing the change against it makes every edit those two make look like
+// no change at all: the pruned record is never written, and the volume record
+// a rebuild is carrying is dropped on the floor while up reports success.
+func TestUpWritesAPrunedVolumeRecordEvenWhenNothingElseChanged(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML)
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("first Up() error = %v", err)
+	}
+
+	// A volume the record names and the pool does not have: pruning it is the
+	// only difference between the instance and dev.yml.
+	inst := client.Instances["dev-example-project"]
+	inst.Config["user.incus-dev.volumes"] = "default/dev-example-project-gone"
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("second Up() error = %v", err)
+	}
+
+	if got := client.Instances["dev-example-project"].Config["user.incus-dev.volumes"]; got != "" {
+		t.Errorf("record = %q, want the missing volume pruned from it", got)
+	}
+}
+
+// A config key changed on the instance is written back even though every
+// device already matches.
+func TestUpWritesConfigWhenOnlyConfigDrifted(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+`
+  config:
+    limits.cpu: "16"
+`)
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("first Up() error = %v", err)
+	}
+	client.Instances["dev-example-project"].Config["limits.cpu"] = "4"
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("second Up() error = %v", err)
+	}
+	if got := client.Instances["dev-example-project"].Config["limits.cpu"]; got != "16" {
+		t.Errorf("limits.cpu = %q, want 16: dev.yml declares it and the instance had 4", got)
+	}
+}
+
+// A device changed on the instance is written back even though every config
+// key already matches.
+func TestUpWritesDevicesWhenOnlyADeviceDrifted(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML)
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("first Up() error = %v", err)
+	}
+	want := client.Instances["dev-example-project"].Devices["workspace"]["path"]
+	if want == "" {
+		t.Fatal("the workspace device has no path; this test no longer checks anything")
+	}
+	client.Instances["dev-example-project"].Devices["workspace"]["path"] = "/elsewhere"
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("second Up() error = %v", err)
+	}
+	if got := client.Instances["dev-example-project"].Devices["workspace"]["path"]; got != want {
+		t.Errorf("workspace path = %q, want %q: dev.yml declares it and the instance had /elsewhere",
+			got, want)
+	}
+}
+
+// A declared volume is asked about once per up, not twice.
+//
+// ensureVolumes creates it or finds it, so by the time the record is pruned
+// the answer for a declared volume is already known to be yes. Asking again is
+// a round trip per volume, and the second answer cannot differ from the first
+// without something else having deleted the volume mid-run.
+func TestUpChecksADeclaredVolumeOnce(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+`
+volumes:
+  cache:
+    path: /cache
+`)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			"user.incus-dev.project": "example-project",
+			"user.incus-dev.volumes": "default/dev-example-project-cache",
+		},
+	})
+	client.Volumes["default/dev-example-project-cache"] = true
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	const call = "volume exists default dev-example-project-cache"
+	var n int
+	for _, c := range client.Calls {
+		if c == call {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("asked whether the declared volume exists %d times, want 1: %v", n, client.Calls)
+	}
+}
+
+// The commands that work inside a running instance read it once.
+//
+// Each one looked it up to check idev manages it, then looked it up again to
+// see whether it was running. The second reading is a round trip for something
+// the first already said, and the two can disagree, which makes the behaviour
+// depend on which one a later change happens to consult.
+func TestCommandsReadTheInstanceOnce(t *testing.T) {
+	running := func() *incus.Instance {
+		return &incus.Instance{
+			Name:   "dev-example-project",
+			Status: "Running",
+			Config: map[string]string{"user.incus-dev.project": "example-project"},
+		}
+	}
+
+	for _, tt := range []struct {
+		name string
+		run  func(*cli.App) error
+	}{
+		{"provision", func(a *cli.App) error {
+			return a.Provision(context.Background(), provision.Selection{})
+		}},
+		{"exec", func(a *cli.App) error {
+			return a.Exec(context.Background(), []string{"true"})
+		}},
+		{"shell", func(a *cli.App) error {
+			return a.Shell(context.Background(), nil)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, client, _ := newApp(t, baseYAML)
+			client.AddInstance(running())
+
+			if err := tt.run(app); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+
+			var n int
+			for _, c := range client.Calls {
+				if c == "instance dev-example-project" {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("read the instance %d times, want 1: %v", n, client.Calls)
+			}
+		})
+	}
+}
+
+// The profiles are checked with one listing, not one per profile.
+//
+// Incus has no "does this profile exist" call: every answer is the whole list
+// of names, filtered. Asking once per declared profile fetches the same list
+// again for each one, and the answers can disagree with each other.
+func TestProfilesAreListedOnce(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+`
+  profiles:
+    - default
+    - gpu
+    - web
+`)
+	client.Profiles = []string{"default", "gpu", "web"}
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	var n int
+	for _, c := range client.Calls {
+		if strings.HasPrefix(c, "profile") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("listed the profiles %d times for 3 declared profiles, want 1: %v",
+			n, client.Calls)
+	}
+}
+
+// profiles: [] declares that there are none to check, so there is nothing to
+// ask the host about.
+func TestProfilesAreNotListedWhenNoneAreDeclared(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML+`
+  profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
+`)
+
+	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	for _, c := range client.Calls {
+		if strings.HasPrefix(c, "profile") {
+			t.Errorf("listed the profiles with none declared: %v", client.Calls)
+		}
+	}
+}
+
+// rebuild reads the instance three times, and each one reads something the
+// last cannot know.
+//
+// It read it a fourth time: once to carry the volume record off before the
+// instance goes, and again inside destroy to check idev manages it, with
+// nothing in between. What is left is the record before the delete, the lookup
+// that finds the instance gone, and the status of the one just created.
+func TestRebuildReadsTheInstanceOnceBeforeDestroying(t *testing.T) {
+	app, client, _ := newApp(t, baseYAML)
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
+	})
+
+	if err := app.Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	var n int
+	for _, c := range client.Calls {
+		if c == "instance dev-example-project" {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("read the instance %d times, want 3 (the record before the delete, "+
+			"the lookup after it, and the status of the new one): %v", n, client.Calls)
+	}
+}

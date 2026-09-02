@@ -3,6 +3,7 @@ package incus
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	incusclient "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
@@ -88,8 +89,27 @@ func connect(ctx context.Context, config cliConfig, target Target) (*API, error)
 
 // configImageResolver resolves image references with the same configuration as
 // the incus command.
+//
+// It remembers what it resolved, because a run asks about the same reference
+// more than once: rebuild checks the image is there before it destroys
+// anything, and then creating the replacement resolves it again. Each of those
+// is a round trip to an image server, and the two can answer differently -- an
+// upstream alias that moves between them would have the run check one image
+// and create another.
+//
+// Only successes are kept. A failure is the caller's to report, and the run
+// that reports it does not go on to ask again.
 type configImageResolver struct {
 	config cliConfig
+
+	mu    sync.Mutex
+	cache map[string]resolvedImage
+}
+
+// resolvedImage is one answer from an image server.
+type resolvedImage struct {
+	server incusclient.ImageServer
+	image  *api.Image
 }
 
 // Resolve turns a reference such as images:ubuntu/24.04 into a source and an
@@ -105,6 +125,10 @@ func (r *configImageResolver) Resolve(ctx context.Context, ref string) (incuscli
 		err    error
 	}
 
+	if hit, ok := r.cached(ref); ok {
+		return hit.server, hit.image, nil
+	}
+
 	done := make(chan resolved, 1)
 	go func() {
 		server, image, err := r.resolve(ref)
@@ -113,6 +137,9 @@ func (r *configImageResolver) Resolve(ctx context.Context, ref string) (incuscli
 
 	select {
 	case res := <-done:
+		if res.err == nil {
+			r.remember(ref, resolvedImage{res.server, res.image})
+		}
 		return res.server, res.image, res.err
 	case <-ctx.Done():
 		// incus's ImageServer takes no context, so the request itself cannot
@@ -120,6 +147,24 @@ func (r *configImageResolver) Resolve(ctx context.Context, ref string) (incuscli
 		// slow part of a run and has to stay interruptible.
 		return nil, nil, ctx.Err()
 	}
+}
+
+func (r *configImageResolver) cached(ref string) (resolvedImage, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	hit, ok := r.cache[ref]
+	return hit, ok
+}
+
+func (r *configImageResolver) remember(ref string, hit resolvedImage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.cache == nil {
+		r.cache = map[string]resolvedImage{}
+	}
+	r.cache[ref] = hit
 }
 
 // Alias splits a reference into the remote's name and the image name, without

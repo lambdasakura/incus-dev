@@ -3627,7 +3627,7 @@ func TestTheLostRecordAdviceMatchesWhatTheInstanceRecords(t *testing.T) {
 		{
 			name:       "up creates the instance",
 			arrange:    func(*incustest.Fake) {},
-			leastCalls: 13,
+			leastCalls: 12,
 			mustReach:  "create dev-example-project",
 		},
 		{
@@ -3636,7 +3636,12 @@ func TestTheLostRecordAdviceMatchesWhatTheInstanceRecords(t *testing.T) {
 			// The VolumeExists on the carried volume, inside
 			// pruneVolumeRecord: it exists only on up's existing-instance
 			// branch, which is where every window so far has been.
-			leastCalls: 15,
+			//
+			// It falls as reads that told rebuild nothing new go: a declared
+			// volume is not a stale record, and destroy works from the
+			// reading rebuild already has. The carried volume is undeclared,
+			// so it is still asked about, which is what mustReach names.
+			leastCalls: 13,
 			mustReach:  "volume exists default dev-example-project-old",
 		},
 	} {
@@ -3915,4 +3920,98 @@ func filteredToSubtests() bool {
 	}
 	_, subtest, ok := strings.Cut(f.Value.String(), "/")
 	return ok && strings.TrimSpace(subtest) != ""
+}
+
+// settled answers one question -- would this write change anything -- and it
+// has to answer it for every part of a change.
+//
+// Two of them cannot be reached through up today: a stale key is only stale
+// because the managed record listed it, and the record is itself a key in the
+// same write, so the removal never travels alone. That invariant is one edit
+// away from not holding, and if it stops holding the failure is silent: idev
+// decides the instance is settled and leaves the undeclared config and devices
+// in place for good.
+func TestSettledAnswersForEveryPartOfAChange(t *testing.T) {
+	config := map[string]string{"limits.cpu": "16"}
+	devices := map[string]incus.Device{"workspace": {"path": "/workspace"}}
+
+	tests := []struct {
+		name  string
+		chg   incus.InstanceChange
+		want  bool
+		about string
+	}{
+		{"an empty change", incus.InstanceChange{}, true, ""},
+		{
+			"config already set to the same value",
+			incus.InstanceChange{SetConfig: map[string]string{"limits.cpu": "16"}}, true, "",
+		},
+		{
+			"config set to something else",
+			incus.InstanceChange{SetConfig: map[string]string{"limits.cpu": "4"}}, false,
+			"the value differs",
+		},
+		{
+			"a config key that is not there yet",
+			incus.InstanceChange{SetConfig: map[string]string{"limits.memory": "2GiB"}}, false,
+			"the key is absent",
+		},
+		{
+			"unsetting a key that is not there",
+			incus.InstanceChange{UnsetConfig: []string{"limits.memory"}}, true, "",
+		},
+		{
+			"unsetting a key that is there",
+			incus.InstanceChange{UnsetConfig: []string{"limits.cpu"}}, false,
+			"the key would be removed",
+		},
+		{
+			"a device already as declared",
+			incus.InstanceChange{SetDevices: map[string]incus.Device{
+				"workspace": {"path": "/workspace"},
+			}}, true, "",
+		},
+		{
+			"a device with a different field",
+			incus.InstanceChange{SetDevices: map[string]incus.Device{
+				"workspace": {"path": "/elsewhere"},
+			}}, false, "the path differs",
+		},
+		{
+			"a device with an extra field",
+			incus.InstanceChange{SetDevices: map[string]incus.Device{
+				"workspace": {"path": "/workspace", "shift": "true"},
+			}}, false, "a field would be added",
+		},
+		{
+			"a device that is not there yet",
+			incus.InstanceChange{SetDevices: map[string]incus.Device{
+				"cache": {"path": "/cache"},
+			}}, false, "the device is absent",
+		},
+		{
+			"removing a device that is not there",
+			incus.InstanceChange{RemoveDevices: []string{"cache"}}, true, "",
+		},
+		{
+			"removing a device that is there",
+			incus.InstanceChange{RemoveDevices: []string{"workspace"}}, false,
+			"the device would be removed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := settled(config, devices, tt.chg)
+			if got == tt.want {
+				return
+			}
+			if tt.want {
+				t.Errorf("settled() = false, want true: the instance already has this")
+				return
+			}
+			t.Errorf("settled() = true, want false: %s, so skipping the write loses it",
+				tt.about)
+		})
+	}
 }

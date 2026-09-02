@@ -3,6 +3,7 @@ package incustest_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -155,11 +156,17 @@ func TestFakeProfilesAndWaitReady(t *testing.T) {
 	ctx := context.Background()
 	f := incustest.New()
 
-	if ok, _ := f.ProfileExists(ctx, "default"); !ok {
-		t.Error("the default profile is missing")
+	names, err := f.ProfileNames(ctx)
+	if err != nil {
+		t.Fatalf("ProfileNames() error = %v", err)
 	}
-	if ok, _ := f.ProfileExists(ctx, "missing"); ok {
-		t.Error("reported a profile that does not exist as existing")
+	if !slices.Contains(names, "default") {
+		t.Errorf("ProfileNames() = %v, want the default profile", names)
+	}
+	// The caller keeps the result while it works out what is missing.
+	names[0] = "clobbered"
+	if again, _ := f.ProfileNames(ctx); slices.Contains(again, "clobbered") {
+		t.Errorf("ProfileNames() = %v, want the fake's own list left alone", again)
 	}
 
 	if err := f.WaitReady(ctx, "dev-x", incus.WaitOptions{}); err != nil {
@@ -191,7 +198,7 @@ func TestFakeErrorInjection(t *testing.T) {
 		"devices": func(f *incustest.Fake) error {
 			return f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{"d": {"type": "disk"}}}, "")
 		},
-		"profile": func(f *incustest.Fake) error { _, err := f.ProfileExists(ctx, "p"); return err },
+		"profiles": func(f *incustest.Fake) error { _, err := f.ProfileNames(ctx); return err },
 		"exec": func(f *incustest.Fake) error {
 			_, err := f.Exec(ctx, "dev-x", []string{"true"}, incus.ExecOptions{})
 			return err

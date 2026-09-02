@@ -78,6 +78,8 @@ type fakeImageServer struct {
 	aliases map[string]string
 	images  map[string]*api.Image
 	err     error
+	// lookups counts the alias lookups, which is the remote round trip.
+	lookups int
 	// info is what GetConnectionInfo returns. The zero value names a
 	// simplestreams remote, which is what every example uses.
 	info *incusclient.ConnectionInfo
@@ -101,6 +103,7 @@ func (s *fakeImageServer) GetConnectionInfo() (*incusclient.ConnectionInfo, erro
 // GetImageAliasType returns a different image per instance type, as the real
 // simplestreams does.
 func (s *fakeImageServer) GetImageAliasType(imageType, name string) (*api.ImageAliasesEntry, string, error) {
+	s.lookups++
 	target, ok := s.aliases[imageType+"/"+name]
 	if !ok {
 		return nil, "", errors.New("alias not found")
@@ -445,5 +448,76 @@ func TestConnectStopsWhenTheContextDoes(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("Connect() took %v; it waited for the daemon instead of the context", elapsed)
+	}
+}
+
+// Resolving the same reference twice in one run contacts the remote once.
+//
+// rebuild resolves it to check the image is there before destroying anything,
+// and creating the replacement resolves it again. Both are round trips to an
+// image server, and the second can answer differently from the first, which
+// would have rebuild check one image and create another.
+func TestResolveImageIsResolvedOncePerReference(t *testing.T) {
+	config := newFakeCLIConfig()
+	r := &configImageResolver{config: config}
+
+	first, image, err := r.Resolve(context.Background(), "images:alpine/3.21")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	again, sameImage, err := r.Resolve(context.Background(), "images:alpine/3.21")
+	if err != nil {
+		t.Fatalf("second Resolve() error = %v", err)
+	}
+
+	if config.imageServer.lookups != 1 {
+		t.Errorf("asked the remote %d times for one reference, want 1",
+			config.imageServer.lookups)
+	}
+	if first != again || image != sameImage {
+		t.Error("the second answer differs from the first; the run would check " +
+			"one image and create another")
+	}
+}
+
+// A different reference is its own answer.
+func TestResolveImageDoesNotConfuseTwoReferences(t *testing.T) {
+	config := newFakeCLIConfig()
+	config.imageServer.images["deadbeef"] = &api.Image{Fingerprint: "deadbeef"}
+	r := &configImageResolver{config: config}
+
+	if _, _, err := r.Resolve(context.Background(), "images:alpine/3.21"); err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	_, image, err := r.Resolve(context.Background(), "images:deadbeef")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if image.Fingerprint != "deadbeef" {
+		t.Errorf("image = %+v, want the second reference resolved on its own", image)
+	}
+}
+
+// A reference that did not resolve is not remembered as if it had.
+//
+// Nothing asks twice after a failure today -- the run that reports it stops --
+// but a cache that keeps failures answers the second call with a nil image and
+// no error, and creating an instance dereferences that image.
+func TestResolveImageDoesNotRememberAFailure(t *testing.T) {
+	config := newFakeCLIConfig()
+	config.imageServer.err = errors.New("image server is down")
+	r := &configImageResolver{config: config}
+
+	if _, _, err := r.Resolve(context.Background(), "images:alpine/3.21"); err == nil {
+		t.Fatal("Resolve() = nil error while the image server is down")
+	}
+
+	_, image, err := r.Resolve(context.Background(), "images:alpine/3.21")
+	if err == nil {
+		t.Errorf("second Resolve() = nil error, image %+v; a failure was remembered "+
+			"as an answer", image)
+	}
+	if image != nil {
+		t.Errorf("second Resolve() image = %+v, want nil alongside the error", image)
 	}
 }

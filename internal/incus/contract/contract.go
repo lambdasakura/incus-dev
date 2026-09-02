@@ -19,6 +19,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -127,14 +128,16 @@ func Run(t *testing.T, env Env) []string {
 		}
 	})
 
-	check("ProfileExists tells the two apart", func(t *testing.T) {
-		ctx := context.Background()
-
-		if ok, err := env.Client.ProfileExists(ctx, env.Profile); err != nil || !ok {
-			t.Errorf("ProfileExists(%q) = %v, %v; want true, nil", env.Profile, ok, err)
+	check("ProfileNames lists what is there and nothing else", func(t *testing.T) {
+		names, err := env.Client.ProfileNames(context.Background())
+		if err != nil {
+			t.Fatalf("ProfileNames() error = %v", err)
 		}
-		if ok, err := env.Client.ProfileExists(ctx, "idev-contract-nope"); err != nil || ok {
-			t.Errorf("ProfileExists(absent) = %v, %v; want false, nil", ok, err)
+		if !slices.Contains(names, env.Profile) {
+			t.Errorf("ProfileNames() = %v, want it to contain %q", names, env.Profile)
+		}
+		if slices.Contains(names, "idev-contract-nope") {
+			t.Errorf("ProfileNames() = %v, want no profile that was never created", names)
 		}
 	})
 
@@ -554,6 +557,11 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		// restart-pending is decided from a reading of its own and written
 		// straight back; it must not be refused because something else moved
 		// the instance on.
+		//
+		// This is also what holds the two readings together: the write takes
+		// its own etag from the plain instance while Instance hands callers
+		// the one from the full instance. If the daemon computed them
+		// differently, this write would be refused.
 		if err := env.Client.UpdateInstance(ctx, env.Instance,
 			incus.InstanceChange{SetConfig: map[string]string{"user.contract-free": "1"}}, ""); err != nil {
 			t.Errorf("UpdateInstance() with no etag = %v, want it applied", err)

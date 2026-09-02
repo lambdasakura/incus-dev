@@ -193,6 +193,27 @@ func (f *fakeServer) GetInstanceFull(name string) (*api.InstanceFull, string, er
 	return &copied, "etag", nil
 }
 
+// GetInstance answers from the same instances, without the runtime state,
+// the snapshots or the backups -- which is the whole point of asking for it.
+func (f *fakeServer) GetInstance(name string) (*api.Instance, string, error) {
+	if f.beforeInstance != nil {
+		f.beforeInstance()
+	}
+	if err := f.record("GetInstance"); err != nil {
+		return nil, "", err
+	}
+	inst, ok := f.instances[name]
+	if !ok {
+		return nil, "", api.StatusErrorf(404, "Instance not found")
+	}
+	copied := inst.Instance
+	copied.Config = maps.Clone(inst.Config)
+	copied.Devices = cloneDevices(inst.Devices)
+	copied.Profiles = slices.Clone(inst.Profiles)
+
+	return &copied, "etag", nil
+}
+
 func (f *fakeServer) CreateInstanceFromImage(source incusclient.ImageServer, image api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error) {
 	f.lastCreate = req
 	f.lastImage = image
@@ -789,16 +810,17 @@ func TestAPIRemoveDevices(t *testing.T) {
 	}
 }
 
-func TestAPIProfileExists(t *testing.T) {
+func TestAPIProfileNames(t *testing.T) {
 	f := newFakeServer()
 	f.profiles = []string{"default", "gpu"}
 	a, _ := newAPI(f)
 
-	if ok, err := a.ProfileExists(context.Background(), "gpu"); !ok || err != nil {
-		t.Errorf("ProfileExists(gpu) = %v, %v", ok, err)
+	got, err := a.ProfileNames(context.Background())
+	if err != nil {
+		t.Fatalf("ProfileNames() error = %v", err)
 	}
-	if ok, _ := a.ProfileExists(context.Background(), "missing"); ok {
-		t.Error("reported a profile that does not exist as existing")
+	if !slices.Equal(got, []string{"default", "gpu"}) {
+		t.Errorf("ProfileNames() = %v, want the host's list unchanged", got)
 	}
 }
 
@@ -1057,7 +1079,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 		"create":   {"CreateInstance", func(a *API) error { return a.CreateInstance(ctx, InstanceSpec{Name: "dev-x"}) }},
 		"start":    {"UpdateInstanceState", func(a *API) error { return a.StartInstance(ctx, "dev-x") }},
 		"delete":   {"DeleteInstance", func(a *API) error { return a.DeleteInstance(ctx, "dev-x") }},
-		"get": {"GetInstanceFull", func(a *API) error {
+		"get": {"GetInstance", func(a *API) error {
 			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
 		}},
 		"config": {"UpdateInstance", func(a *API) error {
@@ -1066,7 +1088,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 		"devices": {"UpdateInstance", func(a *API) error {
 			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetDevices: map[string]Device{"d": {"type": "disk"}}}, "")
 		}},
-		"profiles":   {"GetProfileNames", func(a *API) error { _, err := a.ProfileExists(ctx, "p"); return err }},
+		"profiles":   {"GetProfileNames", func(a *API) error { _, err := a.ProfileNames(ctx); return err }},
 		"volumes":    {"GetStoragePoolVolume", func(a *API) error { _, err := a.VolumeExists(ctx, "p", "v"); return err }},
 		"volcreate":  {"CreateStoragePoolVolume", func(a *API) error { return a.CreateVolume(ctx, "p", "v", nil) }},
 		"voldelete":  {"DeleteStoragePoolVolume", func(a *API) error { return a.DeleteVolume(ctx, "p", "v") }},
@@ -1703,4 +1725,32 @@ func TestWaitDeleteSeparatesRefusalFromInterruption(t *testing.T) {
 			t.Errorf("waitDelete() = %v, want it to carry the cancellation", err)
 		}
 	})
+}
+
+// A write reads the writable instance, not the full one.
+//
+// Every write merges into what is already there, so it has to read first. The
+// full reading adds the runtime state, every snapshot and every backup: none
+// of it is looked at, and all of it crosses the socket. An instance with a
+// hundred snapshots paid for them on every config change.
+func TestAPIWriteDoesNotFetchTheFullInstance(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{Config: map[string]string{"a": "1"}})
+	a := &API{Server: f}
+
+	if err := a.UpdateInstance(context.Background(), "dev-x",
+		InstanceChange{SetConfig: map[string]string{"b": "2"}}, ""); err != nil {
+		t.Fatalf("UpdateInstance() error = %v", err)
+	}
+
+	if slices.Contains(f.calls, "GetInstanceFull") {
+		t.Errorf("calls = %v, want the write to read the writable instance only", f.calls)
+	}
+	if !slices.Contains(f.calls, "GetInstance") {
+		t.Errorf("calls = %v, want the write to read before it merges", f.calls)
+	}
+	// And the merge still happened: the key that was there is still there.
+	if got := f.instances["dev-x"].Config["a"]; got != "1" {
+		t.Errorf("config[a] = %q, want the existing key kept by the merge", got)
+	}
 }

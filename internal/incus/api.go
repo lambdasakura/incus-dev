@@ -21,6 +21,7 @@ import (
 // incus.InstanceServer satisfies it as it is. Tests replace it with a fake.
 type server interface {
 	GetInstanceFull(name string) (*api.InstanceFull, string, error)
+	GetInstance(name string) (*api.Instance, string, error)
 	GetInstances(instType api.InstanceType) ([]api.Instance, error)
 	CreateInstanceFromImage(source incusclient.ImageServer, image api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error)
 	UpdateInstance(name string, put api.InstancePut, etag string) (incusclient.Operation, error)
@@ -428,8 +429,13 @@ func (a *API) UpdateInstance(ctx context.Context, name string, change InstanceCh
 
 // updateInstance fetches the current state, applies a change and writes it
 // back.
+//
+// The plain instance rather than the full one: a write needs what it is about
+// to send back, which is the writable part. The full reading adds the runtime
+// state, every snapshot and every backup, none of which a write looks at and
+// all of which travel over the socket.
 func (a *API) updateInstance(ctx context.Context, name, etag string, change func(*api.InstancePut)) error {
-	full, fresh, err := a.Server.GetInstanceFull(name)
+	current, fresh, err := a.Server.GetInstance(name)
 	if err != nil {
 		if api.StatusErrorCheck(err, 404) && !missingScope(err) {
 			return fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
@@ -437,7 +443,7 @@ func (a *API) updateInstance(ctx context.Context, name, etag string, change func
 		return fmt.Errorf("get instance %s: %w", name, err)
 	}
 
-	put := full.Writable()
+	put := current.Writable()
 	if put.Config == nil {
 		put.Config = map[string]string{}
 	}
@@ -463,14 +469,14 @@ func (a *API) updateInstance(ctx context.Context, name, etag string, change func
 	return nil
 }
 
-// ProfileExists reports whether a profile exists. idev never creates one
+// ProfileNames lists the profiles on the host. idev never creates one
 // (REQ-007).
-func (a *API) ProfileExists(_ context.Context, name string) (bool, error) {
+func (a *API) ProfileNames(_ context.Context) ([]string, error) {
 	names, err := a.Server.GetProfileNames()
 	if err != nil {
-		return false, fmt.Errorf("list profiles: %w", err)
+		return nil, fmt.Errorf("list profiles: %w", err)
 	}
-	return slices.Contains(names, name), nil
+	return names, nil
 }
 
 // CheckImage reports whether an image reference resolves.
