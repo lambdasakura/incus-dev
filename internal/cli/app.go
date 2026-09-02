@@ -1032,7 +1032,7 @@ func restartOwed(running bool, before, desired map[string]string, unset []string
 	booted := pendingRestart(before, lastStart)
 
 	owed := map[string]bootedValue{}
-	for _, k := range restartRequiredKeys {
+	for _, k := range incus.RestartRequiredKeys {
 		was, recorded := booted[k]
 		if !recorded {
 			was = bootedValue{value: before[k], known: true}
@@ -1049,7 +1049,11 @@ func restartOwed(running bool, before, desired map[string]string, unset []string
 			// it -- an earlier run changed it and nothing has restarted since.
 			want = before[k]
 		}
-		if was.known && sameIDMapping(k, want, was.value) {
+		// Same text is no change for any key; raw.idmap is additionally the
+		// one key where two spellings mean the same mapping.
+		unchanged := want == was.value ||
+			(k == incus.IDMapKey && incus.SameIDMapping(want, was.value))
+		if was.known && unchanged {
 			// The container is already running with this. A value changed and
 			// changed back is not a change, and restarting would apply
 			// nothing while killing whatever is running inside.
@@ -1080,47 +1084,6 @@ func restartWarning(fresh, all []string) string {
 		strings.Join(all, ", "))
 }
 
-// sameIDMapping reports whether two values apply the same thing.
-//
-// Only raw.idmap needs it: idev used to write "both <id> 0" and now writes
-// "uid <id> 0" and "gid <id> 0" on separate lines. The kernel mapping is
-// identical when the ids are, so demanding a restart to respell it would cost
-// every upgraded instance whatever was running inside it.
-func sameIDMapping(key, want, have string) bool {
-	if want == have {
-		return true
-	}
-	if key != idmapConfigKey {
-		return false
-	}
-	return normalizeIDMap(want) == normalizeIDMap(have)
-}
-
-// normalizeIDMap rewrites a raw.idmap into one comparable form: sorted lines,
-// with "both" expanded into its uid and gid halves.
-func normalizeIDMap(value string) string {
-	var lines []string
-	for _, line := range strings.Split(value, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 3 {
-			// Not a shape idev writes; compare it as it is.
-			if line = strings.TrimSpace(line); line != "" {
-				lines = append(lines, line)
-			}
-			continue
-		}
-		if fields[0] == "both" {
-			lines = append(lines,
-				"uid "+fields[1]+" "+fields[2],
-				"gid "+fields[1]+" "+fields[2])
-			continue
-		}
-		lines = append(lines, strings.Join(fields, " "))
-	}
-	slices.Sort(lines)
-	return strings.Join(lines, "\n")
-}
-
 // recordRestart renders the record: when the change was applied, and to what.
 func recordRestart(lastStart time.Time, booted map[string]bootedValue) string {
 	entries := make([]string, 0, len(booted))
@@ -1144,12 +1107,6 @@ func (a *App) clearRestartPending(ctx context.Context, before map[string]string)
 	return a.changedUnderfoot(a.client.UpdateInstance(ctx, a.instance,
 		incus.InstanceChange{UnsetConfig: []string{managedRestartKey}}, ""))
 }
-
-// restartRequiredKeys are the config keys whose changes need a restart.
-//
-// limits.* is not among them: in a container both increases and decreases take
-// effect while it runs (verified on real hardware; VMs are out of scope).
-var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
 
 // idmapPlan resolves the idmap strategy to apply.
 func (a *App) idmapPlan() (idmapPlan, error) {

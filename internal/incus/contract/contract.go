@@ -153,7 +153,7 @@ func Run(t *testing.T, env Env) []string {
 //
 // A check deleted and replaced in the same edit keeps the count, which no
 // cheap guard catches -- but that is a deliberate act, not an oversight.
-const Checks = 34
+const Checks = 35
 
 // Critical are the checks that exist because the fake once disagreed with
 // Incus and a defect reached a user through the gap.
@@ -583,6 +583,45 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		}
 		if before.ETag == after.ETag {
 			t.Error("the etag did not move across a start")
+		}
+	})
+
+	check("the two spellings of an idmap are one mapping to the daemon", func(t *testing.T) {
+		// SameIDMapping says "both 1000 0" and the uid/gid pair ask for the
+		// same thing, and idev skips a restart on that basis. CLAUDE.md lists
+		// this among the beliefs about Incus that have already caused
+		// regressions here, and until now it was held by a unit test of
+		// idev's own opinion. This asks the daemon.
+		const both, split = "both 1000 0", "uid 1000 0\ngid 1000 0"
+		if !incus.SameIDMapping(both, split) {
+			t.Fatal("SameIDMapping says these differ; the rest of this check assumes it does not")
+		}
+
+		set := func(value string) string {
+			t.Helper()
+			if err := env.Client.UpdateInstance(ctx, env.Instance,
+				incus.InstanceChange{SetConfig: map[string]string{incus.IDMapKey: value}}, ""); err != nil {
+				t.Fatalf("UpdateInstance(%q) error = %v", value, err)
+			}
+			inst, err := env.Client.Instance(ctx, env.Instance)
+			if err != nil {
+				t.Fatalf("Instance() error = %v", err)
+			}
+			return inst.Config[incus.IDMapKey]
+		}
+		t.Cleanup(func() {
+			_ = env.Client.UpdateInstance(ctx, env.Instance,
+				incus.InstanceChange{UnsetConfig: []string{incus.IDMapKey}}, "")
+		})
+
+		// Both spellings are accepted, and each is stored as written -- so
+		// idev cannot tell them apart by reading the instance back, which is
+		// exactly why it has to normalise.
+		if got := set(both); got != both {
+			t.Errorf("after writing %q the instance holds %q", both, got)
+		}
+		if got := set(split); got != split {
+			t.Errorf("after writing %q the instance holds %q", split, got)
 		}
 	})
 

@@ -3,12 +3,16 @@
 package integration_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 const idmapYAML = `
@@ -172,4 +176,92 @@ func subIDAllows(t *testing.T, path string, id int) bool {
 		}
 	}
 	return false
+}
+
+// The two spellings of raw.idmap ask the kernel for the same thing.
+//
+// idev skips a restart on that basis, and CLAUDE.md lists it among the beliefs
+// about Incus that have already caused regressions here. Until now the only
+// guard was a unit test of idev's own opinion, which is the shape that
+// produces a wrong fake and a matching wrong test.
+//
+// The daemon settles it: volatile.idmap.current is what it computed. Note that
+// the two are not textually equal there either -- "both" yields one entry with
+// both flags set, the split form yields two -- so this expands them the same
+// way idev does before comparing.
+func TestBothAndSplitIDMapAreOneMapping(t *testing.T) {
+	requireIncus(t)
+
+	name := fmt.Sprintf("dev-idmap-%d", time.Now().UnixNano()%1e9)
+	if out, err := runIncus("launch", testImage, name, "-c", "raw.idmap=both 1000 0"); err != nil {
+		t.Skipf("cannot create an instance with raw.idmap here: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _, _ = runIncus("delete", "-f", name) })
+
+	computed := func() []idmapEntry {
+		t.Helper()
+		// The mapping is computed at start, so it is there once it is running.
+		var raw string
+		for range 30 {
+			raw = strings.TrimSpace(incusOut(t, "config", "get", name, "volatile.idmap.current"))
+			if raw != "" && raw != "[]" {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if raw == "" || raw == "[]" {
+			t.Fatalf("the daemon computed no idmap for %s", name)
+		}
+		var entries []idmapEntry
+		if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+			t.Fatalf("volatile.idmap.current = %q: %v", raw, err)
+		}
+		return entries
+	}
+
+	fromBoth := expandIDMap(computed())
+
+	if out, err := runIncus("stop", "-f", name); err != nil {
+		t.Fatalf("stop: %v\n%s", err, out)
+	}
+	if out, err := runIncus("config", "set", name, "raw.idmap", "uid 1000 0\ngid 1000 0"); err != nil {
+		t.Fatalf("set the split form: %v\n%s", err, out)
+	}
+	if out, err := runIncus("start", name); err != nil {
+		t.Fatalf("start: %v\n%s", err, out)
+	}
+
+	fromSplit := expandIDMap(computed())
+
+	if !slices.Equal(fromBoth, fromSplit) {
+		t.Errorf("the daemon computed different mappings:\n  both  = %v\n  split = %v\n"+
+			"incus.SameIDMapping treats these as one, and idev skips a restart on that",
+			fromBoth, fromSplit)
+	}
+}
+
+// idmapEntry is one row of volatile.idmap.current.
+type idmapEntry struct {
+	Isuid    bool
+	Isgid    bool
+	Hostid   int
+	Nsid     int
+	Maprange int
+}
+
+// expandIDMap splits an entry that carries both flags into its uid and gid
+// halves, so the two spellings become comparable -- the same expansion
+// incus.SameIDMapping does on the text.
+func expandIDMap(entries []idmapEntry) []string {
+	var out []string
+	for _, e := range entries {
+		if e.Isuid {
+			out = append(out, fmt.Sprintf("uid %d %d %d", e.Hostid, e.Nsid, e.Maprange))
+		}
+		if e.Isgid {
+			out = append(out, fmt.Sprintf("gid %d %d %d", e.Hostid, e.Nsid, e.Maprange))
+		}
+	}
+	slices.Sort(out)
+	return out
 }

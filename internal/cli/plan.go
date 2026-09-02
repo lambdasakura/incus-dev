@@ -36,7 +36,8 @@ const (
 
 // idmapConfigKey is the key that maps uids and gids in an unprivileged
 // container.
-const idmapConfigKey = "raw.idmap"
+// idmapConfigKey is incus.IDMapKey, kept as a local name for readability.
+const idmapConfigKey = incus.IDMapKey
 
 // desiredConfig builds the instance config to apply, from dev.yml.
 //
