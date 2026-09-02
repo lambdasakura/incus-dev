@@ -72,7 +72,7 @@ func fakeAppWith(t *testing.T, yaml string, out *bytes.Buffer) (*App, *incustest
 		t.Fatal(err)
 	}
 	client := incustest.New()
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config:     cfg,
 		Client:     client,
 		Runner:     &runnertest.Fake{},
@@ -499,7 +499,7 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 	}
 
 	// The values handed to the Ansible inventory match.
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config:       cfg,
 		Client:       incustest.New(),
 		Runner:       &runnertest.Fake{},
@@ -552,7 +552,7 @@ provision:
 				Status: "Running",
 				Config: map[string]string{managedProjectKey: "example-project"},
 			})
-			app := NewApp(AppOptions{
+			app := MustNewApp(AppOptions{
 				Config: cfg, Client: client, Runner: &runnertest.Fake{},
 				Out: out, CheckIDMap: func(int, int) error { return nil },
 			})
@@ -601,7 +601,7 @@ provision:
 	}
 
 	client := incustest.New()
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: out, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -918,7 +918,7 @@ func TestDestroyVolumesFlag(t *testing.T) {
 		Status: "Running",
 		Config: map[string]string{managedProjectKey: "example-project"},
 	})
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: out, CheckIDMap: func(int, int) error { return nil },
 	})

@@ -42,7 +42,7 @@ func appFromAnotherCheckout(t *testing.T, extra map[string]string) (*App, *incus
 	})
 
 	errOut := &bytes.Buffer{}
-	return NewApp(AppOptions{
+	return MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	}), client, errOut
@@ -146,7 +146,7 @@ func TestKeptVolumeAdviceIsRunnable(t *testing.T) {
 	client.Volumes["default/dev-example-project-cache"] = true
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -191,7 +191,7 @@ func TestKeptVolumeAdviceSurvivesAMalformedRecord(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -208,7 +208,7 @@ func TestKeptVolumeAdviceSurvivesAMalformedRecord(t *testing.T) {
 // does not escalate; destroy itself reports that it does not exist.
 func TestHasVolumesIsFalseWithoutAnInstance(t *testing.T) {
 	cfg := mustParse(t, rootYAML)
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
 		CheckIDMap: func(int, int) error { return nil },
 	})
@@ -253,7 +253,7 @@ func TestKeptVolumeAdviceNamesOnlyTheUndeclaredOnes(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -287,7 +287,7 @@ func TestKeptVolumeAdviceIsSilentWithNothingElseToRemove(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -317,7 +317,7 @@ func TestHasVolumesIgnoresARecordWithoutAVolume(t *testing.T) {
 	})
 	// The pool has no such volume: someone removed it by hand.
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		CheckIDMap: func(int, int) error { return nil },
 	})
@@ -395,7 +395,7 @@ func TestKeptVolumeAdviceSaysWhenThereAreMore(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -423,7 +423,7 @@ func TestHasVolumesIgnoresAMalformedRecord(t *testing.T) {
 		},
 	})
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		CheckIDMap: func(int, int) error { return nil },
 	})
@@ -451,7 +451,7 @@ func TestDestroyVolumesSkipsARecordWithoutAVolume(t *testing.T) {
 		},
 	})
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -486,7 +486,7 @@ func TestDestroyNamesTheVolumesItCouldNotDelete(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"volume delete default dev-example-project-a": errBoom}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -537,7 +537,7 @@ func TestUpWarnsWhenAProfileIsRenamed(t *testing.T) {
 	client.Profiles = []string{"default", "web"}
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -566,7 +566,7 @@ func TestStatusDeclaresTheWorkspaceSourceOnlyOnDrift(t *testing.T) {
 	})
 
 	out := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -655,7 +655,7 @@ func TestFailedVolumeCleanupNamesOnlyRealReferences(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"volume delete default dev-example-project-a": errBoom}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -691,7 +691,7 @@ func TestDestroyNamesTheVolumesWhenTheInstanceDeleteFails(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"delete dev-example-project": errBoom}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -723,7 +723,7 @@ func TestDestroySaysToRetryWhenTheInstanceSurvived(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"delete dev-example-project": errBoom}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -757,7 +757,7 @@ func TestFailedVolumeCleanupIsCertainTheInstanceIsGone(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"volume delete": errBoom}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -788,7 +788,7 @@ func TestSnapshotNameIsChecked(t *testing.T) {
 		Config: map[string]string{managedProjectKey: "example-project"},
 	})
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -860,7 +860,7 @@ func TestDestroyVolumesToleratesAMissingPool(t *testing.T) {
 		"volume exists oldpool": fmt.Errorf("storage pool oldpool: %w", incus.ErrPoolNotFound),
 	}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -890,7 +890,7 @@ func TestUpDropsARecordOnAMissingPool(t *testing.T) {
 	}
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -928,7 +928,7 @@ func TestPlanReportsAMissingPool(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -958,7 +958,7 @@ func TestDestroyVolumesStopsOnAnUncheckableVolume(t *testing.T) {
 	})
 	client.FailOn = map[string]error{"volume exists default": errBoom}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -997,7 +997,7 @@ func TestRestartOwedClearsWhenAChangeIsReverted(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1032,7 +1032,7 @@ func TestRestartRecordCarriesTheBootedValue(t *testing.T) {
 		},
 	})
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1061,7 +1061,7 @@ func TestSnapshotCollisionIsExplained(t *testing.T) {
 		"snapshot create": fmt.Errorf("create snapshot x: %w", incus.ErrSnapshotExists),
 	}
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1113,7 +1113,7 @@ func TestOldRestartRecordForAnUnsetKeyStaysOwed(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1146,7 +1146,7 @@ func TestOldRestartRecordForAnUnsetKeyRestarts(t *testing.T) {
 		},
 	})
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1195,7 +1195,7 @@ func TestUpNamesAnInstanceItCanNoLongerDerive(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1226,7 +1226,7 @@ func TestUpNamesAnInstanceFromAnOlderMarkerPrefix(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1259,7 +1259,7 @@ func TestUpDoesNotRestartForARespelledIDMap(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut,
 		Host:       &HostIDs{UID: 1000, GID: 1000},
@@ -1283,7 +1283,7 @@ func TestStrandedLookIsAdvisoryAndScopeAware(t *testing.T) {
 		client := incustest.New()
 		client.FailOn = map[string]error{"instances": errBoom}
 
-		app := NewApp(AppOptions{
+		app := MustNewApp(AppOptions{
 			Config: cfg, Client: client, Runner: &runnertest.Fake{},
 			Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 		})
@@ -1310,7 +1310,7 @@ func TestStrandedLookIsAdvisoryAndScopeAware(t *testing.T) {
 		})
 
 		errOut := &bytes.Buffer{}
-		app := NewApp(AppOptions{
+		app := MustNewApp(AppOptions{
 			Config: cfg, Client: client, Runner: &runnertest.Fake{},
 			Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 		})
@@ -1335,7 +1335,7 @@ func TestStrandedLookIsAdvisoryAndScopeAware(t *testing.T) {
 		})
 
 		errOut := &bytes.Buffer{}
-		app := NewApp(AppOptions{
+		app := MustNewApp(AppOptions{
 			Config: cfg, Client: client, Runner: &runnertest.Fake{},
 			Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 		})
@@ -1368,7 +1368,7 @@ func TestDestroyVolumesFindsThemOnAnInstanceWithNoRecord(t *testing.T) {
 		},
 	})
 
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1400,7 +1400,7 @@ func TestStatusDoesNotInventTheImageOfAnOlderInstance(t *testing.T) {
 	})
 
 	out := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1441,7 +1441,7 @@ func TestUpNamesWhatItCannotManageOnAnOlderInstance(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})
@@ -1498,7 +1498,7 @@ func TestUpDoesNotWarnAboutAnInstanceItRecorded(t *testing.T) {
 			})
 
 			errOut := &bytes.Buffer{}
-			app := NewApp(AppOptions{
+			app := MustNewApp(AppOptions{
 				Config: cfg, Client: client, Runner: &runnertest.Fake{},
 				Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 			})
@@ -1547,7 +1547,7 @@ func TestStrandedWarningsSayWhichKind(t *testing.T) {
 			})
 
 			errOut := &bytes.Buffer{}
-			app := NewApp(AppOptions{
+			app := MustNewApp(AppOptions{
 				Config: cfg, Client: client, Runner: &runnertest.Fake{},
 				Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 			})
@@ -1584,7 +1584,7 @@ func TestALegacyInstanceFromAnotherCheckoutIsLeftAlone(t *testing.T) {
 	})
 
 	errOut := &bytes.Buffer{}
-	app := NewApp(AppOptions{
+	app := MustNewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{},
 		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
 	})

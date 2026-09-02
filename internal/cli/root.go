@@ -165,7 +165,7 @@ func buildApp(ctx context.Context, g *globalFlags, connect func(context.Context,
 		client = api
 	}
 
-	return NewAppFor(AppOptions{
+	return NewApp(AppOptions{
 		InstanceNameOptional: offlineOptions(connect),
 		Config:               cfg,
 		Branch:               gitBranch(ctx, cmdRunner, proj.Root),

@@ -48,7 +48,7 @@ func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Bu
 
 	client := incustest.New()
 	out := &bytes.Buffer{}
-	app := cli.NewApp(cli.AppOptions{
+	app := cli.MustNewApp(cli.AppOptions{
 		Config:  cfg,
 		Client:  client,
 		Runner:  &runnertest.Fake{},
@@ -536,7 +536,7 @@ func TestUpFallsBackToShiftWhenRawIDMapNotAllowed(t *testing.T) {
 	client := incustest.New()
 	errOut := &bytes.Buffer{}
 
-	app := cli.NewApp(cli.AppOptions{
+	app := cli.MustNewApp(cli.AppOptions{
 		Config:     cfg,
 		Client:     client,
 		Runner:     &runnertest.Fake{},
@@ -570,7 +570,7 @@ func TestUpFailsWhenExplicitRawIDMapNotAllowed(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML+"workspace:\n  idmap: raw\n")
 	client := incustest.New()
 
-	app := cli.NewApp(cli.AppOptions{
+	app := cli.MustNewApp(cli.AppOptions{
 		Config:     cfg,
 		Client:     client,
 		Runner:     &runnertest.Fake{},
@@ -594,7 +594,7 @@ func TestUpFailsWhenExplicitRawIDMapNotAllowed(t *testing.T) {
 func TestUpSkipsIDMapCheckWhenDisabled(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML+"workspace:\n  idmap: none\n")
 
-	app := cli.NewApp(cli.AppOptions{
+	app := cli.MustNewApp(cli.AppOptions{
 		Config:     cfg,
 		Client:     incustest.New(),
 		Runner:     &runnertest.Fake{},
@@ -678,7 +678,7 @@ func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 			}
 
 			in, out, errOut := strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}
-			app := cli.NewApp(cli.AppOptions{
+			app := cli.MustNewApp(cli.AppOptions{
 				Config:      cfg,
 				Client:      client,
 				Runner:      &runnertest.Fake{},
@@ -719,7 +719,7 @@ func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
 		return 0, nil
 	}
 
-	app := cli.NewApp(cli.AppOptions{
+	app := cli.MustNewApp(cli.AppOptions{
 		Config:     cfg,
 		Client:     client,
 		Runner:     &runnertest.Fake{},
@@ -890,7 +890,7 @@ func TestShellPassesTerm(t *testing.T) {
 		return 0, nil
 	}
 
-	app := cli.NewApp(cli.AppOptions{
+	app := cli.MustNewApp(cli.AppOptions{
 		Config:      cfg,
 		Client:      client,
 		Runner:      &runnertest.Fake{},

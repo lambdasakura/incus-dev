@@ -250,6 +250,24 @@ func TestArchitecturalConstraintsHold(t *testing.T) {
 		})
 	})
 
+	// The panicking constructor used to be the one called NewApp, so the
+	// obvious name was the one no user should reach. Renaming it is only half
+	// the fix: nothing stops the next caller from picking it up again, and a
+	// panic reaches the user as a stack trace instead of a message.
+	t.Run("MustNewApp outside tests", func(t *testing.T) {
+		pattern := regexp.MustCompile(`\bMustNewApp\(`)
+		forEachSourceFile(t, func(path, dir string, body []byte) {
+			if dir == "internal/cli" && filepath.Base(path) == "app.go" {
+				return // Its definition.
+			}
+			if pattern.Match(body) {
+				t.Errorf("%s: MustNewApp panics when the instance name cannot be "+
+					"derived. Anything a user runs calls NewApp and reports the error",
+					path)
+			}
+		})
+	})
+
 	t.Run("os.Exit outside main", func(t *testing.T) {
 		pattern := regexp.MustCompile(`\bos\.Exit\(`)
 		forEachSourceFile(t, func(path, dir string, body []byte) {

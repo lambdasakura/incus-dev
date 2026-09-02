@@ -92,23 +92,21 @@ type App struct {
 	lookupEnv  func(string) (string, bool)
 }
 
-// NewApp builds an App.
-//
-// Use NewAppFor where deriving the instance name can fail, such as
-// project.scope: branch without a usable Git.
-func NewApp(opt AppOptions) *App {
-	app, err := NewAppFor(opt)
+// MustNewApp builds an App and panics if it cannot, which makes it unfit for
+// anything a user runs. It is here for tests and for callers whose options
+// cannot fail: only deriving the instance name can, and the default scope
+// derives it from the directory name.
+func MustNewApp(opt AppOptions) *App {
+	app, err := NewApp(opt)
 	if err != nil {
-		// The default scope cannot fail. This is the convenient entry point for
-		// tests and default configurations.
 		panic(err)
 	}
 	return app
 }
 
-// NewAppFor builds an App, returning an error when the instance name cannot be
-// derived.
-func NewAppFor(opt AppOptions) (*App, error) {
+// NewApp builds an App, returning an error when the instance name cannot be
+// derived -- project.scope: branch without a usable Git, say.
+func NewApp(opt AppOptions) (*App, error) {
 	out := opt.Out
 	if out == nil {
 		out = io.Discard
