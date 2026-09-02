@@ -51,13 +51,6 @@ func desiredConfig(cfg *config.Config, plan idmapPlan, current map[string]string
 	out[managedProjectKey] = cfg.Project.Name
 	out[managedRootKey] = cfg.Root
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
-	// Written at creation and never again: it is what the instance was made
-	// from, which up cannot change. Rewriting it on every run would erase the
-	// one record that can tell the user their edit had no effect. An instance
-	// created before this key existed keeps none, and is left alone.
-	if current == nil {
-		out[managedImageKey] = cfg.Instance.Image
-	}
 
 	// The raw strategy maps the invoking host user onto root in the container.
 	if v := plan.rawIDMap(); v != "" {
@@ -271,12 +264,18 @@ func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
 // instanceSpec builds what to pass when creating an instance.
 func instanceSpec(cfg *config.Config, name string, plan idmapPlan, current map[string]string) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
+	config := desiredConfig(cfg, plan, current, name)
+	// Written at creation and never again: it is what the instance was made
+	// from, which up cannot change. Rewriting it on every run would erase the
+	// one record that can tell the user their edit had no effect.
+	config[managedImageKey] = cfg.Instance.Image
+
 	return incus.InstanceSpec{
 		Name:       name,
 		Image:      cfg.Instance.Image,
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg, plan, current, name),
+		Config:     config,
 		Devices:    desiredDevices(cfg, plan, name),
 	}
 }

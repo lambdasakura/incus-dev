@@ -182,6 +182,11 @@ Workspace:  /home/user/src/example-project -> /workspace
 - runtime version
 - idev管理下かどうか
 
+`Image` と `Workspace` はinstanceが実際に持っている値を表示する
+（`user.incus-dev.image` と workspace deviceの `source`）。
+`dev.yml` が別のものを宣言している場合は併記する。`up` が作り直さない以上、
+宣言の方を表示すると、実態と違うものを「現在の状態」として見せることになる。
+
 これらは実装済みである。
 
 ---
@@ -328,7 +333,7 @@ Provision step 2/2: main playbook (ansible .incus-dev/ansible/site.yml)
   1行にまとめる
 
 実行予定の算出は、実際に適用する経路と同じ関数
-（`desiredConfig` / `desiredDevices` / `staleIDMapKeys`）を使う。
+（`desiredConfig` / `desiredDevices` / `staleConfigKeys` / `staleDevices`）を使う。
 表示と実際の適用がずれないようにするため。
 
 ---
@@ -349,12 +354,16 @@ idev up
 [idev] Project: example-project
 [idev] Creating instance dev-example-project
 [idev] Mounting workspace /home/user/src/example-project -> /workspace
-[idev] Starting instance
-[idev] Bootstrap (default)
-[idev] Step 1/2: prepare
-[idev] Step 2/2: main playbook
+[idev] Starting instance dev-example-project
+[idev] bootstrap step 1/1 in dev-example-project: default
+[idev] provision step 1/2 in dev-example-project: prepare
+[idev] provision step 2/2 in dev-example-project: main playbook
 [idev] Development environment is ready
 ```
+
+警告が出た実行では、末尾を
+`Development environment is ready, with N warning(s) above` とする。
+成功で終わった旨だけを最後に出すと、その上の警告が読まれないためである。
 
 ステップ実行中の出力は、そのまま標準エラーへ中継する。
 
@@ -383,24 +392,34 @@ idev -v up
 対象：
 
 ```text
-ansible-playbook
+ansible-playbook / ansible-galaxy / ansible-doc
 git
 Incus API の呼び出し
 コンテナ内で実行した run ステップ
 ```
 
-失敗時には最低限以下を表示する。
+失敗時には最低限、以下の **情報** を含めること。整形は問わない。
+
+| 項目 | 例 |
+| --- | --- |
+| 操作 | `provision step 2/3` |
+| 対象instance | `dev-example-project` |
+| ステップ | `main playbook (ansible)` |
+| 実行コマンド | `ansible-playbook ...` |
+| 終了コード | `2` |
+| エラー内容 | コマンドのstderr |
+
+実装は1行で連結して出す。
 
 ```text
-Operation        provision step 2/3
-Target           dev-example-project
-Step             main playbook (ansible)
-Command          ansible-playbook ...
-Exit code        2
-Error message    ...
+[idev] error: provision step 2/3 in dev-example-project: main playbook (ansible):
+command failed: ansible-playbook ... (exit code 2)
+<stderr>
 ```
 
 ステップ実行の失敗では、どのステップが失敗したかを必ず特定できること。
+対象instance名を含めるのは、`project.scope` が `path` / `branch` の場合に
+instance名が導出されるため、どの環境で失敗したかが自明でないからである。
 
 ただしSecretを含む可能性のある引数や環境変数を無条件で出力してはならない。
 

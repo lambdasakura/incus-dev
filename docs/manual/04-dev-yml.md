@@ -380,6 +380,9 @@ environment around it is thrown away.
 changing them later has no effect, and idev does not resize. Remove the volume
 with `incus storage volume delete` and let the next `idev up` create it anew.
 
+`idev destroy --volumes` deletes the data along with the instance, and asks
+about both before it does.
+
 **Removing or renaming an entry does not delete the data.** idev remembers the
 volumes it created, so `idev up` says which ones have left the declaration and
 `idev destroy --volumes` still removes them.
@@ -396,7 +399,7 @@ secrets:
   API_TOKEN:
     env: HOST_TOKEN          # from a host environment variable
   DEPLOY_KEY:
-    file: ~/.config/key      # from a host file
+    file: ~/.config/key      # from a host file; ~ is expanded here
   OPTIONAL_ONE:
     env: MAYBE
     optional: true           # may be absent

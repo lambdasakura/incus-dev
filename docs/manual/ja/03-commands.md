@@ -230,7 +230,8 @@ idev status --json
   "status": "Running",
   "image": "images:ubuntu/24.04",
   "workspace": "/workspace",
-  "workspace_source": "/home/you/src/my-project",
+  "workspace_source": "/home/you/other-checkout",
+  "workspace_source_declared": "/home/you/src/my-project",
   "exists": true,
   "managed": true,
   "profiles": ["default"],
@@ -243,6 +244,9 @@ idev status --json
 ```
 
 `profiles` / `config` / `devices` は、instanceが存在しない場合は出力されない。
+`image` と `workspace_source` はinstanceが実際に持っている値である。
+dev.yml が別のものを求めている場合に限り、`image_declared` と
+`workspace_source_declared` が併記される。
 `runtime` は dev.yml の `runtime.version` の値であり、宣言が無ければ出力されない。
 
 ```bash
@@ -265,12 +269,10 @@ idev destroy --force        # 確認を省略（CI・スクリプト用）
   削除されるのはコンテナだけである
 - idev が作ったものでないinstanceは削除しない
 
----
-
 | フラグ | 説明 |
 | --- | --- |
 | `-f`, `--force` | 確認せずに実行する |
-| `--volumes` | `dev.yml` の `volumes` で宣言した永続ボリュームも削除する |
+| `--volumes` | idevがこのinstance向けに作成した永続ボリュームをすべて削除する（宣言から消したものも含む） |
 
 既定では永続ボリュームを残す。instanceを作り直してもキャッシュを保ちたい、
 という用途で使われるためである。残した場合はその旨を表示する。

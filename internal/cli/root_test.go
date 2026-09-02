@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,8 +60,14 @@ func testProject(t *testing.T, body string) string {
 // fakeApp returns an App built on fakes, and the Incus client behind it.
 func fakeApp(t *testing.T, out *bytes.Buffer) (*App, *incustest.Fake) {
 	t.Helper()
+	return fakeAppWith(t, rootYAML, out)
+}
 
-	cfg, err := config.Load(filepath.Join(testProject(t, rootYAML), ".incus-dev", "dev.yml"))
+// fakeAppWith is fakeApp for a particular dev.yml.
+func fakeAppWith(t *testing.T, yaml string, out *bytes.Buffer) (*App, *incustest.Fake) {
+	t.Helper()
+
+	cfg, err := config.Load(filepath.Join(testProject(t, yaml), ".incus-dev", "dev.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,6 +624,63 @@ func TestShellAndExecDoNotClaimTheCommandsFlags(t *testing.T) {
 	}
 }
 
+// destroy --volumes asks about the data, not only the instance.
+//
+// Everything else about idev says the instance is the cheap, recreatable
+// half; a prompt that mentions only the instance is not the question being
+// answered when the volumes go too.
+func TestDestroyVolumesPromptNamesTheData(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		yaml string
+		args []string
+		want string
+	}{
+		{"instance only", rootYAML, []string{"destroy"}, "Delete instance dev-example-project?"},
+		{
+			"with volumes", rootYAML + "volumes:\n  cache:\n    path: /cache\n",
+			[]string{"destroy", "--volumes"}, "persistent volumes",
+		},
+		// Nothing to lose, so the scarier question is not asked: it is the one
+		// most likely to make a user answer N to a harmless destroy.
+		{"volumes flag with none declared", rootYAML, []string{"destroy", "--volumes"},
+			"Delete instance dev-example-project?"},
+		// The volume left the declaration but not the pool, and --volumes
+		// still deletes it. This is the case the flag exists for, so it is the
+		// worst one to ask the mild question about.
+		{"dropped from the declaration", rootYAML, []string{"destroy", "--volumes"},
+			"persistent volumes"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			app, client := fakeAppWith(t, tt.yaml, out)
+			config := map[string]string{managedProjectKey: "example-project"}
+			if tt.name == "dropped from the declaration" {
+				config[managedVolumesKey] = "default/dev-example-project-cache"
+				client.Volumes["default/dev-example-project-cache"] = true
+			}
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: config,
+			})
+
+			root := newRootCommand("test", stub(app), stub(app))
+			root.SetArgs(tt.args)
+			root.SetIn(strings.NewReader("y\n"))
+			root.SetOut(out)
+			root.SetErr(out)
+
+			if err := root.ExecuteContext(context.Background()); err != nil {
+				t.Fatalf("execute %v: %v", tt.args, err)
+			}
+			if !strings.Contains(out.String(), tt.want) {
+				t.Errorf("prompt = %q, want it to contain %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
 // exec without a command says so before it reaches Incus.
 //
 // It is the one condition the user can fix from what they typed, so an
@@ -630,8 +695,14 @@ func TestExecRequiresACommand(t *testing.T) {
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 
-	if err := root.ExecuteContext(context.Background()); err == nil {
-		t.Error("error = nil, want the missing command reported")
+	err := root.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("error = nil, want the missing command reported")
+	}
+	// The one command that does what they meant, rather than cobra's generic
+	// count of arguments.
+	if !strings.Contains(err.Error(), "idev shell") {
+		t.Errorf("error = %v, want it to point at idev shell", err)
 	}
 }
 
@@ -902,4 +973,11 @@ func TestUserFacingTextIsASCII(t *testing.T) {
 			})
 		}
 	})
+}
+
+// warningCount reads the logger idev builds, and nothing else.
+func TestWarningCountIgnoresAnotherLogger(t *testing.T) {
+	if got := warningCount(slog.New(slog.NewTextHandler(io.Discard, nil))); got != 0 {
+		t.Errorf("warningCount() = %d, want 0 for a logger idev did not build", got)
+	}
 }

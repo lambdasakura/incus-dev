@@ -155,6 +155,16 @@ project:
 
 Incus instance名生成などに利用する（[05-incus.md](05-incus.md) 参照）。
 
+スキーマで以下を課す。instance名へそのまま持ち込める形に限ることで、
+正規化した結果が元と大きく違うという事態を避ける。
+
+| 制約 | 値 |
+| --- | --- |
+| 長さ | 1〜55文字（`dev-` と scope suffix を足して63文字に収まる範囲） |
+| 文字種 | `^[A-Za-z0-9][A-Za-z0-9._-]*$` |
+
+これを満たさない名前は `idev validate` が弾く。
+
 ### scope
 
 同一マシンで複数のチェックアウトを扱う場合の、instance名の区別の仕方。
@@ -635,6 +645,12 @@ idev_incus_project: default
 `run` ステップの `env`、`ansible` ステップのvarsのいずれでも、
 プロジェクト側の指定が勝つ（[06-provisioning.md](06-provisioning.md) 6.4）。
 
+**強制されるのは `secrets` の名前のみである。**（3.12）
+`IDEV_` で始まるsecretは `idev validate` が弾く。
+一方 `run` ステップの `env` や varsファイルの中身は検査しない。
+上書きを許す以上、「既存の名前への代入」と「新しい名前の定義」を
+静的に区別できないためである。この予約は、そちらでは規約にとどまる。
+
 ---
 
 ## 3.11 パス解決規則
@@ -645,7 +661,7 @@ idev_incus_project: default
 | `devices.*.source`（相対パスの場合） | project root |
 | `provision[].ansible.playbook` / `vars` / `inventory` | project root |
 | `provision[].galaxy.requirements` | project root |
-| `secrets.*.file` | project root（`~` はホームへ展開する） |
+| `secrets.*.file` | project root（このフィールドだけ `~` をホームへ展開する） |
 | `provision[].run` 内のパス | コンテナ内の絶対パス（利用者が記述） |
 
 project rootの外を指すパスは警告してよいが、禁止はしない。

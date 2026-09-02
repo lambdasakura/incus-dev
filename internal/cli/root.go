@@ -274,7 +274,12 @@ func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Run a command in the container without allocating a terminal",
 		// Checked before the App is built, so the missing command is what the
 		// user is told about rather than an unreachable Incus.
-		Args: cobra.MinimumNArgs(1),
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errors.New("exec requires a command; use 'idev shell' for an interactive shell")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
 			if err != nil {
@@ -321,8 +326,15 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("Delete instance %s?", app.InstanceName())) {
+			// --volumes takes the data with it, and the data is the half a
+			// user is not expecting to lose.
+			prompt := fmt.Sprintf("Delete instance %s?", app.InstanceName())
+			if volumes && app.HasVolumes(cmd.Context()) {
+				prompt = fmt.Sprintf(
+					"Delete instance %s AND its persistent volumes, with everything in them?",
+					app.InstanceName())
+			}
+			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(), prompt) {
 				return errAborted
 			}
 			return app.Destroy(cmd.Context(), DestroyOptions{Volumes: volumes})

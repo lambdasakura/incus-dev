@@ -29,11 +29,14 @@ func (d Device) Type() string { return d["type"] }
 
 // Instance is the state of an Incus instance.
 type Instance struct {
-	Name     string            `json:"name"`
-	Status   string            `json:"status"`
-	Profiles []string          `json:"profiles"`
-	Config   map[string]string `json:"config"`
-	Devices  map[string]Device `json:"devices"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	// LastUsedAt is when the instance was last started. It is how idev tells
+	// that something restarted it since a change was applied.
+	LastUsedAt time.Time         `json:"last_used_at"`
+	Profiles   []string          `json:"profiles"`
+	Config     map[string]string `json:"config"`
+	Devices    map[string]Device `json:"devices"`
 	// ExpandedDevices are the effective devices, including those from profiles.
 	ExpandedDevices map[string]Device `json:"expanded_devices"`
 	State           *InstanceState    `json:"state"`
@@ -185,6 +188,10 @@ type Client interface {
 	RemoveDevices(ctx context.Context, name string, devices []string) error
 
 	ProfileExists(ctx context.Context, name string) (bool, error)
+
+	// CheckImage reports whether an image reference resolves, without
+	// creating anything.
+	CheckImage(ctx context.Context, ref string) error
 
 	VolumeExists(ctx context.Context, pool, name string) (bool, error)
 	CreateVolume(ctx context.Context, pool, name string, config map[string]string) error

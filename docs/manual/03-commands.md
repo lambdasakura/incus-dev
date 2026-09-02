@@ -241,7 +241,8 @@ idev status --json
   "status": "Running",
   "image": "images:ubuntu/24.04",
   "workspace": "/workspace",
-  "workspace_source": "/home/you/src/my-project",
+  "workspace_source": "/home/you/other-checkout",
+  "workspace_source_declared": "/home/you/src/my-project",
   "exists": true,
   "managed": true,
   "profiles": ["default"],
@@ -254,8 +255,10 @@ idev status --json
 ```
 
 `profiles`, `config` and `devices` are omitted when the instance does not
-exist. `runtime` is what `runtime.version` in dev.yml declares, and is omitted
-when it declares none.
+exist. `image` and `workspace_source` are what the instance actually has;
+`image_declared` and `workspace_source_declared` appear beside them only when
+dev.yml asks for something else. `runtime` is what `runtime.version` in dev.yml
+declares, and is omitted when it declares none.
 
 ```bash
 # branch on whether it is running
@@ -280,7 +283,7 @@ idev destroy --force        # skip the confirmation, for CI and scripts
 | Flag | Description |
 | --- | --- |
 | `-f`, `--force` | skip the confirmation prompt |
-| `--volumes` | also delete the persistent volumes declared in `volumes` |
+| `--volumes` | also delete every persistent volume idev created for this instance, including any no longer declared |
 
 Persistent volumes are kept by default, since the point of them is usually to
 survive a recreated instance and keep a cache warm. When they are kept, it says

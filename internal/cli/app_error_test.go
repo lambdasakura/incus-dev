@@ -737,7 +737,10 @@ func TestVolumeDroppedFromTheDeclaration(t *testing.T) {
 	if err := app.Up(context.Background(), UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
-	for _, want := range []string{"dev-example-project-cache", "--volumes"} {
+	// Named, and pointed at a command that removes only that volume: the
+	// obvious 'idev destroy --volumes' takes the instance and every other
+	// recorded volume with it.
+	for _, want := range []string{"dev-example-project-cache", "incus storage volume delete"} {
 		if !strings.Contains(errOut.String(), want) {
 			t.Errorf("warning = %q, want it to mention %q", errOut.String(), want)
 		}
@@ -785,6 +788,220 @@ func TestRebuildChecksBeforeDestroying(t *testing.T) {
 	}
 	if _, ok := client.Instances["dev-example-project"]; !ok {
 		t.Error("the instance was destroyed before the host was checked")
+	}
+}
+
+// shell, exec and provision say so too when the workspace is another
+// checkout's.
+//
+// They operate on whatever up mounted last, so running them from the second
+// checkout reaches into the first one's tree — `idev exec -- rm -rf build`
+// deletes the other clone's build directory, on the host.
+func TestCommandsWarnAboutAnotherCheckout(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	newFake := func() *incustest.Fake {
+		client := incustest.New()
+		client.AddInstance(&incus.Instance{
+			Name:     "dev-example-project",
+			Status:   "Running",
+			Profiles: []string{"default"},
+			Config: map[string]string{
+				managedProjectKey: "example-project",
+				managedRootKey:    "/home/u/other-checkout",
+			},
+		})
+		return client
+	}
+
+	for _, tt := range []struct {
+		name string
+		run  func(*App) error
+	}{
+		{"exec", func(a *App) error { return a.Exec(context.Background(), []string{"true"}) }},
+		{"shell", func(a *App) error { return a.Shell(context.Background(), nil) }},
+		{"provision", func(a *App) error {
+			return a.Provision(context.Background(), provision.Selection{})
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			errOut := &bytes.Buffer{}
+			app := NewApp(AppOptions{
+				Config: cfg, Client: newFake(), Runner: &runnertest.Fake{},
+				Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+			})
+
+			if err := tt.run(app); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+			if !strings.Contains(errOut.String(), "other-checkout") {
+				t.Errorf("output = %q, want it to name the checkout the workspace points at", errOut.String())
+			}
+		})
+	}
+}
+
+// rebuild resolves the image before it destroys anything.
+func TestRebuildChecksTheImageBeforeDestroying(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+	client.Hook = func(call string) error {
+		if strings.HasPrefix(call, "image check") {
+			return errBoom
+		}
+		return nil
+	}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Rebuild(context.Background()); !errors.Is(err, errBoom) {
+		t.Fatalf("error = %v, want the image failure", err)
+	}
+	if _, ok := client.Instances["dev-example-project"]; !ok {
+		t.Error("the instance was destroyed although the image does not resolve")
+	}
+}
+
+// A stopped instance owes no restart, so the preview does not claim one.
+func TestPlanSaysNothingAboutARestartOnAStoppedInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Stopped",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedRestartKey: recordRestart(time.Time{}, []string{"security.nesting"}),
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "waiting on a restart") {
+		t.Errorf("plan = %q, want nothing owed by a stopped instance", errOut.String())
+	}
+}
+
+// A restart record idev did not write is ignored rather than half-read.
+func TestPendingRestartIgnoresAMalformedRecord(t *testing.T) {
+	for _, record := range []string{"security.nesting", "not-a-time|security.nesting"} {
+		if got := pendingRestart(map[string]string{managedRestartKey: record}, time.Time{}); got != nil {
+			t.Errorf("pendingRestart(%q) = %v, want none", record, got)
+		}
+	}
+}
+
+// A rebuild records the image even when it carries a volume record.
+//
+// The carry was implemented by handing the create path a non-nil "current"
+// config, and the image marker was written only when that was nil — so a
+// project with volumes lost the marker on every rebuild, permanently, and
+// nothing warned about an image change afterwards.
+func TestRebuildStillRecordsTheImage(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedImageKey:   "images:ubuntu/24.04",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.Volumes["default/dev-example-project-cache"] = true
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	got := client.Instances["dev-example-project"].Config
+	if got[managedImageKey] != "images:ubuntu/24.04" {
+		t.Errorf("image record = %q, want it written at creation", got[managedImageKey])
+	}
+	if !strings.Contains(got[managedVolumesKey], "cache") {
+		t.Errorf("volume record = %q, want it carried", got[managedVolumesKey])
+	}
+}
+
+// up does not allocate storage for an instance it turns out not to manage.
+func TestUpDoesNotCreateVolumesForAnUnmanagedInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		// Somebody else's instance: no marker.
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err == nil {
+		t.Fatal("Up() = nil error, want it to refuse an instance it does not manage")
+	}
+	if len(client.Volumes) != 0 {
+		t.Errorf("volumes = %v, want none allocated before the refusal", client.Volumes)
+	}
+}
+
+// A rebuild checks the host once, not once before and once after.
+func TestRebuildChecksTheHostOnce(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	checks := 0
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		CheckIDMap: func(int, int) error { checks++; return nil },
+	})
+
+	if err := app.Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if checks != 1 {
+		t.Errorf("host checks = %d, want 1", checks)
+	}
+	if n := strings.Count(errOut.String(), "Project: example-project"); n != 1 {
+		t.Errorf("the run was announced %d times, want 1", n)
 	}
 }
 
@@ -1143,6 +1360,9 @@ func TestStatusReportsTheInstanceImage(t *testing.T) {
 			managedProjectKey: "example-project",
 			managedImageKey:   "images:debian/12",
 		},
+		Devices: map[string]incus.Device{
+			"workspace": {"type": "disk", "source": "/home/u/other-checkout", "path": "/workspace"},
+		},
 	})
 
 	out := &bytes.Buffer{}
@@ -1156,6 +1376,9 @@ func TestStatusReportsTheInstanceImage(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "images:debian/12") {
 		t.Errorf("status =\n%s\nwant the image the instance was made from", out.String())
+	}
+	if !strings.Contains(out.String(), "/home/u/other-checkout") {
+		t.Errorf("status =\n%s\nwant the workspace actually mounted", out.String())
 	}
 	// And the declaration beside it, so the row is not quietly one or the
 	// other.
@@ -1477,6 +1700,20 @@ func TestRestartIsOwedUntilItHappens(t *testing.T) {
 	if !client.Called("stop dev-example-project") || !client.Called("start dev-example-project") {
 		t.Errorf("calls = %v, want the instance restarted", client.Calls)
 	}
+
+	// Restarted by the user or by the host coming back up: the change is in
+	// effect, so there is nothing left to say.
+	client.Instances["dev-example-project"].LastUsedAt = time.Now().Add(time.Hour)
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart it to apply") {
+		t.Errorf("after an outside restart = %q, want nothing owed", errOut.String())
+	}
+	client.Instances["dev-example-project"].LastUsedAt = time.Time{}
+	client.Instances["dev-example-project"].Config[managedRestartKey] =
+		recordRestart(time.Time{}, []string{"security.nesting"})
 
 	// A stopped instance owes nothing: starting it applies everything.
 	client.Instances["dev-example-project"].Status = "Stopped"
@@ -1931,16 +2168,6 @@ func TestExecDoesNotAllocateTTY(t *testing.T) {
 	}
 	if tty {
 		t.Error("want exec not to allocate a pseudo-terminal")
-	}
-}
-
-func TestExecRequiresCommand(t *testing.T) {
-	client := incustest.New()
-	managed(client, "Running")
-
-	err := appWith(t, rootYAML, client).Exec(context.Background(), nil)
-	if err == nil || !strings.Contains(err.Error(), "idev shell") {
-		t.Errorf("error = %v, want it to point at shell", err)
 	}
 }
 

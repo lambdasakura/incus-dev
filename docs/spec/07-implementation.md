@@ -84,7 +84,8 @@ type Result struct {
 - 複数行の引数は表示時に先頭行へ畳む（`Collapse`）。長いスクリプトが
   そのままエラーへ流れ込むと、肝心の失敗理由が埋もれるため
 
-この層が扱うのは `ansible-playbook` / `ansible-galaxy` / `git` である。
+この層が扱うのは `ansible-playbook` / `ansible-galaxy` / `ansible-doc` / `git` である。
+`ansible-doc` は接続プラグインの事前確認に使う（06-provisioning.md 6.5）。
 Incus操作はAPIを直接呼ぶため、この層を通らない
 （端末を伴う実行も同様。[05-incus.md](05-incus.md) 5.7.2）。
 
@@ -113,20 +114,27 @@ Incus操作やステップ実行をここから行ってはならない。
 
 ```go
 type Config struct {
-    Schema    int        `json:"schema"`
-    Runtime   *Runtime   `json:"runtime,omitempty"`
-    Project   Project    `json:"project"`
-    Instance  Instance   `json:"instance"`
-    Workspace *Workspace `json:"workspace,omitempty"`
-    Bootstrap *[]Step    `json:"bootstrap,omitempty"`
-    Provision []Step     `json:"provision,omitempty"`
+    Schema    int               `json:"schema"`
+    Runtime   *Runtime          `json:"runtime,omitempty"`
+    Project   Project           `json:"project"`
+    Instance  Instance          `json:"instance"`
+    Workspace *Workspace        `json:"workspace,omitempty"`
+    Bootstrap *[]Step           `json:"bootstrap,omitempty"`
+    Provision []Step            `json:"provision,omitempty"`
+    Shell     *Shell            `json:"shell,omitempty"`
+    Incus     *Incus            `json:"incus,omitempty"`
+    Volumes   map[string]Volume `json:"volumes,omitempty"`
+    Secrets   map[string]Secret `json:"secrets,omitempty"`
+
+    // Root はproject rootの絶対パス。Loadが設定する。
+    Root string `json:"-"`
 }
 
 type Instance struct {
-    Image    string                       `json:"image"`
-    Profiles *[]string                    `json:"profiles,omitempty"`
-    Config   map[string]string            `json:"config,omitempty"`
-    Devices  map[string]map[string]string `json:"devices,omitempty"`
+    Image    string               `json:"image"`
+    Profiles *[]string            `json:"profiles,omitempty"`
+    Config   StringMap            `json:"config,omitempty"`
+    Devices  map[string]StringMap `json:"devices,omitempty"`
 }
 ```
 
@@ -160,7 +168,7 @@ func (s *Scalar) UnmarshalJSON(b []byte) error {
 
 ### 7.3.4 ステップのデコード
 
-`provision[]` は `run` と `ansible` の判別を伴うため、
+`provision[]` は `run` / `ansible` / `galaxy` の判別を伴うため、
 カスタムデコードを実装する。
 
 ```go
@@ -168,11 +176,12 @@ type Step struct {
     Name    string
     Run     *RunStep
     Ansible *AnsibleStep
+    Galaxy  *GalaxyStep
 }
 
 func (s *Step) UnmarshalJSON(b []byte) error {
-    // 1. run / ansible のキー存在を確認
-    // 2. 両方あれば error、両方無ければ error
+    // 1. run / ansible / galaxy のキー存在を確認
+    // 2. 2つ以上あれば error、1つも無ければ error
     // 3. run が文字列の場合は短縮形として RunStep.Script へ展開
 }
 ```

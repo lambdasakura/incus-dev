@@ -260,6 +260,11 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 	return false, nil
 }
 
+// CheckImage reports whether the image resolves.
+func (f *Fake) CheckImage(_ context.Context, ref string) error {
+	return f.record("image check %s", ref)
+}
+
 // VolumeExists reports whether the volume is registered.
 func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	if err := f.record("volume exists %s %s", pool, name); err != nil {

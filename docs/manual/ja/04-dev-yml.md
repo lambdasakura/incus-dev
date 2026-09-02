@@ -364,6 +364,9 @@ volumes:
 idevがリサイズすることもない。`incus storage volume delete` で消してから
 `idev up` を実行すると作り直される。
 
+`idev destroy --volumes` はinstanceと一緒にデータも消す。
+実行前に両方について確認を求める。
+
 **宣言から消したり名前を変えたりしてもデータは消えない。**
 idevは作成したvolumeを覚えているので、宣言から消えたものは `idev up` が警告し、
 `idev destroy --volumes` の削除対象にも残る。
@@ -383,7 +386,7 @@ secrets:
   API_TOKEN:
     env: HOST_TOKEN          # ホストの環境変数から
   DEPLOY_KEY:
-    file: ~/.config/key      # ホストのファイルから
+    file: ~/.config/key      # ホストのファイルから（~ を展開する）
   OPTIONAL_ONE:
     env: MAYBE
     optional: true           # 無くてもよい

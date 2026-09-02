@@ -91,6 +91,7 @@ func convertInstance(full *api.InstanceFull) *Instance {
 	inst := &Instance{
 		Name:            full.Name,
 		Status:          full.Status,
+		LastUsedAt:      full.LastUsedAt,
 		Profiles:        full.Profiles,
 		Config:          full.Config,
 		Devices:         convertDevices(full.Devices),
@@ -368,6 +369,15 @@ func (a *API) ProfileExists(_ context.Context, name string) (bool, error) {
 		return false, fmt.Errorf("list profiles: %w", err)
 	}
 	return slices.Contains(names, name), nil
+}
+
+// CheckImage reports whether an image reference resolves.
+//
+// rebuild destroys before it creates, so it has to know the image is there
+// while the instance still is (spec 04-cli.md 4.6).
+func (a *API) CheckImage(ctx context.Context, ref string) error {
+	_, _, err := a.Images.Resolve(ctx, ref)
+	return err
 }
 
 // VolumeExists reports whether a storage volume exists.

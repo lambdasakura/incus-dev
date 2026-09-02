@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/project"
 )
 
 // idev carries no environment-specific assets (REQ-007, spec 08-testing.md
@@ -182,5 +185,17 @@ func TestPackageDependencyDirections(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The two copies of the configuration directory's name agree.
+//
+// internal/config carries it so the packages reading dev.yml need not depend
+// on internal/project; nothing but a comment kept the values equal, and a
+// change to one would quietly stop ansible.cfg being found.
+func TestConfigDirNamesAgree(t *testing.T) {
+	if config.ConfigDir != project.ConfigDir {
+		t.Errorf("config.ConfigDir = %q, project.ConfigDir = %q, want them equal",
+			config.ConfigDir, project.ConfigDir)
 	}
 }

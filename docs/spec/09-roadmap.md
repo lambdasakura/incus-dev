@@ -54,7 +54,7 @@ idev変数の注入
 schema
 runtime
 project
-instance (image / type / profiles / config / devices)
+instance (image / profiles / config / devices)
 workspace (source / target / idmap)
 bootstrap
 provision (run / ansible)

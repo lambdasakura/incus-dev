@@ -53,7 +53,8 @@ func (a *App) Plan(ctx context.Context) error {
 		// The same warnings up gives. A preflight that stays quiet about what
 		// up would refuse to apply is not a preflight (spec 04-cli.md 4.8).
 		a.pruneVolumeRecord(ctx, current)
-		a.warnChanges(current)
+		a.warnChanges(current, remountsHere)
+		a.warnRestartNeeded(current, plan)
 	}
 
 	existing, err := a.existingVolumes(ctx)
@@ -138,6 +139,9 @@ func volumeActions(cfg *config.Config, name string, existing map[string]bool) []
 		vol := cfg.Volumes[key]
 		pool, volume := vol.PoolOrDefault(), volumeName(name, key)
 		if existing[pool+"/"+volume] {
+			// Adoption is worth saying: it puts data idev did not create under
+			// `idev destroy --volumes`.
+			out = append(out, fmt.Sprintf("Use existing volume %s on pool %s", volume, pool))
 			continue
 		}
 		out = append(out, fmt.Sprintf("Create volume %s on pool %s", volume, pool))

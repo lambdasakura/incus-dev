@@ -40,6 +40,10 @@ scope: branch  dev-example-project-feature-x    ブランチごと
 
 Incusのinstance名制約（長さ、使用可能文字）に適合するよう正規化する。
 
+ただし `project.name` 自体はスキーマが制限しており（03-configuration.md 3.5）、
+既にinstance名として使える形に限られる。正規化が実際に効くのは
+`scope: path` / `branch` の suffix 側である。
+
 ---
 
 ## 5.2 idevが管理するinstanceの識別
@@ -52,7 +56,7 @@ user.incus-dev.root    = /home/user/src/example-project
 user.incus-dev.schema  = 1
 user.incus-dev.image   = images:ubuntu/24.04
 user.incus-dev.volumes = default/dev-example-project-cache
-user.incus-dev.restart-pending = security.nesting
+user.incus-dev.restart-pending = 2026-09-01T00:00:00Z|security.nesting
 ```
 
 目的：
@@ -61,6 +65,10 @@ user.incus-dev.restart-pending = security.nesting
 - 名前衝突時に、無関係なinstanceを破壊しないようにする
 
 `user.incus-dev.root` が現在のproject rootと食い違う場合は警告する。
+`up` だけでなく、instanceを操作するすべてのコマンド（`shell` / `exec` /
+`provision` / `destroy` / `rebuild` / `snapshot`）で警告する。
+workspaceは最後に `up` を実行したcheckoutを指しており、
+`idev exec -- rm -rf build` が別のcheckoutのツリーを消しうるためである。
 既定の `project.scope: name` では同じプロジェクトの複数checkoutが
 1つのinstanceを共有する設計であり、`idev up` はworkspaceを最後に実行した
 checkoutへ向け直す。黙って向け直すと、もう一方のcheckoutで作業している人が
@@ -197,12 +205,18 @@ idev up --restart
 再起動は明示的な指示があった場合のみ行う。
 
 **再起動が必要であるという事実は instance へ記録する**
-（`user.incus-dev.restart-pending`）。警告を出すのは変更を書き込んだ回であり、
+（`user.incus-dev.restart-pending`、`<適用時点の起動時刻>|<キー>` の形）。警告を出すのは変更を書き込んだ回であり、
 利用者がその案内に従って `idev up --restart` を実行する頃には、
 宣言とinstanceのconfigは既に一致していて比較対象が残っていないためである。
 記録が無いと、案内されたコマンドが何もせずに終わる。
 
-記録は再起動に成功した時点で消す。
+記録は再起動に成功した時点で消す。停止中のinstanceに対しても消す
+（この後の起動で反映されるため）。
+
+利用者が `incus restart` で再起動した場合や、ホスト再起動でinstanceが
+自動起動した場合も反映は済んでいる。記録した起動時刻より instance の
+起動時刻が新しければ、記録は無効とみなす。これが無いと、既に反映済みの
+変更について警告を出し続けることになる。
 
 停止も同じ理由で **正常停止を先に試みる**。ただし応答しないinstanceで
 固まらないよう待ち時間には上限（30秒）を設け、超えた場合は強制停止する。
@@ -277,6 +291,9 @@ type Client interface {
 
     ProfileExists(ctx context.Context, name string) (bool, error)
 
+    // CheckImage は image 参照が解決できるかを、何も作らずに確かめる。
+    CheckImage(ctx context.Context, ref string) error
+
     VolumeExists(ctx context.Context, pool, name string) (bool, error)
     CreateVolume(ctx context.Context, pool, name string, config map[string]string) error
     DeleteVolume(ctx context.Context, pool, name string) error
@@ -299,6 +316,9 @@ type ExecOptions struct {
     Cwd    string
     User   string
     TTY    bool // idev shell が端末に接続されている場合のみ true
+    // Term はホストの端末種別（TERM）。TTYを割り当てる場合のみ渡す。
+    // これが無いと vim や less が端末を判別できない。
+    Term   string
     Stdin  io.Reader
     Stdout io.Writer
     Stderr io.Writer

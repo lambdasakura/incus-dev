@@ -542,6 +542,28 @@ func TestAPIStopDoesNotForceAfterCancellation(t *testing.T) {
 	}
 }
 
+// The image is resolved without creating anything, so rebuild can check it
+// while the old instance is still there.
+func TestAPICheckImage(t *testing.T) {
+	f := newFakeServer()
+	a, images := newAPI(f)
+
+	if err := a.CheckImage(context.Background(), "images:alpine/3.21"); err != nil {
+		t.Errorf("CheckImage() error = %v", err)
+	}
+	if images.ref != "images:alpine/3.21" {
+		t.Errorf("resolved = %q, want the declared reference", images.ref)
+	}
+	if len(f.instances) != 0 {
+		t.Error("CheckImage created something")
+	}
+
+	images.err = errAPI
+	if err := a.CheckImage(context.Background(), "images:alpine/3.21"); !errors.Is(err, errAPI) {
+		t.Errorf("error = %v, want %v", err, errAPI)
+	}
+}
+
 func TestAPIStopAlreadyStopped(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{}).Status = "Stopped"
