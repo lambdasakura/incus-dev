@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
 )
 
 var errInjected = errors.New("injected")
@@ -44,19 +44,19 @@ func TestFakeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !f.Instances["dev-x"].IsRunning() {
-		t.Error("StartInstance() で Running にならない")
+		t.Error("StartInstance() did not move it to Running")
 	}
 	if err := f.StopInstance(ctx, "dev-x"); err != nil {
 		t.Fatal(err)
 	}
 	if f.Instances["dev-x"].IsRunning() {
-		t.Error("StopInstance() で Stopped にならない")
+		t.Error("StopInstance() did not move it to Stopped")
 	}
 	if err := f.DeleteInstance(ctx, "dev-x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.Instances) != 0 {
-		t.Errorf("DeleteInstance() 後に残っている: %v", f.Instances)
+		t.Errorf("still present after DeleteInstance(): %v", f.Instances)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestFakeConfigAndDevices(t *testing.T) {
 		t.Fatalf("ApplyDevices(nil) error = %v", err)
 	}
 	if len(f.Calls) != 0 {
-		t.Errorf("空の適用で呼び出しを記録している: %v", f.Calls)
+		t.Errorf("recorded a call for an empty apply: %v", f.Calls)
 	}
 
 	if err := f.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}); err != nil {
@@ -81,13 +81,13 @@ func TestFakeConfigAndDevices(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := f.Instances["dev-x"].Config["a"]; ok {
-		t.Error("UnsetConfig() で削除されていない")
+		t.Error("UnsetConfig() did not remove it")
 	}
 	if err := f.UnsetConfig(ctx, "dev-x", nil); err != nil {
 		t.Fatalf("UnsetConfig(nil) error = %v", err)
 	}
 
-	// 本物同様、宣言されていないキーは残す
+	// As the real thing does, keys that were not declared stay.
 	dev := map[string]incus.Device{"ws": {"type": "disk", "path": "/ws", "shift": "true"}}
 	if err := f.ApplyDevices(ctx, "dev-x", dev); err != nil {
 		t.Fatal(err)
@@ -97,15 +97,15 @@ func TestFakeConfigAndDevices(t *testing.T) {
 	}
 	got := f.Instances["dev-x"].Devices["ws"]
 	if got["path"] != "/ws2" || got["shift"] != "true" {
-		t.Errorf("device = %v, 宣言外のキーは残すこと", got)
+		t.Errorf("device = %v, want undeclared keys kept", got)
 	}
 
-	// 型が変われば作り直す
+	// A changed type means a recreated device.
 	if err := f.ApplyDevices(ctx, "dev-x", map[string]incus.Device{"ws": {"type": "proxy"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := f.Instances["dev-x"].Devices["ws"]["path"]; ok {
-		t.Errorf("device = %v, 型変更時は作り直すこと", f.Instances["dev-x"].Devices["ws"])
+		t.Errorf("device = %v, want it recreated when the type changed", f.Instances["dev-x"].Devices["ws"])
 	}
 }
 
@@ -128,14 +128,14 @@ func TestFakeExec(t *testing.T) {
 	ctx := context.Background()
 	f := incustest.New()
 
-	// 実物同様、存在しない/停止中のinstanceへのexecは失敗する
+	// As the real thing does, exec fails against an absent or stopped instance.
 	if _, err := f.Exec(ctx, "dev-x", []string{"true"}, incus.ExecOptions{}); !errors.Is(err, incus.ErrInstanceNotFound) {
 		t.Errorf("Exec() error = %v", err)
 	}
 
 	f.AddInstance(&incus.Instance{Name: "dev-x", Status: "Stopped"})
 	if _, err := f.Exec(ctx, "dev-x", []string{"true"}, incus.ExecOptions{}); err == nil {
-		t.Error("停止中のinstanceでは失敗すること")
+		t.Error("want a failure against a stopped instance")
 	}
 
 	f.Instances["dev-x"].Status = "Running"
@@ -145,7 +145,7 @@ func TestFakeExec(t *testing.T) {
 
 	f.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 7, nil }
 	if code, _ := f.Exec(ctx, "dev-x", []string{"true"}, incus.ExecOptions{}); code != 7 {
-		t.Errorf("ExecFunc の結果を返すこと: %d", code)
+		t.Errorf("want the result of ExecFunc: %d", code)
 	}
 }
 
@@ -154,10 +154,10 @@ func TestFakeProfilesAndWaitReady(t *testing.T) {
 	f := incustest.New()
 
 	if ok, _ := f.ProfileExists(ctx, "default"); !ok {
-		t.Error("既定のProfileが存在しない")
+		t.Error("the default profile is missing")
 	}
 	if ok, _ := f.ProfileExists(ctx, "missing"); ok {
-		t.Error("存在しないProfileを存在すると判定している")
+		t.Error("reported a profile that does not exist as existing")
 	}
 
 	if err := f.WaitReady(ctx, "dev-x", incus.WaitOptions{}); err != nil {
@@ -165,7 +165,7 @@ func TestFakeProfilesAndWaitReady(t *testing.T) {
 	}
 	f.FailReady = true
 	if err := f.WaitReady(ctx, "dev-x", incus.WaitOptions{}); err == nil {
-		t.Error("FailReady 時は失敗すること")
+		t.Error("want a failure while FailReady is set")
 	}
 }
 
@@ -211,7 +211,7 @@ func TestFakeCalled(t *testing.T) {
 	f := incustest.New()
 
 	if f.Called("start") {
-		t.Error("何も実行していないのに Called() が真")
+		t.Error("Called() is true though nothing ran")
 	}
 	if err := f.StartInstance(context.Background(), "dev-x"); err != nil {
 		t.Fatal(err)

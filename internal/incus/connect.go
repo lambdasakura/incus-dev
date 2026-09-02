@@ -9,30 +9,33 @@ import (
 	"github.com/lxc/incus/v6/shared/cliconfig"
 )
 
-// Target は操作対象のIncus。
+// Target is the Incus to operate on.
 type Target struct {
-	// Remote はremote名。空の場合のみ incus の既定remoteを使う。
-	// CLIの既定は "local" であり、incus remote switch の影響を受けない。
+	// Remote is the remote name. Only when it is empty is the incus default
+	// remote used. The CLI default is "local", and it is unaffected by
+	// incus remote switch.
 	Remote string
-	// Project はIncus project名。空なら default。
+	// Project is the Incus project name. Empty means default.
 	Project string
 }
 
-// cliConfig は incus コマンドの設定のうち、devkitが使う部分。
+// cliConfig is the part of the incus command's configuration devkit uses.
 type cliConfig interface {
-	// GetInstanceServer はremoteのIncus APIへ接続する。
+	// GetInstanceServer connects to a remote's Incus API.
 	GetInstanceServer(name string) (incusclient.InstanceServer, error)
-	// GetImageServer はremoteのimage配布サーバへ接続する。
+	// GetImageServer connects to a remote's image server.
 	GetImageServer(name string) (incusclient.ImageServer, error)
-	// ParseRemote は images:alpine/3.21 のような参照をremoteと名前に分ける。
+	// ParseRemote splits a reference such as images:alpine/3.21 into a remote
+	// and a name.
 	ParseRemote(raw string) (string, string, error)
 }
 
-// Connect は Incus API へ接続した Client を返す。
+// Connect returns a Client connected to the Incus API.
 //
-// remoteやimageサーバの解決には incus コマンドと同じ設定
-// （~/.config/incus/config.yml）を使う。挙動を揃えるためである。
-// パスを空にすると LoadConfig が自動判別し、設定が無ければ既定を返す。
+// It resolves remotes and image servers with the same configuration as the
+// incus command (~/.config/incus/config.yml), so that the two behave alike.
+// An empty path lets LoadConfig find it, falling back to the defaults when
+// there is no configuration at all.
 func Connect(target Target) (*API, error) {
 	config, err := cliconfig.LoadConfig("")
 	if err != nil {
@@ -61,15 +64,18 @@ func connect(config cliConfig, defaultRemote string, target Target) (*API, error
 	}, nil
 }
 
-// configImageResolver は incus コマンドと同じ設定でimage参照を解決する。
+// configImageResolver resolves image references with the same configuration as
+// the incus command.
 type configImageResolver struct {
 	config cliConfig
 }
 
-// Resolve は images:ubuntu/24.04 のような参照から、取得元とimageを返す。
+// Resolve turns a reference such as images:ubuntu/24.04 into a source and an
+// image.
 //
-// instanceType はaliasの解決に使う。同じalias（例 images:debian/12）が
-// container用とvirtual-machine用で別のimageを指すためである。
+// instanceType is used to resolve the alias: the same alias — images:debian/12,
+// say — points at a different image for a container than for a virtual
+// machine.
 func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error) {
 	remote, name, err := r.config.ParseRemote(ref)
 	if err != nil {
@@ -84,8 +90,8 @@ func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType strin
 		return nil, nil, fmt.Errorf("connect to image server %q: %w", remote, err)
 	}
 
-	// エイリアス（ubuntu/24.04 など）を fingerprint へ解決する。
-	// 解決できない場合は fingerprint 直指定とみなす。
+	// Resolve the alias (ubuntu/24.04 and the like) to a fingerprint. When it
+	// does not resolve, take it for a fingerprint given directly.
 	fingerprint := name
 	aliasErr := error(nil)
 	if alias, _, err := server.GetImageAliasType(instanceTypeOrDefault(instanceType), name); err == nil && alias != nil {
@@ -97,7 +103,7 @@ func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType strin
 	image, _, err := server.GetImage(fingerprint)
 	if err != nil {
 		if aliasErr != nil {
-			// aliasを引けなかったことが原因のこともあるため、両方示す。
+			// The alias lookup failing may be the cause, so show both.
 			return nil, nil, fmt.Errorf("resolve image %q: %w (alias lookup failed: %w)", ref, err, aliasErr)
 		}
 		return nil, nil, fmt.Errorf("resolve image %q: %w", ref, err)
@@ -105,7 +111,7 @@ func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType strin
 	return server, image, nil
 }
 
-// instanceTypeOrDefault は空の指定を container として扱う。
+// instanceTypeOrDefault treats an empty type as container.
 func instanceTypeOrDefault(instanceType string) string {
 	if instanceType == "" {
 		return "container"

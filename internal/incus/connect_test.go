@@ -13,7 +13,7 @@ import (
 	"github.com/lxc/incus/v6/shared/cliconfig"
 )
 
-// fakeCLIConfig は incus コマンド設定のfake。
+// fakeCLIConfig is a fake of the incus command's configuration.
 type fakeCLIConfig struct {
 	instanceServer *fakeInstanceServer
 	imageServer    *fakeImageServer
@@ -22,7 +22,7 @@ type fakeCLIConfig struct {
 	imageErr    error
 	parseErr    error
 
-	// requestedRemote は GetInstanceServer に渡されたremote名。
+	// requestedRemote is the remote name GetInstanceServer was given.
 	requestedRemote string
 }
 
@@ -52,7 +52,7 @@ func (c *fakeCLIConfig) ParseRemote(raw string) (string, string, error) {
 	return remote, name, nil
 }
 
-// fakeInstanceServer は project の切り替えだけを扱う。
+// fakeInstanceServer handles nothing but switching projects.
 type fakeInstanceServer struct {
 	incusclient.InstanceServer
 	project string
@@ -62,7 +62,7 @@ func (s *fakeInstanceServer) UseProject(name string) incusclient.InstanceServer 
 	return &fakeInstanceServer{project: name}
 }
 
-// fakeImageServer は alias と image の解決だけを扱う。
+// fakeImageServer handles nothing but resolving aliases and images.
 type fakeImageServer struct {
 	incusclient.ImageServer
 	aliases map[string]string
@@ -70,8 +70,8 @@ type fakeImageServer struct {
 	err     error
 }
 
-// GetImageAliasType はinstance種別ごとに別のimageを返す。
-// 本物のsimplestreamsも種別でimageを分けている。
+// GetImageAliasType returns a different image per instance type, as the real
+// simplestreams does.
 func (s *fakeImageServer) GetImageAliasType(imageType, name string) (*api.ImageAliasesEntry, string, error) {
 	target, ok := s.aliases[imageType+"/"+name]
 	if !ok {
@@ -107,7 +107,7 @@ func newFakeCLIConfig() *fakeCLIConfig {
 	}
 }
 
-// serverProject は接続先に設定されたIncus projectを返す。
+// serverProject returns the Incus project the connection was set to.
 func serverProject(t *testing.T, client *API) string {
 	t.Helper()
 	server, ok := client.Server.(*fakeInstanceServer)
@@ -125,10 +125,10 @@ func TestConnectUsesDefaultRemote(t *testing.T) {
 		t.Fatalf("connect() error = %v", err)
 	}
 	if config.requestedRemote != "local" {
-		t.Errorf("remote = %q, 既定のremoteを使うこと", config.requestedRemote)
+		t.Errorf("remote = %q, want the default remote used", config.requestedRemote)
 	}
 	if got := serverProject(t, client); got != "" {
-		t.Errorf("project = %q, 指定が無ければ切り替えないこと", got)
+		t.Errorf("project = %q, want no switch when none was asked for", got)
 	}
 }
 
@@ -153,20 +153,21 @@ func TestConnectError(t *testing.T) {
 
 	_, err := connect(config, "local", Target{Remote: "lab"})
 	if !errors.Is(err, errAPI) || !strings.Contains(err.Error(), "lab") {
-		t.Errorf("error = %v, 接続先が分かるエラーにすること", err)
+		t.Errorf("error = %v, want an error that names what it tried to reach", err)
 	}
 }
 
-// 設定が無くてもConnectは既定値で動く（LoadConfigの既定に委ねる）
+// Connect works on the defaults with no configuration, leaving them to
+// LoadConfig.
 func TestConnectLoadsCLIConfig(t *testing.T) {
 	t.Setenv("INCUS_CONF", t.TempDir())
 
 	if _, err := Connect(Target{Remote: "does-not-exist"}); err == nil {
-		t.Error("未知のremoteはエラーになること")
+		t.Error("want an unknown remote to be an error")
 	}
 }
 
-// 設定が壊れている場合は、原因が分かるエラーにする
+// Broken configuration produces an error that says why.
 func TestConnectBrokenCLIConfig(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte("\tnot: [yaml"), 0o600); err != nil {
@@ -189,14 +190,14 @@ func TestResolveImage(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	if server != config.imageServer {
-		t.Error("image取得元が返されていない")
+		t.Error("no image source was returned")
 	}
 	if image.Fingerprint != "abc123" {
-		t.Errorf("image = %+v, aliasをfingerprintへ解決すること", image)
+		t.Errorf("image = %+v, want the alias resolved to a fingerprint", image)
 	}
 }
 
-// alias が無い場合は fingerprint 直接指定とみなす
+// Without an alias, it is taken for a fingerprint given directly.
 func TestResolveImageByFingerprint(t *testing.T) {
 	config := newFakeCLIConfig()
 	config.imageServer.images["deadbeef"] = &api.Image{Fingerprint: "deadbeef"}
@@ -211,7 +212,7 @@ func TestResolveImageByFingerprint(t *testing.T) {
 	}
 }
 
-// 同じaliasでも、instance種別によって別のimageを指す
+// The same alias points at a different image per instance type.
 func TestResolveImageByInstanceType(t *testing.T) {
 	tests := []struct {
 		instanceType string
@@ -219,7 +220,7 @@ func TestResolveImageByInstanceType(t *testing.T) {
 	}{
 		{"container", "abc123"},
 		{"virtual-machine", "vm456"},
-		{"", "abc123"}, // 未指定は container
+		{"", "abc123"}, // unspecified means container
 	}
 
 	for _, tt := range tests {
@@ -237,7 +238,7 @@ func TestResolveImageByInstanceType(t *testing.T) {
 	}
 }
 
-// aliasを引けなかった場合、その理由もエラーへ含める
+// When the alias lookup fails, the error says why that failed too.
 func TestResolveImageKeepsAliasError(t *testing.T) {
 	config := newFakeCLIConfig()
 	config.imageServer.aliases = nil
@@ -246,7 +247,7 @@ func TestResolveImageKeepsAliasError(t *testing.T) {
 		context.Background(), "images:alpine/3.21", "container")
 
 	if err == nil || !strings.Contains(err.Error(), "alias lookup") {
-		t.Errorf("error = %v, aliasの失敗も示すこと", err)
+		t.Errorf("error = %v, want the alias failure shown as well", err)
 	}
 }
 
@@ -258,24 +259,24 @@ func TestResolveImageErrors(t *testing.T) {
 		wantMsg string
 	}{
 		{
-			name:    "参照を解釈できない",
+			name:    "the reference cannot be parsed",
 			ref:     "??",
 			setup:   func(c *fakeCLIConfig) { c.parseErr = errAPI },
 			wantMsg: "parse image reference",
 		},
 		{
-			name:    "image名が無い",
+			name:    "no image name",
 			ref:     "images:",
 			wantMsg: "no image name",
 		},
 		{
-			name:    "取得元へ接続できない",
+			name:    "the source cannot be reached",
 			ref:     "images:alpine/3.21",
 			setup:   func(c *fakeCLIConfig) { c.imageErr = errAPI },
 			wantMsg: "connect to image server",
 		},
 		{
-			name:    "imageが見つからない",
+			name:    "the image is not found",
 			ref:     "images:alpine/3.21",
 			setup:   func(c *fakeCLIConfig) { c.imageServer.err = errAPI },
 			wantMsg: "resolve image",
@@ -297,5 +298,5 @@ func TestResolveImageErrors(t *testing.T) {
 	}
 }
 
-// *cliconfig.Config を cliConfig として扱えること
+// *cliconfig.Config satisfies cliConfig.
 var _ cliConfig = (*cliconfig.Config)(nil)

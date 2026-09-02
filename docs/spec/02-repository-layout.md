@@ -27,7 +27,8 @@
 
 ```text
 incus-devkit/
-├── README.md
+├── README.md                   # 英語版
+├── README.ja.md                # 日本語版
 ├── LICENSE
 ├── go.mod
 ├── go.sum
@@ -85,6 +86,20 @@ incus-devkit/
 │   ├── dev-v1.schema.json
 │   └── embed.go
 │
+├── docs/
+│   ├── README.md               # 文書の索引（英語版・日本語版）
+│   ├── troubleshooting.md      # ホスト環境起因の問題（英語版・日本語版）
+│   ├── manual/                 # 利用者向けマニュアル（英語）
+│   │   └── ja/                 # 同（日本語）
+│   └── spec/                   # 設計仕様。日本語のみ
+│
+├── skills/                     # AIエージェント向けAgent Skill
+│   ├── incus-devkit/           # 英語版
+│   │   ├── SKILL.md
+│   │   ├── references/
+│   │   └── templates/
+│   └── incus-devkit-ja/        # 日本語版
+│
 ├── examples/                   # ドキュメント用サンプル（実行時には使用しない）
 │   ├── minimal/
 │   ├── shell-based/
@@ -92,9 +107,14 @@ incus-devkit/
 │
 └── test/
     ├── examples_test.go        # examples/ が読めることの確認
+    ├── skills_test.go          # skills/ の雛形とコマンド名の確認
     ├── structure_test.go       # パッケージ依存方向の確認
     └── integration/            # //go:build integration
 ```
+
+利用者向け文書は英語と日本語の両方を保つ。英語が既定のパスで、
+日本語は `ja/` ディレクトリまたは `.ja.md` サフィックス。
+`docs/spec/` は実装判断の基準であり利用者向けではないため、日本語のみとする。
 
 Goの慣例に従い、外部から利用されない実装は `internal/` へ配置する。
 

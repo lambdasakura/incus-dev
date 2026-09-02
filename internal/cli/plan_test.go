@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
 )
 
 func mustParse(t *testing.T, yaml string) *config.Config {
@@ -23,7 +23,7 @@ func mustParse(t *testing.T, yaml string) *config.Config {
 	return c
 }
 
-// rawPlan は raw 方式で解決済みの計画。
+// rawPlan is a plan already resolved to the raw strategy.
 var rawPlan = idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1000}
 
 const planBase = `
@@ -61,7 +61,7 @@ func TestDesiredDevicesResolvesRelativeSource(t *testing.T) {
 	devices := desiredDevices(cfg, rawPlan, "dev-example-project")
 
 	if got := devices["data"]["source"]; got != "/home/u/src/example/assets" {
-		t.Errorf("source = %q, project rootを基準に解決すること", got)
+		t.Errorf("source = %q, want it resolved from the project root", got)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
 	}
 }
 
-// プロジェクトが raw.idmap を明示した場合はそちらを尊重する
+// A raw.idmap the project set explicitly wins.
 func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   config:
@@ -108,7 +108,7 @@ func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
 	}
 
 	if got := desiredConfig(cfg, plan)["raw.idmap"]; got != "both 1234 0" {
-		t.Errorf("raw.idmap = %q, 明示指定を上書きしないこと", got)
+		t.Errorf("raw.idmap = %q, want the explicit setting left alone", got)
 	}
 }
 
@@ -118,9 +118,9 @@ func TestIsManagedBy(t *testing.T) {
 		config map[string]string
 		want   bool
 	}{
-		{"管理下", map[string]string{"user.incus-devkit.project": "example-project"}, true},
-		{"印なし", map[string]string{}, false},
-		{"別プロジェクト", map[string]string{"user.incus-devkit.project": "other"}, false},
+		{"managed", map[string]string{"user.incus-devkit.project": "example-project"}, true},
+		{"unmarked", map[string]string{}, false},
+		{"a different project", map[string]string{"user.incus-devkit.project": "other"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,7 +131,8 @@ func TestIsManagedBy(t *testing.T) {
 	}
 }
 
-// devkitが適用したキーを記録し、削除に追従できるようにする（仕様 05-incus.md 5.4.4）
+// The keys devkit applied are recorded, so a removal can be followed
+// (spec 05-incus.md 5.4.4).
 func TestDesiredConfigRecordsManagedKeys(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   config:
@@ -153,7 +154,7 @@ func TestStaleConfigKeys(t *testing.T) {
 		want    []string
 	}{
 		{
-			name: "宣言から消えたキーを取り消す",
+			name: "unsets a key the declaration dropped",
 			current: map[string]string{
 				managedKeysKey:  "limits.cpu,limits.memory,raw.idmap",
 				"limits.cpu":    "8",
@@ -163,22 +164,22 @@ func TestStaleConfigKeys(t *testing.T) {
 			want: []string{"limits.memory"},
 		},
 		{
-			name: "利用者が手で足したキーには触れない",
+			name: "leaves a key the user added by hand alone",
 			current: map[string]string{
 				managedKeysKey:     "limits.cpu,raw.idmap",
-				"security.nesting": "true", // devkit管理外
+				"security.nesting": "true", // not managed by devkit
 			},
 			yaml: planBase + "  config:\n    limits.cpu: \"8\"\n",
 			want: nil,
 		},
 		{
-			name:    "記録が無い場合はidmapのみ追従する",
+			name:    "with no record, only idmap is followed",
 			current: map[string]string{idmapConfigKey: "uid 1000 0"},
 			yaml:    planBase + "workspace:\n  idmap: shift\n",
 			want:    []string{idmapConfigKey},
 		},
 		{
-			name:    "記録も差分も無ければ何もしない",
+			name:    "with neither a record nor a difference, nothing happens",
 			current: map[string]string{managedKeysKey: "raw.idmap", idmapConfigKey: "uid 1000 0"},
 			yaml:    planBase,
 			want:    nil,
@@ -201,7 +202,7 @@ func TestStaleConfigKeys(t *testing.T) {
 	}
 }
 
-// deviceも同様に、devkitが作ったものだけ削除に追従する
+// For devices too, only what devkit created is followed on removal.
 func TestStaleDevices(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   devices:
@@ -214,8 +215,8 @@ func TestStaleDevices(t *testing.T) {
 		Config: map[string]string{managedDevicesKey: "gone,keep,workspace"},
 		Devices: map[string]incus.Device{
 			"keep":      {"type": "disk"},
-			"gone":      {"type": "disk"}, // 宣言から消えた
-			"manual":    {"type": "nic"},  // 利用者が手で追加
+			"gone":      {"type": "disk"}, // dropped from the declaration
+			"manual":    {"type": "nic"},  // added by the user, by hand
 			"workspace": {"type": "disk"},
 		},
 	}
@@ -241,7 +242,7 @@ func TestDesiredConfigRecordsManagedDevices(t *testing.T) {
 	}
 }
 
-// 同一マシンで複数checkoutを扱えるようにする（仕様 05-incus.md 5.1）
+// Several checkouts can live on one machine (spec 05-incus.md 5.1).
 func TestInstanceNameScope(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -250,10 +251,10 @@ func TestInstanceNameScope(t *testing.T) {
 		branch string
 		want   string
 	}{
-		{"既定は名前のみ", "", "/home/u/a", "main", "dev-example-project"},
+		{"the name alone by default", "", "/home/u/a", "main", "dev-example-project"},
 		{"name", "name", "/home/u/a", "main", "dev-example-project"},
 		{"branch", "branch", "/home/u/a", "feature/x", "dev-example-project-feature-x"},
-		{"branchが既定名", "branch", "/home/u/a", "main", "dev-example-project-main"},
+		{"branch, on the default branch", "branch", "/home/u/a", "main", "dev-example-project-main"},
 	}
 
 	for _, tt := range tests {
@@ -275,7 +276,7 @@ func TestInstanceNameScope(t *testing.T) {
 	}
 }
 
-// path スコープは checkout ごとに異なる名前になる
+// The path scope gives a different name per checkout.
 func TestInstanceNameScopePath(t *testing.T) {
 	name := func(root string) string {
 		cfg := mustParse(t, planBase)
@@ -291,10 +292,10 @@ func TestInstanceNameScopePath(t *testing.T) {
 
 	a, b := name("/home/u/checkout-a"), name("/home/u/checkout-b")
 	if a == b {
-		t.Errorf("checkoutが違っても同じ名前になっている: %q", a)
+		t.Errorf("different checkouts got the same name: %q", a)
 	}
 	if a != name("/home/u/checkout-a") {
-		t.Error("同じパスでは同じ名前になること")
+		t.Error("want the same path to give the same name")
 	}
 	for _, got := range []string{a, b} {
 		if !strings.HasPrefix(got, "dev-example-project-") {
@@ -303,7 +304,7 @@ func TestInstanceNameScopePath(t *testing.T) {
 	}
 }
 
-// branch を取得できない場合は、対処が分かるエラーにする
+// When the branch cannot be read, the error says what to do.
 func TestInstanceNameScopeBranchError(t *testing.T) {
 	cfg := mustParse(t, planBase)
 	cfg.Project.Scope = config.ScopeBranch
@@ -314,7 +315,8 @@ func TestInstanceNameScopeBranchError(t *testing.T) {
 	}
 }
 
-// ブランチ名の取得は、コミットが無いリポジトリやdetached HEADでも成り立つこと
+// Reading the branch name works in a repository with no commits, and on a
+// detached HEAD.
 func TestGitBranch(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -323,12 +325,12 @@ func TestGitBranch(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "通常のブランチ",
+			name: "an ordinary branch",
 			fake: &runnertest.Fake{Stdout: map[string]string{"git -C /r symbolic-ref": "feature/x\n"}},
 			want: "feature/x",
 		},
 		{
-			name: "detached HEAD ではコミットハッシュ",
+			name: "a commit hash on a detached HEAD",
 			fake: &runnertest.Fake{
 				Err:    map[string]error{"git -C /r symbolic-ref": errors.New("not a symbolic ref")},
 				Stdout: map[string]string{"git -C /r rev-parse": "a8f213\n"},
@@ -336,7 +338,7 @@ func TestGitBranch(t *testing.T) {
 			want: "a8f213",
 		},
 		{
-			name:    "Gitリポジトリでない",
+			name:    "not a Git repository",
 			fake:    &runnertest.Fake{Err: map[string]error{"git": errors.New("not a git repository")}},
 			wantErr: true,
 		},

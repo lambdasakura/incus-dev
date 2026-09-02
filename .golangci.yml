@@ -60,4 +60,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/lambdasakura/incus-dev
+        - github.com/lambdasakura/incus-devkit

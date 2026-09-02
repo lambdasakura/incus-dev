@@ -8,13 +8,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
-// resolveSecrets はホスト側から秘密情報を取り込む（仕様 03-configuration.md 3.12）。
+// resolveSecrets reads the secrets from the host (spec 03-configuration.md
+// 3.12).
 //
-// dev.yml はGitへcommitされる前提なので値そのものは書かない。
-// 取得できないものがあれば、どれが足りないかをまとめて報告する。
+// dev.yml is meant to be committed, so the values are never written in it.
+// Whatever cannot be read is reported together, naming what is missing.
 func resolveSecrets(cfg *config.Config, lookupEnv func(string) (string, bool)) (map[string]string, error) {
 	if len(cfg.Secrets) == 0 {
 		return nil, nil
@@ -43,7 +44,7 @@ func resolveSecrets(cfg *config.Config, lookupEnv func(string) (string, bool)) (
 	return out, nil
 }
 
-// readSecret は1件の秘密情報を取得する。
+// readSecret reads one secret.
 func readSecret(secret config.Secret, lookupEnv func(string) (string, bool)) (string, error) {
 	if secret.Env != "" {
 		value, ok := lookupEnv(secret.Env)
@@ -57,15 +58,15 @@ func readSecret(secret config.Secret, lookupEnv func(string) (string, bool)) (st
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // 利用者が指定したファイルを読むことが目的
+	data, err := os.ReadFile(path) //nolint:gosec // reading the file the user named is the point
 	if err != nil {
 		return "", err
 	}
-	// ファイル末尾の改行は値に含めない。
+	// A trailing newline is not part of the value.
 	return strings.TrimSpace(string(data)), nil
 }
 
-// expandHome は先頭の ~ をホームディレクトリへ展開する。
+// expandHome expands a leading ~ to the home directory.
 func expandHome(path string) (string, error) {
 	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path, nil

@@ -36,11 +36,11 @@ func TestAllowsID(t *testing.T) {
 		id    int64
 		want  bool
 	}{
-		{"範囲外", "root", 1000, false},
-		{"範囲内", "root", 1000000, true},
-		{"上端", "root", 1000000 + 1000000000 - 1, true},
-		{"上端の次", "root", 1000000 + 1000000000, false},
-		{"別の所有者", "alice", 1000, false},
+		{"outside the range", "root", 1000, false},
+		{"inside the range", "root", 1000000, true},
+		{"the upper bound", "root", 1000000 + 1000000000 - 1, true},
+		{"one past the upper bound", "root", 1000000 + 1000000000, false},
+		{"a different owner", "alice", 1000, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestCheckSubIDAllowed(t *testing.T) {
 		return path
 	}
 
-	t.Run("許可されている", func(t *testing.T) {
+	t.Run("permitted", func(t *testing.T) {
 		uidPath := write("subuid-ok", "root:1000:1\n")
 		gidPath := write("subgid-ok", "root:1000:1\n")
 
@@ -70,7 +70,7 @@ func TestCheckSubIDAllowed(t *testing.T) {
 		}
 	})
 
-	t.Run("許可されていない", func(t *testing.T) {
+	t.Run("not permitted", func(t *testing.T) {
 		uidPath := write("subuid-ng", "root:1000000:1000000000\n")
 		gidPath := write("subgid-ng", "root:1000000:1000000000\n")
 
@@ -78,18 +78,19 @@ func TestCheckSubIDAllowed(t *testing.T) {
 		if err == nil {
 			t.Fatal("checkSubIDAllowed() = nil error, want error")
 		}
-		// 対処方法を示すこと
+		// It says what to do about it.
 		for _, want := range []string{"/etc/subuid", "root:1000:1", "idmap: none"} {
 			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error =\n%v\n%q を含むこと", err, want)
+				t.Errorf("error =\n%v\nwant it to contain %q", err, want)
 			}
 		}
 	})
 
-	// 検査できない場合は通す（環境によってはファイルが無い）
-	t.Run("ファイルが無い", func(t *testing.T) {
+	// It passes when there is nothing to check by; some environments have no such
+	// file.
+	t.Run("the file is missing", func(t *testing.T) {
 		if err := checkSubIDAllowed(filepath.Join(dir, "nope"), filepath.Join(dir, "nope"), 1000, 1000); err != nil {
-			t.Errorf("checkSubIDAllowed() error = %v, 検査不能なら通すこと", err)
+			t.Errorf("checkSubIDAllowed() error = %v, want it to pass when it cannot check", err)
 		}
 	})
 }
@@ -115,33 +116,33 @@ func TestCheckSubIDAllowedReportsGIDOnly(t *testing.T) {
 
 	err := checkSubIDAllowed(uidPath, gidPath, 1000, 1000)
 	if err == nil {
-		t.Fatal("error = nil, gidが許可されていなければ失敗すること")
+		t.Fatal("error = nil, want a failure when the gid is not permitted")
 	}
 	if !strings.Contains(err.Error(), "subgid") {
-		t.Errorf("error = %v, subgid を示すこと", err)
+		t.Errorf("error = %v, want it to name subgid", err)
 	}
 	if strings.Contains(err.Error(), "/etc/subuid: root:1000:1") {
-		t.Errorf("error = %v, 満たしている側は挙げないこと", err)
+		t.Errorf("error = %v, want it not to list the side that is satisfied", err)
 	}
 }
 
-// 既定の検査はホストの /etc/subuid, /etc/subgid を読む。
-// 結果は環境依存だが、失敗する場合は対処方法を示すこと。
+// The default check reads the host's /etc/subuid and /etc/subgid. The result
+// depends on the host, but a failure has to say what to do about it.
 func TestDefaultIDMapCheck(t *testing.T) {
 	err := defaultIDMapCheck(os.Getuid(), os.Getgid())
 	if err == nil {
-		t.Log("このホストでは raw.idmap が許可されています")
+		t.Log("raw.idmap is permitted on this host")
 		return
 	}
 
 	for _, want := range []string{subUIDPath, subGIDPath, "idmap: none"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %v, %q を含むこと", err, want)
+			t.Errorf("error = %v, want it to contain %q", err, want)
 		}
 	}
 }
 
-// gid側のファイルが読めない場合も判定できないため通す
+// An unreadable gid file leaves nothing to judge by either, so it passes.
 func TestCheckSubIDAllowedSkipsWhenGIDFileMissing(t *testing.T) {
 	dir := t.TempDir()
 	uidPath := filepath.Join(dir, "subuid")
@@ -150,6 +151,6 @@ func TestCheckSubIDAllowedSkipsWhenGIDFileMissing(t *testing.T) {
 	}
 
 	if err := checkSubIDAllowed(uidPath, filepath.Join(dir, "missing"), 1000, 1000); err != nil {
-		t.Errorf("checkSubIDAllowed() error = %v, 判定不能なら通すこと", err)
+		t.Errorf("checkSubIDAllowed() error = %v, want it to pass when it cannot judge", err)
 	}
 }

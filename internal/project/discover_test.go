@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-dev/internal/project"
+	"github.com/lambdasakura/incus-devkit/internal/project"
 )
 
-// mkProject は root 配下に .incus-dev/dev.yml を作る。
+// mkProject creates .incus-dev/dev.yml under root.
 func mkProject(t *testing.T, root string) {
 	t.Helper()
 	dir := filepath.Join(root, ".incus-dev")
@@ -69,7 +69,7 @@ func TestDiscoverReturnsNearestProject(t *testing.T) {
 		t.Fatalf("Discover() error = %v", err)
 	}
 	if want := mustEvalSymlinks(t, inner); got.Root != want {
-		t.Errorf("Root = %q, want %q (最も近いプロジェクトを返すこと)", got.Root, want)
+		t.Errorf("Root = %q, want %q (the nearest project must win)", got.Root, want)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestDiscoverRelativeStartDir(t *testing.T) {
 		t.Fatalf("Discover() error = %v", err)
 	}
 	if !filepath.IsAbs(got.Root) {
-		t.Errorf("Root = %q, 絶対パスであること", got.Root)
+		t.Errorf("Root = %q, want an absolute path", got.Root)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestDiscoverNotFound(t *testing.T) {
 	}
 }
 
-// .incus-dev/ はあるが dev.yml が無い場合、エラーメッセージでそれを示す。
+// With .incus-dev/ present but no dev.yml, the error message says so.
 func TestDiscoverConfigDirWithoutConfigFile(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".incus-dev"), 0o755); err != nil {
@@ -108,12 +108,12 @@ func TestDiscoverConfigDirWithoutConfigFile(t *testing.T) {
 		t.Fatalf("Discover() error = %v, want ErrNotFound", err)
 	}
 	if want := filepath.Join(".incus-dev", "dev.yml"); !strings.Contains(err.Error(), want) {
-		t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 	}
 }
 
 func TestDiscoverGitRootIsNotRequired(t *testing.T) {
-	// Gitリポジトリでなくても動作すること（REQ: Gitへの依存は副次的）
+	// It works outside a Git repository (the dependency on Git is incidental).
 	root := t.TempDir()
 	mkProject(t, root)
 
@@ -131,10 +131,10 @@ func mustEvalSymlinks(t *testing.T, p string) string {
 	return resolved
 }
 
-// 読み取れないディレクトリは「見つからない」ではなくエラーとして報告する
+// An unreadable directory is reported as an error, not as "not found".
 func TestDiscoverReportsUnreadableDirectory(t *testing.T) {
 	if os.Getuid() == 0 {
-		t.Skip("rootでは権限による失敗を再現できません")
+		t.Skip("cannot reproduce a permission failure as root")
 	}
 
 	root := t.TempDir()
@@ -152,6 +152,6 @@ func TestDiscoverReportsUnreadableDirectory(t *testing.T) {
 		t.Fatal("Discover() = nil error, want error")
 	}
 	if errors.Is(err, project.ErrNotFound) {
-		t.Errorf("error = %v, 権限の問題を ErrNotFound として報告しないこと", err)
+		t.Errorf("error = %v, want a permission problem not to be reported as ErrNotFound", err)
 	}
 }

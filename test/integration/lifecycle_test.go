@@ -11,8 +11,8 @@ import (
 	"testing"
 )
 
-// minimalYAML はidmapに依存しない最小構成。
-// idmap の検証は idmap_test.go で個別に行う。
+// minimalYAML is the smallest configuration that does not depend on idmap.
+// idmap itself is covered separately, in idmap_test.go.
 const minimalYAML = `
 schema: 1
 workspace:
@@ -32,9 +32,9 @@ func TestValidate(t *testing.T) {
 	if !strings.Contains(out, "configuration is valid") {
 		t.Errorf("validate output = %q", out)
 	}
-	// Incusへ変更を加えないこと
+	// It changes nothing in Incus.
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-		t.Errorf("validate がinstanceを作成した: %q", got)
+		t.Errorf("validate created an instance: %q", got)
 	}
 }
 
@@ -43,11 +43,12 @@ func TestValidateRejectsInvalidConfig(t *testing.T) {
 
 	out := f.mustFail("validate")
 	if !strings.Contains(out, "features") {
-		t.Errorf("validate output = %q, 未知フィールドを報告すること", out)
+		t.Errorf("validate output = %q, want the unknown field reported", out)
 	}
 }
 
-// idev up でコンテナが起動し、workspaceからホストのファイルが見えること
+// idev up starts the container, and the host's files are visible through the
+// workspace.
 func TestUpCreatesRunningInstanceWithWorkspace(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 
@@ -59,10 +60,10 @@ func TestUpCreatesRunningInstanceWithWorkspace(t *testing.T) {
 
 	out := f.mustRun("shell", "--", "cat", "/workspace/src/marker.txt")
 	if !strings.Contains(out, "hello from host") {
-		t.Errorf("workspace越しにホストのファイルが見えない: %q", out)
+		t.Errorf("the host's file is not visible through the workspace: %q", out)
 	}
 
-	// devkit管理下であることの印
+	// The mark that says devkit manages it.
 	if got := incusOut(t, "config", "get", f.instance, "user.incus-devkit.project"); got != f.project {
 		t.Errorf("user.incus-devkit.project = %q, want %q", got, f.project)
 	}
@@ -75,7 +76,7 @@ func TestStatusReportsRunningInstance(t *testing.T) {
 	out := f.mustRun("status")
 	for _, want := range []string{f.project, f.instance, "Running", "/workspace"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("status = %q, %q を含むこと", out, want)
+			t.Errorf("status = %q, want it to contain %q", out, want)
 		}
 	}
 
@@ -84,7 +85,7 @@ func TestStatusReportsRunningInstance(t *testing.T) {
 	}
 }
 
-// provisionステップが実行され、連続実行しても成功すること（REQ-005）
+// The provisioning steps run, and running them again still succeeds (REQ-005).
 func TestProvisionIsRepeatable(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 provision:
@@ -96,7 +97,7 @@ provision:
 `)
 	out := f.mustRun("up")
 	if !strings.Contains(out, "hello from host") {
-		t.Errorf("provisionステップの出力が見えない: %q", out)
+		t.Errorf("the provisioning step's output is not visible: %q", out)
 	}
 
 	f.mustRun("provision")
@@ -107,7 +108,7 @@ provision:
 	}
 }
 
-// 失敗したステップを特定できること
+// A failed step can be identified.
 func TestProvisionReportsFailingStep(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 provision:
@@ -122,22 +123,23 @@ provision:
 
 	for _, want := range []string{"broken step", "2/3"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("output = %q, %q を含むこと", out, want)
+			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
 	}
 	if _, err := f.run("shell", "--", "test", "-f", "/etc/should-not-exist"); err == nil {
-		t.Error("失敗後のステップが実行されている")
+		t.Error("a step after the failure ran")
 	}
 }
 
-// idev shell -- cmd は端末以外へ出力しても内容を壊さず、終了コードを伝播する
+// idev shell -- cmd keeps its output intact off a terminal, and passes the exit
+// code through.
 func TestShellCommandOutputAndExitCode(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 	f.mustRun("up")
 
 	out := f.mustRun("shell", "--", "printf", `a\nb\n`)
 	if strings.Contains(out, "\r") {
-		t.Errorf("output = %q, パイプ経由の出力にCRを混入させないこと", out)
+		t.Errorf("output = %q, want no carriage returns in piped output", out)
 	}
 	if out != "a\nb\n" {
 		t.Errorf("output = %q, want %q", out, "a\nb\n")
@@ -152,24 +154,24 @@ func TestShellCommandOutputAndExitCode(t *testing.T) {
 		t.Fatalf("error = %v, want exit error", err)
 	}
 	if exitErr.ExitCode() != 42 {
-		t.Errorf("exit code = %d, want 42 (コマンドの終了コードを伝播すること)", exitErr.ExitCode())
+		t.Errorf("exit code = %d, want 42 (the command's exit code must pass through)", exitErr.ExitCode())
 	}
 }
 
-// idev provision は暗黙的に up へ切り替えない（仕様 04-cli.md 4.2）
+// idev provision never silently falls back to up (spec 04-cli.md 4.2).
 func TestProvisionRequiresExistingInstance(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 
 	out := f.mustFail("provision")
 	if !strings.Contains(out, "idev up") {
-		t.Errorf("output = %q, idev up の案内を含むこと", out)
+		t.Errorf("output = %q, want it to point at idev up", out)
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-		t.Errorf("provision がinstanceを作成した: %q", got)
+		t.Errorf("provision created an instance: %q", got)
 	}
 }
 
-// 既存instanceを破壊せずに dev.yml の変更を反映すること
+// A dev.yml change is applied without destroying the existing instance.
 func TestUpReappliesConfigWithoutRecreating(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 	f.mustRun("up")
@@ -188,11 +190,11 @@ func TestUpReappliesConfigWithoutRecreating(t *testing.T) {
 		t.Errorf("limits.cpu = %q, want 2", got)
 	}
 	if got := f.mustRun("shell", "--", "cat", "/etc/idev-state"); !strings.Contains(got, "keep") {
-		t.Errorf("instanceが作り直されている: %q", got)
+		t.Errorf("the instance was recreated: %q", got)
 	}
 }
 
-// rebuild はinstance内の状態を破棄する
+// rebuild throws away the state inside the instance.
 func TestRebuildDiscardsInstanceState(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 	f.mustRun("up")
@@ -201,14 +203,14 @@ func TestRebuildDiscardsInstanceState(t *testing.T) {
 	f.mustRun("rebuild", "--force")
 
 	if _, err := f.run("shell", "--", "test", "-f", "/etc/idev-state"); err == nil {
-		t.Error("rebuild後もinstance内の状態が残っている")
+		t.Error("state inside the instance survived the rebuild")
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "ns"); !strings.Contains(got, "RUNNING") {
-		t.Errorf("rebuild後のstate = %q, want RUNNING", got)
+		t.Errorf("state after the rebuild = %q, want RUNNING", got)
 	}
 }
 
-// destroy はinstanceのみ削除し、ホスト側のソースには触れない
+// destroy deletes the instance alone, leaving the sources on the host.
 func TestDestroyKeepsHostFiles(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 	f.mustRun("up")
@@ -216,39 +218,39 @@ func TestDestroyKeepsHostFiles(t *testing.T) {
 	f.mustRun("destroy", "--force")
 
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-		t.Errorf("instanceが削除されていない: %q", got)
+		t.Errorf("the instance was not deleted: %q", got)
 	}
 	for _, path := range []string{
 		filepath.Join(f.root, "src", "marker.txt"),
 		filepath.Join(f.root, ".incus-dev", "dev.yml"),
 	} {
 		if _, err := os.Stat(path); err != nil {
-			t.Errorf("%s が削除されている: %v", path, err)
+			t.Errorf("%s was deleted: %v", path, err)
 		}
 	}
 }
 
-// devkit管理外のinstanceには触れない（仕様 05-incus.md 5.2）
+// An instance devkit does not manage is left alone (spec 05-incus.md 5.2).
 func TestRefusesUnmanagedInstance(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 
 	if out, err := runIncus("create", testImage, f.instance); err != nil {
-		t.Fatalf("準備に失敗: %v\n%s", err, out)
+		t.Fatalf("the setup failed: %v\n%s", err, out)
 	}
 
 	out := f.mustFail("up")
 	if !strings.Contains(out, "not managed by devkit") {
-		t.Errorf("output = %q, 管理外である旨を報告すること", out)
+		t.Errorf("output = %q, want it to say the instance is unmanaged", out)
 	}
 	if out := f.mustFail("destroy", "--force"); !strings.Contains(out, "not managed by devkit") {
 		t.Errorf("destroy output = %q", out)
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got == "" {
-		t.Error("管理外instanceを削除している")
+		t.Error("deleted an unmanaged instance")
 	}
 }
 
-// 存在しないProfileを指定した場合は明示的に失敗する（仕様 05-incus.md 5.3）
+// A named profile that does not exist fails explicitly (spec 05-incus.md 5.3).
 func TestFailsWhenProfileMissing(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
   profiles:
@@ -258,14 +260,15 @@ func TestFailsWhenProfileMissing(t *testing.T) {
 	out := f.mustFail("up")
 
 	if !strings.Contains(out, "idev-nonexistent-profile") {
-		t.Errorf("output = %q, 不足しているProfile名を含むこと", out)
+		t.Errorf("output = %q, want it to name the missing profile", out)
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-		t.Errorf("Profile確認前にinstanceを作成している: %q", got)
+		t.Errorf("created the instance before checking the profiles: %q", got)
 	}
 }
 
-// devkitはProfileを同梱しない。config/devicesだけで環境を宣言できること（REQ-007）
+// devkit ships no profile. config and devices alone can declare an environment
+// (REQ-007).
 func TestWorksWithoutAnyProfile(t *testing.T) {
 	f := newFixture(t, `
 schema: 1
@@ -296,11 +299,11 @@ provision:
 	}
 }
 
-// 新規作成直後でも、ネットワークを使うステップが成功すること。
+// A step that needs the network succeeds even right after creation.
 //
-// instanceが起動してコマンドを実行できるようになった時点では、
-// まだIPv4が割り当てられておらず外部へ出られない。ここを待たないと
-// パッケージ導入を伴うプロジェクトは初回のupが必ず失敗する。
+// By the time the instance has started and can run commands, no IPv4 address is
+// assigned yet and nothing reaches the outside. Without waiting here, any
+// project that installs a package fails its very first up.
 func TestFirstUpCanUseNetwork(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 provision:
@@ -311,11 +314,11 @@ provision:
 	f.mustRun("up")
 
 	if got := f.mustRun("shell", "--", "sh", "-c", "command -v jq"); !strings.Contains(got, "jq") {
-		t.Errorf("パッケージが導入されていない: %q", got)
+		t.Errorf("the package was not installed: %q", got)
 	}
 }
 
-// provision の部分実行（仕様 04-cli.md 4.2）
+// A partial provisioning run (spec 04-cli.md 4.2).
 func TestProvisionPartialExecution(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 provision:
@@ -330,12 +333,12 @@ provision:
 	f.mustRun("shell", "--", "sh", "-c", ": > /etc/idev-order")
 
 	if out := f.mustRun("provision", "--list"); !strings.Contains(out, "second") {
-		t.Errorf("--list = %q, ステップ名を示すこと", out)
+		t.Errorf("--list = %q, want it to show the step names", out)
 	}
 
 	f.mustRun("provision", "--step", "second")
 	if got := f.mustRun("shell", "--", "cat", "/etc/idev-order"); strings.TrimSpace(got) != "second" {
-		t.Errorf("実行結果 = %q, 指定したステップのみ実行すること", got)
+		t.Errorf("result = %q, want only the named step run", got)
 	}
 
 	f.mustRun("shell", "--", "sh", "-c", ": > /etc/idev-order")
@@ -343,16 +346,16 @@ provision:
 
 	want := "second\nthird"
 	if got := f.mustRun("shell", "--", "cat", "/etc/idev-order"); strings.TrimSpace(got) != want {
-		t.Errorf("実行結果 = %q, want %q", got, want)
+		t.Errorf("result = %q, want %q", got, want)
 	}
 
-	// 解決できない指定はその場で失敗する
+	// A selection that cannot be resolved fails on the spot.
 	if out := f.mustFail("provision", "--step", "no-such-step"); !strings.Contains(out, "available steps") {
-		t.Errorf("output = %q, 選べるステップを示すこと", out)
+		t.Errorf("output = %q, want it to show the steps that can be chosen", out)
 	}
 }
 
-// --dry-run はIncusへ一切変更を加えない（仕様 04-cli.md 4.8）
+// --dry-run changes nothing at all in Incus (spec 04-cli.md 4.8).
 func TestUpDryRun(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 provision:
@@ -369,21 +372,22 @@ provision:
 		"Provision step 1/1: setup (run)",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("output =\n%s\n%q を含むこと", out, want)
+			t.Errorf("output =\n%s\nwant it to contain %q", out, want)
 		}
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-		t.Fatalf("instanceを作成している: %q", got)
+		t.Fatalf("an instance was created: %q", got)
 	}
 
-	// 実際に作ったあとは、既存instanceとして扱う
+	// Once it really exists, it is treated as an existing instance.
 	f.mustRun("up")
 	if out := f.mustRun("up", "--dry-run"); !strings.Contains(out, "Use existing instance") {
-		t.Errorf("output =\n%s\n既存instanceとして扱うこと", out)
+		t.Errorf("output =\n%s\nwant it treated as an existing instance", out)
 	}
 }
 
-// 永続ボリュームは instance を作り直しても残る（仕様 03-configuration.md 3.13）
+// A persistent volume survives a recreated instance (spec 03-configuration.md
+// 3.13).
 func TestPersistentVolume(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 volumes:
@@ -400,24 +404,24 @@ volumes:
 
 	f.mustRun("rebuild", "--force")
 	if got := f.mustRun("shell", "--", "cat", "/cache/data"); !strings.Contains(got, "persistent") {
-		t.Errorf("rebuild でボリュームの中身が失われている: %q", got)
+		t.Errorf("rebuild lost the volume's contents: %q", got)
 	}
 
-	// destroy では残す
+	// destroy keeps it.
 	f.mustRun("destroy", "--force")
 	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); !strings.Contains(out, f.instance+"-cache") {
-		t.Error("destroy でボリュームまで削除している")
+		t.Error("destroy deleted the volume as well")
 	}
 
-	// --volumes を指定したときだけ消す
+	// Only --volumes deletes it.
 	f.mustRun("up")
 	f.mustRun("destroy", "--force", "--volumes")
 	if out, _ := runIncus("storage", "volume", "list", "default", "--format", "csv"); strings.Contains(out, f.instance+"-cache") {
-		t.Error("--volumes でボリュームが削除されていない")
+		t.Error("--volumes did not delete the volume")
 	}
 }
 
-// 秘密情報はホストから注入され、表示ではマスクされる
+// Secrets are injected from the host, and masked when displayed.
 func TestSecretInjection(t *testing.T) {
 	f := newFixture(t, minimalYAML+`
 secrets:
@@ -428,19 +432,19 @@ provision:
     run: printf %s "$API_TOKEN" > /etc/idev-secret
 `)
 
-	// 未設定なら instance を作る前に止まる
+	// Unset, it stops before creating an instance.
 	out := f.mustFail("up")
 	if !strings.Contains(out, "API_TOKEN") || !strings.Contains(out, "IDEV_TEST_TOKEN") {
-		t.Errorf("output = %q, 足りない秘密情報を報告すること", out)
+		t.Errorf("output = %q, want the missing secret reported", out)
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got != "" {
-		t.Error("秘密情報を解決できないのにinstanceを作成している")
+		t.Error("created the instance despite the secret not resolving")
 	}
 
 	t.Setenv("IDEV_TEST_TOKEN", "from-host-env")
 	f.mustRun("up")
 
 	if got := f.mustRun("shell", "--", "cat", "/etc/idev-secret"); got != "from-host-env" {
-		t.Errorf("コンテナ内の値 = %q", got)
+		t.Errorf("the value inside the container = %q", got)
 	}
 }

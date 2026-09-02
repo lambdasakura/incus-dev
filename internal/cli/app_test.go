@@ -12,12 +12,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-dev/internal/cli"
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
-	"github.com/lambdasakura/incus-dev/internal/provision"
-	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-devkit/internal/cli"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
 )
 
 const baseYAML = `
@@ -28,7 +28,7 @@ instance:
   image: images:ubuntu/24.04
 `
 
-// newApp はプロジェクトを作り、fakeで構成したAppを返す。
+// newApp creates a project and returns an App built on fakes.
 func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Buffer) {
 	t.Helper()
 
@@ -54,7 +54,7 @@ func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Bu
 		Runner:  &runnertest.Fake{},
 		Out:     out,
 		Verbose: false,
-		// ホストの /etc/subuid に依存しないようにする
+		// Do not depend on the host's /etc/subuid.
 		CheckIDMap:   func(int, int) error { return nil },
 		Remote:       "local",
 		IncusProject: "default",
@@ -71,12 +71,13 @@ func TestUpCreatesInstance(t *testing.T) {
 
 	inst, ok := client.Instances["dev-example-project"]
 	if !ok {
-		t.Fatalf("instanceが作成されていない: %v", client.Calls)
+		t.Fatalf("no instance was created: %v", client.Calls)
 	}
 	if inst.Status != "Running" {
 		t.Errorf("Status = %q, want Running", inst.Status)
 	}
-	// deviceは作成時に渡すため、作成 → 起動 → ready待ち の順になる
+	// The devices are passed at creation time, so the order is create, start,
+	// wait for ready.
 	want := []string{"create", "start", "waitready"}
 	var got []string
 	for _, c := range client.Calls {
@@ -87,7 +88,7 @@ func TestUpCreatesInstance(t *testing.T) {
 		}
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("操作順が違う (-want +got):\n%s\ncalls=%v", diff, client.Calls)
+		t.Errorf("wrong order of operations (-want +got):\n%s\ncalls=%v", diff, client.Calls)
 	}
 }
 
@@ -103,11 +104,11 @@ func TestUpMountsWorkspace(t *testing.T) {
 		t.Errorf("workspace device = %v", dev)
 	}
 	if dev["source"] == "" {
-		t.Errorf("workspace device source が空")
+		t.Errorf("the workspace device source is empty")
 	}
 }
 
-// 既存instanceは破壊しない（仕様 04-cli.md 4.1）
+// An existing instance is never destroyed (spec 04-cli.md 4.1).
 func TestUpDoesNotRecreateExistingInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{
@@ -120,13 +121,13 @@ func TestUpDoesNotRecreateExistingInstance(t *testing.T) {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if client.Called("create") {
-		t.Errorf("既存instanceを作り直している: %v", client.Calls)
+		t.Errorf("recreated an existing instance: %v", client.Calls)
 	}
 	if client.Called("delete") {
-		t.Errorf("既存instanceを削除している: %v", client.Calls)
+		t.Errorf("deleted an existing instance: %v", client.Calls)
 	}
 	if !client.Called("start") {
-		t.Errorf("停止中のinstanceを起動していない: %v", client.Calls)
+		t.Errorf("a stopped instance was never started: %v", client.Calls)
 	}
 }
 
@@ -148,18 +149,18 @@ func TestUpReappliesConfigToExistingInstance(t *testing.T) {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if got := client.Instances["dev-example-project"].Config["limits.cpu"]; got != "16" {
-		t.Errorf("limits.cpu = %q, want 16 (dev.ymlの変更を反映すること)", got)
+		t.Errorf("limits.cpu = %q, want 16 (the dev.yml change must be applied)", got)
 	}
 }
 
-// devkit管理外のinstanceには触れない（仕様 05-incus.md 5.2）
+// An instance devkit does not manage is left alone (spec 05-incus.md 5.2).
 func TestUpRefusesUnmanagedInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
 
 	err := app.Up(context.Background(), cli.UpOptions{})
 	if err == nil {
-		t.Fatal("Up() = nil error, 管理外instanceでは失敗すること")
+		t.Fatal("Up() = nil error, want a failure on an unmanaged instance")
 	}
 	if !strings.Contains(err.Error(), "dev-example-project") {
 		t.Errorf("error = %q", err.Error())
@@ -177,14 +178,14 @@ func TestUpSetsManagedMarkers(t *testing.T) {
 		t.Errorf("user.incus-devkit.project = %q", got)
 	}
 	if cfg["user.incus-devkit.root"] == "" {
-		t.Errorf("user.incus-devkit.root が空")
+		t.Errorf("user.incus-devkit.root is empty")
 	}
 	if got := cfg["user.incus-devkit.schema"]; got != "1" {
 		t.Errorf("user.incus-devkit.schema = %q, want 1", got)
 	}
 }
 
-// 指定Profileが存在しなければ明示的に失敗する（仕様 05-incus.md 5.3）
+// A named profile that does not exist fails explicitly (spec 05-incus.md 5.3).
 func TestUpFailsWhenProfileMissing(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+`
   profiles:
@@ -195,13 +196,13 @@ func TestUpFailsWhenProfileMissing(t *testing.T) {
 
 	err := app.Up(context.Background(), cli.UpOptions{})
 	if err == nil {
-		t.Fatal("Up() = nil error, 存在しないProfileでは失敗すること")
+		t.Fatal("Up() = nil error, want a failure on a missing profile")
 	}
 	if !strings.Contains(err.Error(), "gpu-nvidia") {
-		t.Errorf("error = %q, 不足しているProfile名を含むこと", err.Error())
+		t.Errorf("error = %q, want it to name the missing profile", err.Error())
 	}
 	if client.Called("create") {
-		t.Error("Profile確認前にinstanceを作成している")
+		t.Error("created the instance before checking the profiles")
 	}
 }
 
@@ -218,7 +219,7 @@ func TestUpAppliesNoProfiles(t *testing.T) {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=container profiles=[] noprofiles=true") {
-		t.Errorf("calls = %v, profiles: [] は --no-profiles に対応すること", client.Calls)
+		t.Errorf("calls = %v, want profiles: [] to mean no profiles at all", client.Calls)
 	}
 }
 
@@ -238,7 +239,7 @@ provision:
 		}
 	}
 	if !found {
-		t.Errorf("provisionステップが実行されていない: %v", client.Execs)
+		t.Errorf("no provisioning step ran: %v", client.Execs)
 	}
 }
 
@@ -249,20 +250,20 @@ func TestProvisionRequiresExistingInstance(t *testing.T) {
 
 	err := app.Provision(context.Background(), provision.Selection{})
 	if err == nil {
-		t.Fatal("Provision() = nil error, instanceが無ければ失敗すること")
+		t.Fatal("Provision() = nil error, want a failure without an instance")
 	}
 	if !strings.Contains(err.Error(), "idev up") {
-		t.Errorf("error = %q, idev up の案内を含むこと", err.Error())
+		t.Errorf("error = %q, want it to point at idev up", err.Error())
 	}
 }
 
-// provision はinstanceを作り直さない（仕様 04-cli.md 4.2）
+// provision never recreates the instance (spec 04-cli.md 4.2).
 func TestProvisionDoesNotCreateInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 
 	_ = app.Provision(context.Background(), provision.Selection{})
 	if client.Called("create") {
-		t.Errorf("calls = %v, provisionはinstanceを作成しないこと", client.Calls)
+		t.Errorf("calls = %v, want provision not to create an instance", client.Calls)
 	}
 }
 
@@ -281,7 +282,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if client.Called("config ") {
-		t.Errorf("calls = %v, provisionはinstance設定を変更しないこと", client.Calls)
+		t.Errorf("calls = %v, want provision not to change the instance config", client.Calls)
 	}
 }
 
@@ -300,7 +301,7 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if !client.Called("start") {
-		t.Errorf("calls = %v, 停止中なら起動すること", client.Calls)
+		t.Errorf("calls = %v, want it started when it is stopped", client.Calls)
 	}
 }
 
@@ -318,7 +319,7 @@ func TestDestroyDeletesManagedInstance(t *testing.T) {
 		t.Fatalf("Destroy() error = %v", err)
 	}
 	if _, ok := client.Instances["dev-example-project"]; ok {
-		t.Error("instanceが削除されていない")
+		t.Error("the instance was not deleted")
 	}
 }
 
@@ -327,10 +328,10 @@ func TestDestroyRefusesUnmanagedInstance(t *testing.T) {
 	client.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
 
 	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err == nil {
-		t.Fatal("Destroy() = nil error, 管理外instanceは削除しないこと")
+		t.Fatal("Destroy() = nil error, want an unmanaged instance left alone")
 	}
 	if _, ok := client.Instances["dev-example-project"]; !ok {
-		t.Error("管理外instanceを削除している")
+		t.Error("deleted an unmanaged instance")
 	}
 }
 
@@ -338,7 +339,7 @@ func TestDestroyOnMissingInstanceIsAnError(t *testing.T) {
 	app, _, _ := newApp(t, baseYAML)
 
 	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err == nil {
-		t.Fatal("Destroy() = nil error, 対象が無ければ失敗すること")
+		t.Fatal("Destroy() = nil error, want a failure when there is nothing to delete")
 	}
 }
 
@@ -369,7 +370,7 @@ func TestStatusOutput(t *testing.T) {
 		"/workspace",
 	} {
 		if !strings.Contains(text, want) {
-			t.Errorf("status =\n%s\n%q を含むこと", text, want)
+			t.Errorf("status =\n%s\nwant it to contain %q", text, want)
 		}
 	}
 }
@@ -388,9 +389,9 @@ func TestStatusJSON(t *testing.T) {
 
 	var got map[string]any
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-		t.Fatalf("JSON出力が不正: %v\n%s", err, out.String())
+		t.Fatalf("the JSON output is invalid: %v\n%s", err, out.String())
 	}
-	// 仕様 04-cli.md 4.12 の最低限のフィールド
+	// The minimum fields spec 04-cli.md 4.12 requires.
 	want := map[string]any{
 		"project":  "example-project",
 		"instance": "dev-example-project",
@@ -410,10 +411,10 @@ func TestStatusWhenInstanceMissing(t *testing.T) {
 	app, _, out := newApp(t, baseYAML)
 
 	if err := app.Status(context.Background(), false); err != nil {
-		t.Fatalf("Status() error = %v, instanceが無くても成功すること", err)
+		t.Fatalf("Status() error = %v, want success even without an instance", err)
 	}
 	if !strings.Contains(out.String(), "NOT CREATED") {
-		t.Errorf("status =\n%s\n未作成であることを示すこと", out.String())
+		t.Errorf("status =\n%s\nwant it to say nothing has been created", out.String())
 	}
 }
 
@@ -431,10 +432,10 @@ func TestRebuildRecreatesInstance(t *testing.T) {
 		t.Fatalf("Rebuild() error = %v", err)
 	}
 	if !client.Called("delete") {
-		t.Errorf("calls = %v, 削除していない", client.Calls)
+		t.Errorf("calls = %v, nothing was deleted", client.Calls)
 	}
 	if !client.Called("create") {
-		t.Errorf("calls = %v, 作成していない", client.Calls)
+		t.Errorf("calls = %v, nothing was created", client.Calls)
 	}
 }
 
@@ -455,7 +456,7 @@ func TestShellRequiresRunningInstance(t *testing.T) {
 	app, _, _ := newApp(t, baseYAML)
 
 	if err := app.Shell(context.Background(), nil); err == nil {
-		t.Fatal("Shell() = nil error, instanceが無ければ失敗すること")
+		t.Fatal("Shell() = nil error, want a failure without an instance")
 	}
 }
 
@@ -471,7 +472,7 @@ func TestShellExecutesInteractiveShell(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if len(client.Execs) == 0 {
-		t.Fatal("execされていない")
+		t.Fatal("nothing was executed")
 	}
 	if got := client.Execs[0][0]; got != "/bin/sh" && got != "/bin/bash" {
 		t.Errorf("shell = %q", got)
@@ -494,7 +495,8 @@ func TestShellRunsGivenCommand(t *testing.T) {
 	}
 }
 
-// idmap: auto でrawが使えないホストでは、shiftへ退避して動作を継続する
+// Under idmap: auto on a host where raw does not work, it falls back to shift
+// and carries on.
 func TestUpFallsBackToShiftWhenRawIDMapNotAllowed(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML)
 	client := incustest.New()
@@ -510,25 +512,26 @@ func TestUpFallsBackToShiftWhenRawIDMapNotAllowed(t *testing.T) {
 	})
 
 	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
-		t.Fatalf("Up() error = %v, shiftへ退避して継続すること", err)
+		t.Fatalf("Up() error = %v, want it to fall back to shift and carry on", err)
 	}
 
 	dev := client.Instances["dev-example-project"].Devices["workspace"]
 	if dev["shift"] != "true" {
-		t.Errorf("workspace device = %v, shift=true を使うこと", dev)
+		t.Errorf("workspace device = %v, want shift=true", dev)
 	}
 	if _, ok := client.Instances["dev-example-project"].Config["raw.idmap"]; ok {
-		t.Error("raw.idmap を設定している")
+		t.Error("raw.idmap was set")
 	}
-	// 退避したことと、より良い設定方法を利用者へ伝えること
+	// The user is told it fell back, and how to do better.
 	for _, want := range []string{"shift", "root:"} {
 		if !strings.Contains(errOut.String(), want) {
-			t.Errorf("warning = %q, %q を含むこと", errOut.String(), want)
+			t.Errorf("warning = %q, want it to contain %q", errOut.String(), want)
 		}
 	}
 }
 
-// idmap: raw を明示した場合は、使えなければinstanceを作る前に失敗する
+// With idmap: raw declared, it fails before creating an instance when raw does
+// not work.
 func TestUpFailsWhenExplicitRawIDMapNotAllowed(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML+"workspace:\n  idmap: raw\n")
 	client := incustest.New()
@@ -543,17 +546,17 @@ func TestUpFailsWhenExplicitRawIDMapNotAllowed(t *testing.T) {
 
 	err := app.Up(context.Background(), cli.UpOptions{})
 	if err == nil {
-		t.Fatal("Up() = nil error, rawを明示した場合は失敗すること")
+		t.Fatal("Up() = nil error, want a failure when raw was declared")
 	}
 	if !strings.Contains(err.Error(), "subuid") {
 		t.Errorf("error = %q", err.Error())
 	}
 	if client.Called("create") {
-		t.Errorf("calls = %v, 検査前にinstanceを作成している", client.Calls)
+		t.Errorf("calls = %v, created the instance before the check", client.Calls)
 	}
 }
 
-// idmap: none の場合は検査しない
+// Under idmap: none nothing is checked.
 func TestUpSkipsIDMapCheckWhenDisabled(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML+"workspace:\n  idmap: none\n")
 
@@ -566,11 +569,11 @@ func TestUpSkipsIDMapCheckWhenDisabled(t *testing.T) {
 	})
 
 	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
-		t.Fatalf("Up() error = %v, idmap: none では検査しないこと", err)
+		t.Fatalf("Up() error = %v, want no check under idmap: none", err)
 	}
 }
 
-// loadTestConfig は一時プロジェクトを作って設定を読み込む。
+// loadTestConfig creates a temporary project and loads its configuration.
 func loadTestConfig(t *testing.T, body string) *config.Config {
 	t.Helper()
 
@@ -589,7 +592,7 @@ func loadTestConfig(t *testing.T, body string) *config.Config {
 	return cfg
 }
 
-// idev shell -- cmd はコマンドの終了コードをそのまま返す
+// idev shell -- cmd passes the command's exit code straight through.
 func TestShellPropagatesExitCode(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{
@@ -612,15 +615,16 @@ func TestShellPropagatesExitCode(t *testing.T) {
 	}
 }
 
-// 端末に接続されていない場合、擬似端末を割り当てない（出力に\rが混入するため）
+// With nothing attached to a terminal, no pseudo-terminal is allocated; it
+// would put carriage returns into the output.
 func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 	tests := []struct {
 		name        string
 		interactive bool
 		wantTTY     bool
 	}{
-		{"端末あり", true, true},
-		{"パイプ経由", false, false},
+		{"attached to a terminal", true, true},
+		{"through a pipe", false, false},
 	}
 
 	for _, tt := range tests {
@@ -657,15 +661,15 @@ func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 			if got.TTY != tt.wantTTY {
 				t.Errorf("TTY = %v, want %v", got.TTY, tt.wantTTY)
 			}
-			// 端末を割り当てる場合も、入出力はIncusへ渡す必要がある
+			// Even with a terminal allocated, the streams have to reach Incus.
 			if got.Stdin != in || got.Stdout != out || got.Stderr != errOut {
-				t.Errorf("入出力が渡されていない: %+v", got)
+				t.Errorf("the streams were not passed: %+v", got)
 			}
 		})
 	}
 }
 
-// 非対話時も出力が中継されること
+// Output is streamed in the non-interactive case too.
 func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML)
 	client := incustest.New()
@@ -693,12 +697,12 @@ func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if !gotStdout {
-		t.Error("非対話時は標準出力を中継すること")
+		t.Error("want standard output streamed in the non-interactive case")
 	}
 }
 
-// status --json のキーは機械可読な契約なので、全フィールドを固定する
-// （仕様 04-cli.md 4.12、docs/manual/07-ai-agents.md）
+// The keys of status --json are a machine-readable contract, so every field is
+// pinned (spec 04-cli.md 4.12, docs/manual/07-ai-agents.md).
 func TestStatusJSONContract(t *testing.T) {
 	app, client, out := newApp(t, baseYAML+`
   config:
@@ -724,7 +728,7 @@ provision:
 
 	var got map[string]any
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-		t.Fatalf("JSON出力が不正: %v\n%s", err, out.String())
+		t.Fatalf("the JSON output is invalid: %v\n%s", err, out.String())
 	}
 
 	want := map[string]any{
@@ -733,7 +737,7 @@ provision:
 		"status":           "Running",
 		"image":            "images:ubuntu/24.04",
 		"workspace":        "/workspace",
-		"workspace_source": got["workspace_source"], // 一時ディレクトリのため値は問わない
+		"workspace_source": got["workspace_source"], // a temporary directory, so the value does not matter
 		"exists":           true,
 		"managed":          true,
 		"profiles":         []any{"default"},
@@ -744,10 +748,10 @@ provision:
 		"incus_project":    "default",
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("status --json のキー・値が変わっている (-want +got):\n%s", diff)
+		t.Errorf("the keys or values of status --json changed (-want +got):\n%s", diff)
 	}
 	if got["workspace_source"] == "" {
-		t.Error("workspace_source が空")
+		t.Error("workspace_source is empty")
 	}
 }
 
@@ -758,7 +762,7 @@ func TestStatusReportsProvisionStepCount(t *testing.T) {
 		t.Fatalf("Status() error = %v", err)
 	}
 	if !strings.Contains(out.String(), "3 step(s)") {
-		t.Errorf("status = %q, ステップ数を表示すること", out.String())
+		t.Errorf("status = %q, want the number of steps shown", out.String())
 	}
 }
 
@@ -769,11 +773,11 @@ func TestValidateReportsProvisionStepCount(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 	if !strings.Contains(out.String(), "2 step(s)") {
-		t.Errorf("validate = %q, ステップ数を表示すること", out.String())
+		t.Errorf("validate = %q, want the number of steps shown", out.String())
 	}
 }
 
-// shell は既定シェルを workspace 上で起動する（仕様 04-cli.md 4.3）
+// shell starts the default shell in the workspace (spec 04-cli.md 4.3).
 func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{
@@ -800,7 +804,7 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 	}
 }
 
-// instance.type が作成時の指定へ渡ること
+// instance.type reaches what is passed at creation time.
 func TestUpPassesInstanceType(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+"  type: virtual-machine\n")
 
@@ -808,11 +812,11 @@ func TestUpPassesInstanceType(t *testing.T) {
 		t.Fatalf("Up() error = %v", err)
 	}
 	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=virtual-machine") {
-		t.Errorf("calls = %v, instance.type を渡すこと", client.Calls)
+		t.Errorf("calls = %v, want instance.type passed", client.Calls)
 	}
 }
 
-// devkitがステップへ渡す文脈が正しく組み立てられること（仕様 3.10）
+// The context devkit hands to a step is assembled correctly (spec 3.10).
 func TestProvisionEnvIsPopulated(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+"provision:\n  - run: echo hi\n")
 
@@ -835,10 +839,11 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 	if got := gotEnv["DEVKIT_WORKSPACE"]; got != "/workspace" {
 		t.Errorf("DEVKIT_WORKSPACE = %q", got)
 	}
-	// workspace（コンテナ内）とworkspace_source（ホスト）を取り違えないこと
+	// workspace (inside the container) and workspace_source (on the host) are
+	// not mixed up.
 	src := gotEnv["DEVKIT_WORKSPACE_SOURCE"]
 	if src == "/workspace" || !filepath.IsAbs(src) {
-		t.Errorf("DEVKIT_WORKSPACE_SOURCE = %q, ホスト側のパスであること", src)
+		t.Errorf("DEVKIT_WORKSPACE_SOURCE = %q, want a path on the host", src)
 	}
 	if got := gotEnv["DEVKIT_INCUS_REMOTE"]; got != "local" {
 		t.Errorf("DEVKIT_INCUS_REMOTE = %q, want local", got)
@@ -848,8 +853,8 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 	}
 }
 
-// 擬似端末を割り当てる場合、ホストの TERM をコンテナへ渡すこと。
-// これが無いと vim / less などが端末を判別できない。
+// With a pseudo-terminal allocated, the host's TERM reaches the container.
+// Without it, vim and less cannot tell what terminal they are on.
 func TestShellPassesTerm(t *testing.T) {
 	cfg := loadTestConfig(t, baseYAML)
 	client := incustest.New()

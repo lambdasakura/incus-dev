@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-// ansible ステップがSSHなしでコンテナへ適用されること（REQ-004）
+// An ansible step reaches the container without SSH (REQ-004).
 func TestAnsibleProvisioning(t *testing.T) {
 	requireCommand(t, "ansible-playbook")
 	if err := exec.Command("ansible-doc", "-t", "connection", "community.general.incus").Run(); err != nil {
-		t.Skip("community.general collection が無いためスキップします")
+		t.Skip("skipping: the community.general collection is not installed")
 	}
 
 	f := newFixture(t, `
@@ -31,8 +31,8 @@ provision:
       vars: .incus-dev/ansible/vars.yml
 `)
 
-	// devkitが注入する変数とプロジェクト側の変数の両方を使う。
-	// ネットワークを必要としないタスクのみで構成する。
+	// Use both the variables devkit injects and the project's own. Keep to
+	// tasks that need no network.
 	writeFile(t, filepath.Join(f.root, ".incus-dev", "ansible", "site.yml"), `---
 - name: Provision development environment
   hosts: dev
@@ -61,30 +61,30 @@ provision:
 
 	got := f.mustRun("shell", "--", "cat", "/etc/idev-ansible-marker")
 	if !strings.Contains(got, f.project) {
-		t.Errorf("marker = %q, devkit変数が渡っていない", got)
+		t.Errorf("marker = %q, the devkit variables never arrived", got)
 	}
 	if !strings.Contains(got, "konnichiwa") {
-		t.Errorf("marker = %q, プロジェクトのvarsが渡っていない", got)
+		t.Errorf("marker = %q, the project's vars never arrived", got)
 	}
 
-	// SSH Serverを導入していないこと（REQ-004）
+	// No SSH server was installed (REQ-004).
 	if _, err := f.run("shell", "--", "sh", "-c", "command -v sshd"); err == nil {
-		t.Error("sshd が導入されている")
+		t.Error("sshd was installed")
 	}
 
-	// 再実行できること（REQ-005）
+	// It can be run again (REQ-005).
 	f.mustRun("provision")
 }
 
-// 既定bootstrapがPythonを導入し、ansibleステップが動作すること
-// （仕様 06-provisioning.md 6.3.2、REQ-007の唯一の例外）
+// The default bootstrap installs Python and the ansible step works
+// (spec 06-provisioning.md 6.3.2; the sole exception to REQ-007).
 func TestDefaultBootstrapInstallsPython(t *testing.T) {
 	requireCommand(t, "ansible-playbook")
 	if err := exec.Command("ansible-doc", "-t", "connection", "community.general.incus").Run(); err != nil {
-		t.Skip("community.general collection が無いためスキップします")
+		t.Skip("skipping: the community.general collection is not installed")
 	}
 
-	// python3 を含まないDebian系イメージを使う
+	// Use a Debian-family image without python3.
 	f := newFixture(t, `
 schema: 1
 project:
@@ -118,11 +118,11 @@ provision:
 		t.Errorf("marker = %q", got)
 	}
 	if _, err := f.run("shell", "--", "sh", "-c", "command -v python3"); err != nil {
-		t.Error("既定bootstrapがpython3を導入していない")
+		t.Error("the default bootstrap did not install python3")
 	}
 }
 
-// bootstrap: [] は既定bootstrapを無効化する（仕様 06-provisioning.md 6.3.3）
+// bootstrap: [] disables the default bootstrap (spec 06-provisioning.md 6.3.3).
 func TestBootstrapCanBeDisabled(t *testing.T) {
 	f := newFixture(t, `
 schema: 1
@@ -138,13 +138,14 @@ provision:
 `)
 	f.mustRun("up")
 
-	// alpineには python3 が無いため、既定bootstrapが動いていれば失敗しているはず
+	// alpine has no python3, so the default bootstrap would have failed had it
+	// run.
 	if _, err := f.run("shell", "--", "sh", "-c", "command -v python3"); err == nil {
-		t.Error("bootstrap: [] を指定したのに python3 が導入されている")
+		t.Error("python3 was installed despite bootstrap: []")
 	}
 }
 
-// bootstrap は provision より先に実行される（仕様 06-provisioning.md 6.1）
+// bootstrap runs before provisioning (spec 06-provisioning.md 6.1).
 func TestBootstrapRunsBeforeProvision(t *testing.T) {
 	f := newFixture(t, `
 schema: 1

@@ -25,7 +25,7 @@ func TestRunReportsError(t *testing.T) {
 		t.Errorf("run() = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "[idev] error:") {
-		t.Errorf("stderr = %q, エラーを報告すること", stderr.String())
+		t.Errorf("stderr = %q, want the error to be reported", stderr.String())
 	}
 }
 

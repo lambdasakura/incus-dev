@@ -1,113 +1,145 @@
-# 1. 導入
+# 1. Installation
 
-## 1.1 前提
+## 1.1 Requirements
 
-| 対象 | 必要なもの |
+| Where | What you need |
 | --- | --- |
-| ホスト | Incus（動作確認は6.0系）、`idev` バイナリ |
-| ホスト（ansibleステップを使う場合のみ） | `ansible-playbook`、`community.general` collection |
-| コンテナ | なし。SSH Serverは導入しない |
+| Host | Incus (tested against the 6.0 series), and the `idev` binary |
+| Host, only for `ansible` steps | `ansible-playbook`, the `community.general` collection |
+| Container | Nothing. Do not install an SSH server |
 
-`idev` は単一の静的バイナリで、実行時に言語ランタイムを必要としない。
+`idev` is a single static binary and needs no language runtime at run time.
 
-Incusの操作はGoのclient libraryからAPIで行うため、`incus` コマンドは要らない。
-ただしremoteやimageの解決には `incus` コマンドと同じ設定
-（`~/.config/incus/config.yml`）を読むため、
-`incus` コマンドで接続できるIncusはそのまま `idev` からも使える。
+It talks to Incus through the Go client library, so the `incus` command is not
+required. It does read the same configuration as `incus`
+(`~/.config/incus/config.yml`) to resolve remotes and images, which means any
+Incus you can reach with `incus` is reachable from `idev` as well.
 
-Ansibleを使うかどうかは **プロジェクトごとの選択** であり、
-シェルスクリプトだけで構成するなら不要。
+Whether to use Ansible is **the project's choice**. If you provision with shell
+scripts alone, you do not need it.
 
-## 1.2 Incusの準備
+## 1.2 Preparing Incus
 
-Incusが利用できることを確認する。`incus` コマンドがあるなら、それが手軽である。
+Confirm that Incus is usable. If you have the `incus` command, that is the
+easiest way.
 
 ```bash
 incus info | head -3
 incus profile list
 ```
 
-`default` profile が存在していれば、そのまま使い始められる。
+If the `default` profile exists, you can start right away.
 
-`incus` コマンドを入れていない場合は、`idev` の導入後（1.3）に
-プロジェクトのディレクトリで確認できる。
+If you have not installed the `incus` command, you can check from a project
+directory after installing `idev` (1.3).
 
 ```bash
 idev status
 ```
 
-Incusへ接続できていれば、instanceがまだ無くても状態が表示される。
-接続できない場合はその旨のエラーになる
-（[トラブルシューティング](../troubleshooting.md#6-incus-apiとの通信で失敗する) 参照）。
+If it can reach Incus, it prints the state even when no instance exists yet.
+If it cannot, it says so
+(see [troubleshooting](../troubleshooting.md#6-incus-api-calls-fail)).
 
-## 1.3 idevの導入
+## 1.3 Installing idev
+
+### From a release (recommended)
+
+Every release ships archives for Linux, macOS and Windows, on amd64 and arm64,
+plus a `checksums.txt`. Download the one for your platform, check it, and put
+the binary on your `PATH`.
 
 ```bash
-git clone <incus-devkit-repository>
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+sudo install -m 0755 idev /usr/local/bin/idev
+```
+
+On Windows, unpack the `.zip` and put `idev.exe` in a directory on `PATH`.
+
+The Incus daemon runs on Linux, but `idev` talks to it over the API, so a macOS
+or Windows machine can drive a remote Incus. `idev shell` there does not follow
+window-size changes, because Windows has no SIGWINCH.
+
+### From source
+
+```bash
+git clone https://github.com/lambdasakura/incus-devkit.git
 cd incus-devkit
 
-make build          # ./bin/idev を生成
+make build          # produces ./bin/idev
 sudo install -m 0755 bin/idev /usr/local/bin/idev
 ```
 
-Goツールチェインがある場合は以下でもよい。
+With a Go toolchain, this works too.
 
 ```bash
-make install        # $GOBIN へインストール
+make install        # into $GOBIN
 ```
 
-確認：
+Or without a checkout at all:
+
+```bash
+go install github.com/lambdasakura/incus-devkit/cmd/idev@latest
+```
+
+A binary built this way reports `dev` for `idev --version`, because the version
+is stamped in at release time.
+
+Check:
 
 ```bash
 idev --version
 idev --help
 ```
 
-## 1.4 Ansibleを使う場合
+## 1.4 If you use Ansible
 
 ```bash
 ansible-galaxy collection install community.general
 
-# 接続プラグインが利用可能か確認する
+# check the connection plugin is available
 ansible-doc -t connection community.general.incus
 ```
 
-idev はSSHを使わず、このconnection pluginでコンテナへ接続する。
-対象コンテナへSSH Serverを導入する必要はない。
+idev does not use SSH; it connects to the container through this connection
+plugin. You do not need to install an SSH server in the container.
 
-## 1.5 workspaceの所有者について（任意だが推奨）
+## 1.5 Workspace ownership (optional, but recommended)
 
-コンテナ内で作ったファイルを、ホスト側でも自分の所有にしたい場合は
-`/etc/subuid` と `/etc/subgid` へ以下を追加する。
+To own files created inside the container as yourself on the host, add the
+following to `/etc/subuid` and `/etc/subgid`.
 
 ```text
-root:1000:1        # 1000 は自分のuid（id -u）
+root:1000:1        # 1000 is your uid (id -u)
 ```
 
 ```bash
-id -u; id -g                        # 自分のuid/gidを確認
+id -u; id -g                        # your uid/gid
 grep '^root:' /etc/subuid /etc/subgid
 ```
 
-追加後、Incusの再起動は不要（コンテナ起動時に読まれる）。
+No Incus restart is needed afterwards — the file is read when the container
+starts.
 
-未設定でも `idev` は動作する。その場合はidmapped mountへ自動的に退避し、
-コンテナが作ったファイルはホスト側でrootの所有になる。
+`idev` works without this. It then falls back to an idmapped mount, and files
+the container creates are owned by root on the host.
 
-詳細は [04-dev-yml.md](04-dev-yml.md) の `workspace.idmap` と
-[トラブルシューティング](../troubleshooting.md#2-workspaceの所有者がおかしい--書き込めない) を参照。
+For details see `workspace.idmap` in [04-dev-yml.md](04-dev-yml.md) and
+[troubleshooting](../troubleshooting.md#2-workspace-is-owned-by-the-wrong-user--not-writable).
 
-## 1.6 Dockerを併用している場合
+## 1.6 If you also run Docker
 
-ホストにDockerが入っていると、コンテナから外部へ通信できなくなることがある。
-Dockerがカーネルの転送ポリシーをDROPに設定するためで、Incus側の設定では解決しない。
+With Docker installed on the host, containers may lose outbound network access.
+Docker sets the kernel's forwarding policy to DROP, and no amount of Incus
+configuration fixes that.
 
-`idev up` のprovisionでパッケージ導入が失敗する場合は
-[トラブルシューティング 1](../troubleshooting.md#1-コンテナから外部へ通信できない) を参照。
+If package installation fails during `idev up`, see
+[troubleshooting 1](../troubleshooting.md#1-no-network-access-from-the-container).
 
-## 1.7 動作確認
+## 1.7 Smoke test
 
-任意のディレクトリで最小のプロジェクトを作って確認する。
+Create a minimal project anywhere and check it works.
 
 ```bash
 mkdir -p /tmp/idev-check/.incus-dev && cd /tmp/idev-check
@@ -125,5 +157,5 @@ idev shell -- cat /etc/os-release
 idev destroy --force
 ```
 
-`idev validate` はIncusへ一切変更を加えないため、
-まずこれが通ることを確認するとよい。
+`idev validate` changes nothing in Incus, so it is a good first thing to get
+passing.

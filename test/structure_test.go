@@ -8,16 +8,17 @@ import (
 	"testing"
 )
 
-// devkitは環境固有の資産を持たない（REQ-007、仕様 08-testing.md 8.2）
+// devkit carries no environment-specific assets (REQ-007, spec 08-testing.md
+// 8.2).
 //
-// リポジトリ全体を走査する。examples/ と test/ は利用者向けサンプルと
-// テストフィクスチャなので対象外（仕様 02-repository-layout.md 2.3）。
+// It walks the whole repository. examples/ and test/ are out of scope, being
+// samples for users and test fixtures (spec 02-repository-layout.md 2.3).
 func TestNoEnvironmentSpecificAssets(t *testing.T) {
 	forbidden := map[string]string{
-		"ansible":          "共通PlaybookやRole",
-		"profiles":         "共通Incus Profile",
-		"roles":            "共通Ansible Role",
-		"requirements.yml": "共通collection定義",
+		"ansible":          "shared playbooks or roles",
+		"profiles":         "shared Incus profiles",
+		"roles":            "shared Ansible roles",
+		"requirements.yml": "a shared collection definition",
 	}
 	skipDirs := map[string]bool{
 		".git": true, "bin": true, "examples": true, "test": true, "docs": true,
@@ -39,8 +40,8 @@ func TestNoEnvironmentSpecificAssets(t *testing.T) {
 		}
 
 		if reason, bad := forbidden[d.Name()]; bad {
-			t.Errorf("%s が存在する（%s）。REQ-007により、環境固有の内容は "+
-				"devkitではなくプロジェクトの .incus-dev/ に属する", rel, reason)
+			t.Errorf("%s exists (%s). Under REQ-007, environment-specific content "+
+				"belongs in a project's .incus-dev/, not in devkit", rel, reason)
 		}
 		return nil
 	})
@@ -49,14 +50,14 @@ func TestNoEnvironmentSpecificAssets(t *testing.T) {
 	}
 }
 
-// 実装コードにOS固有のコマンドが紛れ込んでいないこと（REQ-007）。
+// No OS-specific command sneaks into the implementation (REQ-007).
 //
-// ファイル名の検査だけでは「.go の中へ直接書き足す」形の違反を防げないため、
-// パッケージマネージャの呼び出しを本文で検査する。
+// Checking file names alone would not catch "written straight into a .go", so
+// the bodies are checked for package-manager invocations.
 func TestNoOSSpecificCommandsInImplementation(t *testing.T) {
-	// 仕様 06-provisioning.md 6.3.2 が認める唯一の例外。
+	// The one exception spec 06-provisioning.md 6.3.2 allows.
 	allowed := map[string]string{
-		"internal/provision/provision.go": "既定bootstrap（上書き・無効化が可能）",
+		"internal/provision/provision.go": "the default bootstrap, which can be overridden or disabled",
 	}
 	managers := []string{"apt-get", "apt install", "dnf ", "yum ", "apk add", "pacman -S", "zypper "}
 
@@ -65,7 +66,7 @@ func TestNoOSSpecificCommandsInImplementation(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			// examples/ と docs/ と test/ は利用者向けの例なので対象外。
+			// examples/, docs/ and test/ are examples for users, and out of scope.
 			switch filepath.Base(path) {
 			case ".git", "bin", "examples", "docs", "test":
 				return filepath.SkipDir
@@ -86,11 +87,11 @@ func TestNoOSSpecificCommandsInImplementation(t *testing.T) {
 				continue
 			}
 			if reason, ok := allowed[rel]; ok {
-				t.Logf("%s: %q（%s）", rel, m, reason)
+				t.Logf("%s: %q (%s)", rel, m, reason)
 				continue
 			}
-			t.Errorf("%s が %q を含む。REQ-007により、OS固有の手順は "+
-				"devkitではなくプロジェクトの .incus-dev/ に属する", rel, m)
+			t.Errorf("%s contains %q. Under REQ-007, OS-specific steps belong in "+
+				"a project's .incus-dev/, not in devkit", rel, m)
 		}
 		return nil
 	})
@@ -99,7 +100,8 @@ func TestNoOSSpecificCommandsInImplementation(t *testing.T) {
 	}
 }
 
-// バイナリへ同梱するのはJSON Schemaのみであること（仕様 02-repository-layout.md 2.4）
+// The JSON Schema is the only thing embedded in the binary
+// (spec 02-repository-layout.md 2.4).
 func TestOnlySchemasAreEmbedded(t *testing.T) {
 	var files []string
 
@@ -113,7 +115,7 @@ func TestOnlySchemasAreEmbedded(t *testing.T) {
 			}
 			return nil
 		}
-		// テストファイルはバイナリに含まれないため対象外。
+		// Test files are not in the binary, and are out of scope.
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
@@ -132,7 +134,7 @@ func TestOnlySchemasAreEmbedded(t *testing.T) {
 
 	want := []string{"../schemas/embed.go"}
 	if len(files) != len(want) || files[0] != want[0] {
-		t.Errorf("go:embed を使うファイル = %v, want %v\n"+
-			"devkitが同梱してよいのはJSON Schemaのみ（REQ-007）", files, want)
+		t.Errorf("files using go:embed = %v, want %v\n"+
+			"the JSON Schema is the only thing devkit may embed (REQ-007)", files, want)
 	}
 }

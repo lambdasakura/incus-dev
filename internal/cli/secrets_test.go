@@ -46,7 +46,7 @@ func TestResolveSecretsWithoutDeclaration(t *testing.T) {
 	}
 }
 
-// 取得できないものは、どれが足りないかをまとめて報告する
+// Whatever cannot be read is reported together, naming what is missing.
 func TestResolveSecretsReportsMissing(t *testing.T) {
 	cfg := mustParse(t, planBase+`
 secrets:
@@ -65,15 +65,15 @@ secrets:
 	}
 	for _, want := range []string{"A", "MISSING_A", "B", "/no/such/file"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
 	}
 	if strings.Contains(err.Error(), "C ") {
-		t.Errorf("error = %q, 取得できたものは挙げないこと", err.Error())
+		t.Errorf("error = %q, want it not to list what was read successfully", err.Error())
 	}
 }
 
-// optional なものは取得できなくても失敗しない
+// An optional secret that cannot be read is not a failure.
 func TestResolveSecretsOptional(t *testing.T) {
 	cfg := mustParse(t, planBase+`
 secrets:
@@ -86,14 +86,14 @@ secrets:
 		t.Fatalf("resolveSecrets() error = %v", err)
 	}
 	if _, ok := got["MAYBE"]; ok {
-		t.Errorf("resolveSecrets() = %v, 取得できなければ含めないこと", got)
+		t.Errorf("resolveSecrets() = %v, want it left out when it cannot be read", got)
 	}
 }
 
 func TestExpandHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Skip("ホームディレクトリを取得できません")
+		t.Skip("cannot determine the home directory")
 	}
 
 	tests := map[string]string{
@@ -114,10 +114,11 @@ func TestExpandHome(t *testing.T) {
 }
 
 func TestReadSecretErrors(t *testing.T) {
-	t.Run("ホームディレクトリを解決できないパス", func(t *testing.T) {
+	t.Run("a path whose home cannot be resolved", func(t *testing.T) {
 		t.Setenv("HOME", "")
 
-		// 環境によっては HOME が空でも解決できるため、失敗する場合のみ検証する
+		// Some environments resolve it even with HOME empty, so only assert when
+		// it actually fails.
 		if _, err := expandHome("~/x"); err != nil {
 			cfg := mustParse(t, planBase+"secrets:\n  A:\n    file: ~/x\n")
 			if _, err := resolveSecrets(cfg, os.LookupEnv); err == nil {
@@ -149,6 +150,6 @@ func TestInstanceNameForRequiresBranchFunc(t *testing.T) {
 	cfg.Project.Scope = "branch"
 
 	if _, err := instanceNameFor(cfg, nil); err == nil {
-		t.Error("error = nil, branchFuncが無ければ失敗すること")
+		t.Error("error = nil, want a failure without a branchFunc")
 	}
 }

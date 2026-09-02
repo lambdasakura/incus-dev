@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
 func parse(t *testing.T, yaml string) *config.Config {
@@ -57,7 +57,7 @@ func TestParseMinimal(t *testing.T) {
 	}
 }
 
-// 省略時の既定値（仕様 3.7 / 3.6.3）
+// The defaults when things are omitted (spec 3.7 and 3.6.3).
 func TestDefaults(t *testing.T) {
 	c := parse(t, minimal)
 
@@ -73,7 +73,8 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-// profiles: [] は「Profileを適用しない」を意味し、省略とは区別する（仕様 3.6.3）
+// profiles: [] means "apply no profile", which is not the same as omitting it
+// (spec 3.6.3).
 func TestExplicitEmptyProfiles(t *testing.T) {
 	c := parse(t, minimal+`
   profiles: []
@@ -87,24 +88,24 @@ func TestExplicitEmptyProfiles(t *testing.T) {
 		t.Errorf("ProfileNames() = %v, want []", got)
 	}
 	if c.Instance.Profiles == nil {
-		t.Error("Instance.Profiles = nil, 明示的な空リストと省略は区別すること")
+		t.Error("Instance.Profiles = nil, want an explicit empty list kept distinct from an omission")
 	}
 }
 
-// bootstrap: [] は「bootstrapを行わない」を意味する（仕様 3.8）
+// bootstrap: [] means "do not bootstrap" (spec 3.8).
 func TestExplicitEmptyBootstrap(t *testing.T) {
 	c := parse(t, minimal+`
 bootstrap: []
 `)
 	if c.Bootstrap == nil {
-		t.Fatal("Bootstrap = nil, 明示的な空リストと省略は区別すること")
+		t.Fatal("Bootstrap = nil, want an explicit empty list kept distinct from an omission")
 	}
 	if len(*c.Bootstrap) != 0 {
 		t.Errorf("Bootstrap = %+v, want empty", *c.Bootstrap)
 	}
 }
 
-// Incus config値のスカラは文字列へ正規化する（仕様 3.6.4）
+// Scalar values in the Incus config are normalised to strings (spec 3.6.4).
 func TestScalarNormalization(t *testing.T) {
 	c := parse(t, minimal+`
   config:
@@ -141,7 +142,7 @@ func TestDevices(t *testing.T) {
 	}
 }
 
-// run の短縮形（仕様 3.9.1）
+// The short form of run (spec 3.9.1).
 func TestRunStepShortForm(t *testing.T) {
 	c := parse(t, minimal+`
 provision:
@@ -243,9 +244,9 @@ func TestHasAnsibleStep(t *testing.T) {
 		yaml string
 		want bool
 	}{
-		{"provisionなし", minimal, false},
-		{"runのみ", minimal + "provision:\n  - run: /bin/true\n", false},
-		{"ansibleあり", minimal + "provision:\n  - ansible:\n      playbook: p.yml\n", true},
+		{"no provision", minimal, false},
+		{"run only", minimal + "provision:\n  - run: /bin/true\n", false},
+		{"with ansible", minimal + "provision:\n  - ansible:\n      playbook: p.yml\n", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -264,100 +265,100 @@ func TestParseErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
-		want string // エラーメッセージに含まれるべき文字列
+		want string // a string the error message must contain
 	}{
 		{
-			name: "YAML構文エラー",
+			name: "YAML syntax error",
 			yaml: "schema: 1\n  bad indent: [",
 			want: "yaml",
 		},
 		{
-			name: "schema欠落",
+			name: "schema missing",
 			yaml: "project:\n  name: p\ninstance:\n  image: i\n",
 			want: "schema",
 		},
 		{
-			name: "未知のschema version",
+			name: "unknown schema version",
 			yaml: "schema: 99\nproject:\n  name: p\ninstance:\n  image: i\n",
 			want: "schema",
 		},
 		{
-			name: "project.name欠落",
+			name: "project.name missing",
 			yaml: "schema: 1\nproject: {}\ninstance:\n  image: i\n",
 			want: "name",
 		},
 		{
-			name: "instance.image欠落",
+			name: "instance.image missing",
 			yaml: "schema: 1\nproject:\n  name: p\ninstance: {}\n",
 			want: "image",
 		},
 		{
-			name: "トップレベルの未知フィールド",
+			name: "unknown top-level field",
 			yaml: minimal + "packages:\n  - jq\n",
 			want: "packages",
 		},
 		{
-			name: "instanceの未知フィールド",
+			name: "unknown field under instance",
 			yaml: minimal + "  resources:\n    cpu: 8\n",
 			want: "resources",
 		},
 		{
-			name: "featuresは廃止済み",
+			name: "features has been removed",
 			yaml: minimal + "features:\n  python:\n    version: \"3.13\"\n",
 			want: "features",
 		},
 		{
-			name: "runとansibleの同時指定",
+			name: "run and ansible together",
 			yaml: minimal + "provision:\n  - run: echo\n    ansible:\n      playbook: p.yml\n",
 			want: "provision[0]",
 		},
 		{
-			name: "runもansibleも無い",
+			name: "neither run nor ansible",
 			yaml: minimal + "provision:\n  - name: empty\n",
 			want: "provision[0]",
 		},
 		{
-			name: "bootstrapにansibleステップ",
+			name: "an ansible step in bootstrap",
 			yaml: minimal + "bootstrap:\n  - ansible:\n      playbook: p.yml\n",
 			want: "bootstrap[0]",
 		},
 		{
-			name: "ansibleステップにrun用フィールド",
+			name: "a run-only field on an ansible step",
 			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    cwd: /workspace\n",
 			want: "cwd",
 		},
 		{
-			name: "予約済みconfigキー",
+			name: "reserved config key",
 			yaml: minimal + "  config:\n    user.incus-devkit.project: x\n",
 			want: "user.incus-devkit",
 		},
 		{
-			name: "不正なproject名",
+			name: "invalid project name",
 			yaml: "schema: 1\nproject:\n  name: \"bad name!\"\ninstance:\n  image: i\n",
 			want: "name",
 		},
 		{
-			name: "不正なidmap",
+			name: "invalid idmap",
 			yaml: minimal + "workspace:\n  idmap: magic\n",
 			want: "idmap",
 		},
 		{
-			name: "不正なinstance.type",
+			name: "invalid instance.type",
 			yaml: minimal + "  type: pod\n",
 			want: "type",
 		},
 		{
-			name: "config値がオブジェクト",
+			name: "an object as a config value",
 			yaml: minimal + "  config:\n    limits.cpu:\n      nested: 1\n",
 			want: "config",
 		},
 		{
-			name: "playbook欠落のansibleステップ",
+			name: "an ansible step without a playbook",
 			yaml: minimal + "provision:\n  - ansible:\n      vars: v.yml\n",
 			want: "playbook",
 		},
 		{
-			name: "非互換なruntime version",
+			name: "incompatible runtime version",
 			yaml: "schema: 1\nruntime:\n  version: \"99.0\"\nproject:\n  name: p\ninstance:\n  image: i\n",
 			want: "runtime",
 		},
@@ -367,19 +368,19 @@ func TestParseErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := parseErr(t, tt.yaml)
 			if !strings.Contains(err.Error(), tt.want) {
-				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.want)
 			}
 		})
 	}
 }
 
-// 複数の問題をまとめて報告する（idev validate のUX）
+// Every problem is reported at once, which is what makes idev validate useful.
 func TestValidationReportsMultipleProblems(t *testing.T) {
 	err := parseErr(t, "schema: 1\nproject: {}\ninstance: {}\n")
 	msg := err.Error()
 	for _, want := range []string{"name", "image"} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("error = %q, %q を含むこと", msg, want)
+			t.Errorf("error = %q, want it to contain %q", msg, want)
 		}
 	}
 }
@@ -392,7 +393,7 @@ func TestRuntimeVersionCompatibility(t *testing.T) {
 		{"1.0", true},
 		{"1", true},
 		{"1.0.0", true},
-		{"1.99", false}, // 現行より新しいminorは満たせない
+		{"1.99", false}, // a minor newer than the current one cannot be satisfied
 		{"2.0", false},
 		{"0.9", false},
 		{"abc", false},
@@ -411,7 +412,7 @@ func TestRuntimeVersionCompatibility(t *testing.T) {
 	}
 }
 
-// 参照パスの存在検査（仕様 4.7）
+// Referenced paths are checked for existence (spec 4.7).
 func TestLoadChecksReferencedPaths(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
@@ -422,15 +423,15 @@ provision:
 
 	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
 	if err == nil {
-		t.Fatal("Load() = nil error, playbookが存在しないのでエラーになること")
+		t.Fatal("Load() = nil error, want an error because the playbook is missing")
 	}
 	if !strings.Contains(err.Error(), "site.yml") {
-		t.Errorf("error = %q, site.yml を含むこと", err.Error())
+		t.Errorf("error = %q, want it to contain site.yml", err.Error())
 	}
 
 	mustWrite(t, filepath.Join(root, ".incus-dev", "ansible", "site.yml"), "---\n")
 	if _, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml")); err != nil {
-		t.Errorf("Load() error = %v, playbookを配置したので成功すること", err)
+		t.Errorf("Load() error = %v, want success now that the playbook is in place", err)
 	}
 }
 
@@ -456,7 +457,7 @@ workspace:
 `)
 	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
 	if err == nil || !strings.Contains(err.Error(), "no-such-dir") {
-		t.Errorf("Load() error = %v, workspace.source の不在を報告すること", err)
+		t.Errorf("Load() error = %v, want the missing workspace.source reported", err)
 	}
 }
 
@@ -471,7 +472,7 @@ func TestLoadChecksRelativeDeviceSource(t *testing.T) {
 `)
 	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
 	if err == nil || !strings.Contains(err.Error(), "assets") {
-		t.Errorf("Load() error = %v, device sourceの不在を報告すること", err)
+		t.Errorf("Load() error = %v, want the missing device source reported", err)
 	}
 
 	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
@@ -482,7 +483,7 @@ func TestLoadChecksRelativeDeviceSource(t *testing.T) {
 	}
 }
 
-// 絶対パスのdevice sourceはホスト側の資源なので存在検査しない
+// An absolute device source is a host resource, so its existence is not checked.
 func TestLoadSkipsAbsoluteDeviceSource(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
@@ -493,7 +494,7 @@ func TestLoadSkipsAbsoluteDeviceSource(t *testing.T) {
       path: /data
 `)
 	if _, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml")); err != nil {
-		t.Errorf("Load() error = %v, 絶対パスは検査しないこと", err)
+		t.Errorf("Load() error = %v, want absolute paths left unchecked", err)
 	}
 }
 
@@ -507,14 +508,14 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 }
 
-// profiles: [] の場合、root diskはプロジェクト側で宣言する必要がある
+// With profiles: [], the project has to declare the root disk itself.
 func TestValidateRequiresRootDeviceWhenNoProfiles(t *testing.T) {
 	err := parseErr(t, minimal+`
   profiles: []
 `)
 	for _, want := range []string{"root", "profiles"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
 	}
 }
@@ -530,12 +531,12 @@ func TestValidateAcceptsExplicitRootDevice(t *testing.T) {
 `)
 }
 
-// Profileを使う場合はroot diskの宣言を要求しない
+// With a profile in play, no root disk declaration is required.
 func TestValidateDoesNotRequireRootDeviceWithProfiles(t *testing.T) {
 	parse(t, minimal)
 }
 
-// idmapの各モード（仕様 03-configuration.md 3.7.3）
+// Each idmap mode (spec 03-configuration.md 3.7.3).
 func TestWorkspaceIDMapModes(t *testing.T) {
 	tests := []struct {
 		value string
@@ -567,15 +568,15 @@ func TestWorkspaceIDMapModes(t *testing.T) {
 	}
 }
 
-// incusコマンドのフラグとして解釈されうるキーを拒否する
+// Keys that could be taken for flags of the incus command are rejected.
 func TestValidateRejectsFlagLikeKeys(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
 	}{
-		{"config キー", minimal + "  config:\n    \"--project\": other\n"},
-		{"device 名", minimal + "  devices:\n    \"--help\":\n      type: none\n"},
-		{"device キー", minimal + "  devices:\n    data:\n      type: disk\n      \"--force\": \"1\"\n"},
+		{"config key", minimal + "  config:\n    \"--project\": other\n"},
+		{"device name", minimal + "  devices:\n    \"--help\":\n      type: none\n"},
+		{"device key", minimal + "  devices:\n    data:\n      type: disk\n      \"--force\": \"1\"\n"},
 	}
 
 	for _, tt := range tests {
@@ -588,7 +589,8 @@ func TestValidateRejectsFlagLikeKeys(t *testing.T) {
 	}
 }
 
-// pool を伴う disk の source はストレージボリューム名なので、パスとして検査しない
+// The source of a disk with a pool is a volume name, so it is not checked as a
+// path.
 func TestLoadAllowsStorageVolumeSource(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
@@ -600,11 +602,11 @@ func TestLoadAllowsStorageVolumeSource(t *testing.T) {
       path: /data
 `)
 	if _, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml")); err != nil {
-		t.Errorf("Load() error = %v, ボリューム名をパスとして扱わないこと", err)
+		t.Errorf("Load() error = %v, want a volume name not treated as a path", err)
 	}
 }
 
-// 予約されたdevice名は使えない
+// The reserved device name cannot be used.
 func TestValidateRejectsReservedDeviceName(t *testing.T) {
 	err := parseErr(t, minimal+`
   devices:
@@ -618,7 +620,7 @@ func TestValidateRejectsReservedDeviceName(t *testing.T) {
 	}
 }
 
-// 参照先の問題は「存在しない」以外の理由も報告する
+// A problem with a referenced path is reported even when it is not "missing".
 func TestLoadReportsStatError(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
@@ -687,7 +689,7 @@ func TestWorkspaceOrDefaultPartialOverride(t *testing.T) {
 	}
 }
 
-// bootstrap 内のパスも検査する
+// Paths inside bootstrap are checked too.
 func TestLoadChecksBootstrapPaths(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
@@ -723,7 +725,7 @@ workspace:
 	}
 }
 
-// Profile名の構文を検査する（仕様 04-cli.md 4.7）
+// Profile names are checked for syntax (spec 04-cli.md 4.7).
 func TestValidateProfileNameSyntax(t *testing.T) {
 	invalid := []string{"bad name", "../escape", "-leading", "with/slash", ""}
 	for _, name := range invalid {
@@ -738,7 +740,7 @@ func TestValidateProfileNameSyntax(t *testing.T) {
 	parse(t, minimal+"  profiles:\n    - default\n    - gpu-nvidia\n    - my.profile_1\n")
 }
 
-// incusやsuのオプションとして解釈されうる値を拒否する
+// Values that could be taken for options of incus or su are rejected.
 func TestValidateRejectsFlagLikeValues(t *testing.T) {
 	tests := []struct {
 		name string
@@ -760,9 +762,9 @@ func TestValidateRejectsFlagLikeValues(t *testing.T) {
 	}
 }
 
-// root diskは「type: disk かつ path: /」で判定する（仕様 03-configuration.md 3.6.3）
+// A root disk is "type: disk and path: /" (spec 03-configuration.md 3.6.3).
 func TestValidateRootDiskRequiresRootPath(t *testing.T) {
-	// diskはあるが / を提供していない
+	// A disk, but not one that provides /.
 	err := parseErr(t, minimal+`
   profiles: []
   devices:
@@ -772,10 +774,10 @@ func TestValidateRootDiskRequiresRootPath(t *testing.T) {
       path: /data
 `)
 	if !strings.Contains(err.Error(), "root") {
-		t.Errorf("error = %q, root diskの不足を報告すること", err.Error())
+		t.Errorf("error = %q, want the missing root disk reported", err.Error())
 	}
 
-	// disk以外で path: / を持つdeviceもroot diskとは認めない
+	// A non-disk device with path: / is not a root disk either.
 	err = parseErr(t, minimal+`
   profiles: []
   devices:
@@ -788,7 +790,7 @@ func TestValidateRootDiskRequiresRootPath(t *testing.T) {
 	}
 }
 
-// incusは k=v を最初の = で分割するため、キーに = を含められない
+// incus splits k=v at the first =, so a key cannot contain one.
 func TestValidateRejectsEqualsInConfigKey(t *testing.T) {
 	err := parseErr(t, minimal+"  config:\n    \"limits.cpu=8\": \"x\"\n")
 	if !strings.Contains(err.Error(), "=") {
@@ -803,7 +805,7 @@ func TestValidateRejectsEqualsInDeviceKey(t *testing.T) {
 	}
 }
 
-// shell セクション（仕様 3.13）
+// The shell section (spec 3.13).
 func TestShellSettings(t *testing.T) {
 	c := parse(t, minimal+`
 shell:
@@ -825,14 +827,14 @@ func TestShellDefaults(t *testing.T) {
 		t.Errorf("Command = %q, want %q", sh.Command, config.DefaultShell)
 	}
 	if sh.Cwd != "/workspace" {
-		t.Errorf("Cwd = %q, workspace.target を既定にすること", sh.Cwd)
+		t.Errorf("Cwd = %q, want workspace.target as the default", sh.Cwd)
 	}
 	if sh.User != "" {
-		t.Errorf("User = %q, 既定は指定なし", sh.User)
+		t.Errorf("User = %q, want no user by default", sh.User)
 	}
 }
 
-// workspace.target を変えたら shell の既定も追従する
+// Changing workspace.target moves the shell default with it.
 func TestShellCwdFollowsWorkspace(t *testing.T) {
 	c := parse(t, minimal+"workspace:\n  target: /src\n")
 
@@ -841,7 +843,7 @@ func TestShellCwdFollowsWorkspace(t *testing.T) {
 	}
 }
 
-// incus セクション（仕様 3.13）
+// The incus section (spec 3.13).
 func TestIncusProjectSetting(t *testing.T) {
 	c := parse(t, minimal+"incus:\n  project: development\n")
 
@@ -868,7 +870,7 @@ func TestValidateShellCwdMustBeAbsolute(t *testing.T) {
 	}
 }
 
-// galaxy ステップ（仕様 06-provisioning.md 6.5.5）
+// The galaxy step (spec 06-provisioning.md 6.5.5).
 func TestGalaxyStep(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "collections: []\n")
@@ -904,22 +906,22 @@ func TestGalaxyStepErrors(t *testing.T) {
 		want string
 	}{
 		{
-			name: "requirements欠落",
+			name: "requirements missing",
 			yaml: minimal + "provision:\n  - galaxy: {}\n",
 			want: "requirements",
 		},
 		{
-			name: "runとの併用",
+			name: "together with run",
 			yaml: minimal + "provision:\n  - run: echo\n    galaxy:\n      requirements: r.yml\n",
 			want: "provision[0]",
 		},
 		{
-			name: "ansibleとの併用",
+			name: "together with ansible",
 			yaml: minimal + "provision:\n  - ansible:\n      playbook: p.yml\n    galaxy:\n      requirements: r.yml\n",
 			want: "provision[0]",
 		},
 		{
-			name: "bootstrapでは使えない",
+			name: "not allowed in bootstrap",
 			yaml: minimal + "bootstrap:\n  - galaxy:\n      requirements: r.yml\n",
 			want: "bootstrap[0]",
 		},
@@ -928,7 +930,7 @@ func TestGalaxyStepErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
-				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.want)
 			}
 		})
 	}
@@ -947,7 +949,7 @@ provision:
 	}
 }
 
-// volumes（仕様 03-configuration.md 3.16）
+// volumes (spec 03-configuration.md 3.16).
 func TestVolumes(t *testing.T) {
 	c := parse(t, minimal+`
 volumes:
@@ -962,7 +964,7 @@ volumes:
 		t.Errorf("cache.path = %q", got)
 	}
 	if got := c.Volumes["cache"].PoolOrDefault(); got != "default" {
-		t.Errorf("cache pool = %q, 既定は default", got)
+		t.Errorf("cache pool = %q, want the default pool", got)
 	}
 	if got := c.Volumes["data"].PoolOrDefault(); got != "fast" {
 		t.Errorf("data pool = %q", got)
@@ -978,11 +980,11 @@ func TestVolumeErrors(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"path欠落", minimal + "volumes:\n  cache: {}\n", "path"},
-		{"pathが相対", minimal + "volumes:\n  cache:\n    path: rel\n", "absolute"},
-		{"予約名", minimal + "volumes:\n  workspace:\n    path: /w\n", "reserved"},
+		{"path missing", minimal + "volumes:\n  cache: {}\n", "path"},
+		{"relative path", minimal + "volumes:\n  cache:\n    path: rel\n", "absolute"},
+		{"reserved name", minimal + "volumes:\n  workspace:\n    path: /w\n", "reserved"},
 		{
-			name: "deviceと衝突",
+			name: "collides with a device",
 			yaml: minimal + "  devices:\n    cache:\n      type: disk\n      source: /tmp\n      path: /c\n" +
 				"volumes:\n  cache:\n    path: /cache\n",
 			want: "conflicts",
@@ -992,13 +994,13 @@ func TestVolumeErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
-				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.want)
 			}
 		})
 	}
 }
 
-// secrets（仕様 03-configuration.md 3.12）
+// secrets (spec 03-configuration.md 3.12).
 func TestSecrets(t *testing.T) {
 	c := parse(t, minimal+`
 secrets:
@@ -1017,7 +1019,7 @@ secrets:
 		t.Errorf("DEPLOY_KEY.file = %q", got)
 	}
 	if !c.Secrets["OPTIONAL_ONE"].Optional {
-		t.Error("optional が反映されていない")
+		t.Error("optional did not take effect")
 	}
 	if got := c.Secrets["API_TOKEN"].Source(); !strings.Contains(got, "MY_TOKEN") {
 		t.Errorf("Source() = %q", got)
@@ -1030,16 +1032,16 @@ func TestSecretErrors(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{"env と file の併用", minimal + "secrets:\n  A:\n    env: X\n    file: /f\n", "mutually exclusive"},
-		{"どちらも無い", minimal + "secrets:\n  A:\n    optional: true\n", "must specify"},
-		{"devkit予約の名前", minimal + "secrets:\n  DEVKIT_TOKEN:\n    env: X\n", "reserved"},
-		{"環境変数名として不正", minimal + "secrets:\n  \"bad-name\":\n    env: X\n", "bad-name"},
+		{"env and file together", minimal + "secrets:\n  A:\n    env: X\n    file: /f\n", "mutually exclusive"},
+		{"neither given", minimal + "secrets:\n  A:\n    optional: true\n", "must specify"},
+		{"a name devkit reserves", minimal + "secrets:\n  DEVKIT_TOKEN:\n    env: X\n", "reserved"},
+		{"not a valid environment variable name", minimal + "secrets:\n  \"bad-name\":\n    env: X\n", "bad-name"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := parseErr(t, tt.yaml); !strings.Contains(err.Error(), tt.want) {
-				t.Errorf("error = %q, %q を含むこと", err.Error(), tt.want)
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.want)
 			}
 		})
 	}

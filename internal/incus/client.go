@@ -1,7 +1,7 @@
-// Package incus はIncus instanceのライフサイクル操作を集約する。
+// Package incus is where Incus instance lifecycle operations are concentrated.
 //
-// CLI層からIncusコマンド文字列を直接組み立てないための境界である
-// （仕様 05-incus.md 5.7）。
+// It is the boundary that keeps the CLI layer from assembling Incus calls
+// itself (spec 05-incus.md 5.7).
 package incus
 
 import (
@@ -11,22 +11,23 @@ import (
 	"time"
 )
 
-// ErrInstanceNotFound はinstanceが存在しないことを示す。
+// ErrInstanceNotFound reports that the instance does not exist.
 var ErrInstanceNotFound = errors.New("instance not found")
 
-// ErrNetworkNotReady はinstanceにネットワークアドレスが割り当てられなかったことを示す。
+// ErrNetworkNotReady reports that no network address was assigned to the
+// instance.
 //
-// 静的設定などアドレスが現れない構成もありうるため、
-// これを致命的な失敗として扱うかは呼び出し側が判断する。
+// Some configurations never show an address — static addressing, say — so
+// whether this is fatal is the caller's decision.
 var ErrNetworkNotReady = errors.New("network address not assigned")
 
-// Device はIncus deviceの定義（キーと値の素通し）。
+// Device is an Incus device definition: keys and values, passed through.
 type Device map[string]string
 
-// Type はdeviceの型を返す。
+// Type returns the device type.
 func (d Device) Type() string { return d["type"] }
 
-// Instance はIncus instanceの状態。
+// Instance is the state of an Incus instance.
 type Instance struct {
 	Name     string            `json:"name"`
 	Status   string            `json:"status"`
@@ -34,37 +35,37 @@ type Instance struct {
 	Profiles []string          `json:"profiles"`
 	Config   map[string]string `json:"config"`
 	Devices  map[string]Device `json:"devices"`
-	// ExpandedDevices はProfile由来を含む実効的なdevice。
+	// ExpandedDevices are the effective devices, including those from profiles.
 	ExpandedDevices map[string]Device `json:"expanded_devices"`
 	State           *InstanceState    `json:"state"`
 }
 
-// InstanceState はinstanceの実行時状態。
+// InstanceState is an instance's run-time state.
 type InstanceState struct {
 	Network map[string]NetworkState `json:"network"`
 }
 
-// NetworkState はネットワークインターフェースの状態。
+// NetworkState is the state of a network interface.
 type NetworkState struct {
 	Addresses []NetworkAddress `json:"addresses"`
 }
 
-// NetworkAddress は割り当てられたアドレス。
+// NetworkAddress is an assigned address.
 type NetworkAddress struct {
 	Family  string `json:"family"`
 	Address string `json:"address"`
 	Scope   string `json:"scope"`
 }
 
-// IsRunning はinstanceが実行中かを返す。
+// IsRunning reports whether the instance is running.
 func (i *Instance) IsRunning() bool { return i.Status == "Running" }
 
-// IsStopped はinstanceが停止しているかを返す。
+// IsStopped reports whether the instance is stopped.
 //
-// Frozen や Starting のような中間状態は「停止していない」として扱う。
+// Intermediate states such as Frozen and Starting count as not stopped.
 func (i *Instance) IsStopped() bool { return i.Status == "Stopped" }
 
-// HasNIC はネットワークインターフェースを持つかを返す。
+// HasNIC reports whether it has a network interface.
 func (i *Instance) HasNIC() bool {
 	for _, dev := range i.ExpandedDevices {
 		if dev.Type() == "nic" {
@@ -74,7 +75,7 @@ func (i *Instance) HasNIC() bool {
 	return false
 }
 
-// GlobalAddresses は割り当てられたグローバルアドレスを返す。
+// GlobalAddresses returns the global addresses that were assigned.
 func (i *Instance) GlobalAddresses() []NetworkAddress {
 	if i.State == nil {
 		return nil
@@ -94,16 +95,16 @@ func (i *Instance) GlobalAddresses() []NetworkAddress {
 	return out
 }
 
-// HasGlobalAddress はグローバルアドレスが1つでも割り当てられているかを返す。
+// HasGlobalAddress reports whether any global address was assigned.
 func (i *Instance) HasGlobalAddress() bool {
 	return len(i.GlobalAddresses()) > 0
 }
 
-// HasIPv4Address はIPv4のグローバルアドレスが割り当てられているかを返す。
+// HasIPv4Address reports whether a global IPv4 address was assigned.
 //
-// Incusの既定のブリッジではIPv6(ULA)が先に付き、その時点ではまだ
-// デフォルトルートが無い。実際に外部へ出られるのはIPv4が付いてからなので、
-// ready判定にはこちらを使う。
+// On the default Incus bridge an IPv6 (ULA) address arrives first, and at that
+// point there is still no default route. Traffic only reaches the outside once
+// IPv4 is up, so this is what readiness is judged by.
 func (i *Instance) HasIPv4Address() bool {
 	for _, addr := range i.GlobalAddresses() {
 		if addr.Family == "inet" {
@@ -113,62 +114,66 @@ func (i *Instance) HasIPv4Address() bool {
 	return false
 }
 
-// InstanceSpec はinstance作成時の指定。
+// InstanceSpec describes an instance to create.
 type InstanceSpec struct {
 	Name  string
 	Image string
-	// Type は container（既定）または virtual-machine。
+	// Type is container (the default) or virtual-machine.
 	Type string
-	// Profiles は適用するProfile名。
+	// Profiles names the profiles to apply.
 	Profiles []string
-	// NoProfiles が真の場合、Profileを一切適用しない（profiles: [] に対応）。
+	// NoProfiles applies no profile at all, matching profiles: [].
 	NoProfiles bool
 	Config     map[string]string
-	// Devices は作成時に設定するdevice。
-	// profileを適用しない場合、root diskは作成時に必要となる。
+	// Devices are set at creation time. Without a profile, the root disk has
+	// to be there from the start.
 	Devices map[string]Device
 }
 
-// ExecOptions はコンテナ内でのコマンド実行オプション。
+// ExecOptions are the options for running a command inside the container.
 type ExecOptions struct {
-	// Env は利用者が指定した環境変数。Secretを含みうるため表示時に値を隠す。
+	// Env holds user-supplied environment variables. They may be secrets, so
+	// their values are hidden when displayed.
 	Env map[string]string
-	// PublicEnv はdevkitが注入する環境変数。診断に役立つため表示する。
+	// PublicEnv holds the environment variables devkit injects. They help with
+	// diagnosis, so they are shown.
 	PublicEnv map[string]string
 	Cwd       string
 	User      string
-	// TTY が真の場合、擬似端末を割り当てて標準入出力を引き継ぐ。
+	// TTY allocates a pseudo-terminal and hands the standard streams through.
 	TTY bool
-	// Term はホスト端末の種類（TERM）。TTY割り当て時のみコンテナへ渡す。
-	// これが無いと vim / less などが端末を判別できない。
+	// Term is the host terminal type (TERM), passed to the container only when
+	// a TTY is allocated. Without it, vim and less cannot tell what terminal
+	// they are on.
 	Term   string
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 }
 
-// Snapshot はinstanceのスナップショット。
+// Snapshot is a snapshot of an instance.
 type Snapshot struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// WaitOptions はinstanceのready待ちの制御。
+// WaitOptions controls how long to wait for an instance to become ready.
 type WaitOptions struct {
-	// Timeout はコマンドを実行できるようになるまでの待ち時間。
+	// Timeout is how long to wait until commands can run.
 	Timeout time.Duration
-	// NetworkTimeout はネットワークアドレスが割り当てられるまでの待ち時間。
+	// NetworkTimeout is how long to wait for a network address.
 	NetworkTimeout time.Duration
-	// IPv4Grace はIPv6のみが割り当てられた後、IPv4を待つ時間。
-	// IPv6のみの環境で不必要に待たないよう短くする。
+	// IPv4Grace is how long to keep waiting for IPv4 once IPv6 alone has
+	// arrived. Keep it short so an IPv6-only host is not held up.
 	IPv4Grace time.Duration
 	Interval  time.Duration
 }
 
-// Client はIncus操作のインターフェース。テストではfakeへ差し替える。
+// Client is the interface to Incus. Tests replace it with a fake.
 //
-// 実装差し替えの負担を増やさないよう、実際に使う操作だけを並べる。
-// instanceの存在確認は Instance と errors.Is(ErrInstanceNotFound) で行う。
+// It lists only the operations actually used, so that replacing the
+// implementation stays cheap. Existence is checked with Instance and
+// errors.Is(ErrInstanceNotFound).
 type Client interface {
 	Instance(ctx context.Context, name string) (*Instance, error)
 

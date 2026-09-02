@@ -157,4 +157,36 @@ go test ./...
 idev validate           # examples/ 配下の各サンプルに対して
 ```
 
-`examples/` の各サンプルが常に `idev validate` を通ることを保証する。
+`examples/` の各サンプルが常に `idev validate` を通ることを保証する
+（`test/examples_test.go` が `go test ./...` の中で行うため、別ジョブは要らない）。
+
+### 8.4.1 プラットフォーム別に実行する範囲
+
+配布対象は linux / darwin / windows である（仕様 07-implementation.md 7.7）が、
+全プラットフォームで同じ範囲を実行するわけではない。
+
+| プラットフォーム | 実行する範囲 |
+| --- | --- |
+| Linux | lint、`go test ./...`、カバレッジ |
+| macOS | `go test ./...`、カバレッジ |
+| Windows | `go vet ./...`、ビルド、`idev --version` / `--help` |
+
+Windowsでunit testを実行しないのは、`internal/runner` のテストが
+`sh` / `sleep` のようなUnixのコマンドを実際に起動し、
+`internal/project` のテストがPOSIXのパーミッション（`chmod 0o000`）に
+依存しているためである。
+**カバレッジのためにこれらの検査を弱めない**（8.1「カバレッジ」参照）。
+Windows固有のソースが壊れていないことは、vetとビルドで担保する。
+
+統合テスト（8.3）はIncusを必要とするため、GitHub Actionsでは実行しない。
+Incusが利用可能なランナーを持つCI（`.gitlab-ci.yml`）側で実行する。
+
+### 8.4.2 リリース
+
+`v*` のタグをpushすると GoReleaser（`.goreleaser.yaml`）が
+linux / darwin / windows × amd64 / arm64 のアーカイブと
+`checksums.txt` を作り、GitHub Releaseへ公開する。
+
+リリース設定が壊れていないことは、通常のCIで
+`goreleaser release --snapshot` を実行して検証する。
+タグを打った時点で初めて失敗する、という状態を作らないためである。

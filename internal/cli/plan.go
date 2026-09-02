@@ -6,25 +6,26 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
 )
 
-// devkitが管理用に設定するinstance config（仕様 05-incus.md 5.2）。
+// The instance config devkit sets for its own bookkeeping (spec 05-incus.md 5.2).
 const (
 	managedProjectKey = config.ReservedConfigPrefix + "project"
 	managedRootKey    = config.ReservedConfigPrefix + "root"
 	managedSchemaKey  = config.ReservedConfigPrefix + "schema"
-	// managedKeysKey はdevkitが適用したinstance configキーの記録。
+	// managedKeysKey records which instance config keys devkit applied.
 	managedKeysKey = config.ReservedConfigPrefix + "managed"
-	// managedDevicesKey はdevkitが作成したdevice名の記録。
+	// managedDevicesKey records which devices devkit created.
 	managedDevicesKey = config.ReservedConfigPrefix + "devices"
 )
 
-// idmapConfigKey は非特権コンテナでのuid/gid対応付けに使うキー。
+// idmapConfigKey is the key that maps uids and gids in an unprivileged
+// container.
 const idmapConfigKey = "raw.idmap"
 
-// desiredConfig は dev.yml から適用すべきinstance configを組み立てる。
+// desiredConfig builds the instance config to apply, from dev.yml.
 func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	out := make(map[string]string, len(cfg.Instance.Config)+4)
 	for k, v := range cfg.Instance.Config {
@@ -35,20 +36,21 @@ func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	out[managedRootKey] = cfg.Root
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
 
-	// raw方式ではホストの実行ユーザーをコンテナのrootへ対応付ける。
+	// The raw strategy maps the invoking host user onto root in the container.
 	if v := plan.rawIDMap(); v != "" {
 		out[idmapConfigKey] = v
 	}
 
-	// 適用したキーとdeviceを記録し、宣言から消えたときに追従できるようにする
-	// （仕様 05-incus.md 5.4.4）。記録用のキー自身は含めない。
+	// Record the keys and devices applied, so that dropping one from the
+	// declaration can be followed (spec 05-incus.md 5.4.4). The bookkeeping
+	// keys themselves are not included.
 	out[managedKeysKey] = strings.Join(managedNames(out), ",")
 	out[managedDevicesKey] = strings.Join(managedDeviceNames(cfg), ",")
 
 	return out
 }
 
-// managedDeviceNames はdevkitが作成するdevice名を返す。
+// managedDeviceNames returns the devices devkit creates.
 func managedDeviceNames(cfg *config.Config) []string {
 	names := []string{config.WorkspaceDeviceName}
 	names = append(names, slices.Collect(maps.Keys(cfg.Instance.Devices))...)
@@ -58,7 +60,8 @@ func managedDeviceNames(cfg *config.Config) []string {
 	return names
 }
 
-// managedNames は記録対象のconfigキーを返す（devkitの管理用キーを除く）。
+// managedNames returns the config keys to record, excluding devkit's own
+// bookkeeping keys.
 func managedNames(desired map[string]string) []string {
 	out := make([]string, 0, len(desired))
 	for _, k := range slices.Sorted(maps.Keys(desired)) {
@@ -69,10 +72,11 @@ func managedNames(desired map[string]string) []string {
 	return out
 }
 
-// staleConfigKeys は宣言から消えた、devkit適用済みのconfigキーを返す。
+// staleConfigKeys returns the devkit-applied config keys the declaration
+// dropped.
 //
-// 記録（user.incus-devkit.managed）が無い古いinstanceでは、
-// devkit自身が設定したidmapキーだけを対象とする。
+// On an older instance with no record (user.incus-devkit.managed), only the
+// idmap key devkit set itself is in scope.
 func staleConfigKeys(current, desired map[string]string, plan idmapPlan) []string {
 	recorded, ok := current[managedKeysKey]
 	if !ok {
@@ -90,7 +94,7 @@ func staleConfigKeys(current, desired map[string]string, plan idmapPlan) []strin
 	return out
 }
 
-// staleDevices は宣言から消えた、devkit作成済みのdeviceを返す。
+// staleDevices returns the devkit-created devices the declaration dropped.
 func staleDevices(current *incus.Instance, desired map[string]incus.Device) []string {
 	var out []string
 	for _, name := range splitList(current.Config[managedDevicesKey]) {
@@ -111,16 +115,16 @@ func splitList(v string) []string {
 	return strings.Split(v, ",")
 }
 
-// desiredDevices は dev.yml から適用すべきdeviceを組み立てる。
-// workspaceは予約名のdisk deviceとして追加する。
-// instance名は永続ボリューム名の一意性のために必要となる。
+// desiredDevices builds the devices to apply, from dev.yml. The workspace is
+// added as a disk device under the reserved name. The instance name is needed
+// to keep persistent volume names unique.
 func desiredDevices(cfg *config.Config, plan idmapPlan, instance string) map[string]incus.Device {
 	out := make(map[string]incus.Device, len(cfg.Instance.Devices)+1)
 
 	for name, dev := range cfg.Instance.Devices {
 		copied := maps.Clone(incus.Device(dev))
 
-		// deviceのsourceはproject rootを基準に解決する（仕様 3.11）。
+		// A device's source is resolved from the project root (spec 3.11).
 		if src, ok := copied["source"]; ok && src != "" && !isVolumeSource(copied) {
 			copied["source"] = cfg.ResolvePath(src)
 		}
@@ -129,7 +133,7 @@ func desiredDevices(cfg *config.Config, plan idmapPlan, instance string) map[str
 		out[name] = copied
 	}
 
-	// 永続ボリュームもdeviceとして接続する。
+	// Persistent volumes are attached as devices too.
 	for _, name := range slices.Sorted(maps.Keys(cfg.Volumes)) {
 		vol := cfg.Volumes[name]
 		out[name] = incus.Device{
@@ -152,21 +156,22 @@ func desiredDevices(cfg *config.Config, plan idmapPlan, instance string) map[str
 	return out
 }
 
-// volumeName は永続ボリュームのIncus上の名前を返す。
+// volumeName returns a persistent volume's name in Incus.
 //
-// instanceごとに一意にすることで、複数チェックアウトが同じ
-// ボリュームを共有してしまうのを防ぐ。
+// Making it unique per instance keeps several checkouts from sharing one
+// volume.
 func volumeName(instance, key string) string {
 	return instance + "-" + key
 }
 
-// applyShift はホストのディレクトリをマウントするdiskへidmap方式を反映する。
+// applyShift puts the idmap strategy onto a disk that mounts a host directory.
 //
-// workspace以外の追加マウントにも同じ扱いを適用しないと、
-// shift方式のホストで「workspaceだけ書けて追加マウントは書けない」状態になる。
-// 方式を切り替えたときに古い設定が残らないよう、常に明示的に設定する。
+// Extra mounts get the same treatment as the workspace; without that, a host
+// using the shift strategy ends up able to write to the workspace but not to
+// anything else. It is always set explicitly, so switching strategies leaves
+// nothing stale behind.
 //
-// プロジェクトが shift を明示している場合は、そちらを尊重する。
+// A shift the project set explicitly wins.
 func applyShift(dev incus.Device, plan idmapPlan) {
 	if !plan.Managed {
 		return
@@ -180,22 +185,25 @@ func applyShift(dev incus.Device, plan idmapPlan) {
 	dev["shift"] = strconv.FormatBool(plan.shiftEnabled())
 }
 
-// isHostPathMount はホストのディレクトリをマウントするdiskかを返す。
+// isHostPathMount reports whether a disk mounts a host directory.
 //
-// storage volume（poolを伴うもの）やroot disk、disk以外のdeviceは対象外。
+// Storage volumes (those with a pool), root disks and non-disk devices are out
+// of scope.
 func isHostPathMount(dev incus.Device) bool {
 	return dev.Type() == "disk" && dev["source"] != "" && !isVolumeSource(dev)
 }
 
-// isVolumeSource は source がホストのパスではなくストレージボリューム名かを返す。
+// isVolumeSource reports whether source names a storage volume rather than a
+// path on the host.
 func isVolumeSource(dev incus.Device) bool {
 	return dev.Type() == "disk" && dev["pool"] != ""
 }
 
-// staleIDMapKeys は現在の方針では不要になった、devkit設定のconfigキーを返す。
+// staleIDMapKeys returns the devkit-set config keys the current strategy no
+// longer needs.
 func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
 	if !plan.Managed || plan.Mode == config.IDMapRaw {
-		// 利用者が管理している、または今も設定すべき場合は触れない。
+		// Leave it alone when the user manages it, or when it should still be set.
 		return nil
 	}
 	if _, ok := current[idmapConfigKey]; !ok {
@@ -204,7 +212,7 @@ func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
 	return []string{idmapConfigKey}
 }
 
-// instanceSpec はinstance作成時の指定を組み立てる。
+// instanceSpec builds what to pass when creating an instance.
 func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
 	return incus.InstanceSpec{
@@ -218,7 +226,7 @@ func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.Instanc
 	}
 }
 
-// isManagedBy はinstanceが当該プロジェクトのdevkit管理下かを返す。
+// isManagedBy reports whether devkit manages the instance for this project.
 func isManagedBy(instanceConfig map[string]string, projectName string) bool {
 	return instanceConfig[managedProjectKey] == projectName
 }

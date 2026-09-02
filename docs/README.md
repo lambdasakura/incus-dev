@@ -1,15 +1,30 @@
-# ドキュメント
+# Documentation
 
-| 文書 | 対象読者 | 内容 |
+*[日本語版 / Japanese](README.ja.md)*
+
+| Document | Audience | Contents |
 | --- | --- | --- |
-| [manual/](manual/README.md) | 利用者 | `idev` の使い方。導入、チュートリアル、コマンドと `dev.yml` のリファレンス、構成例 |
-| [troubleshooting.md](troubleshooting.md) | 利用者 | ホスト環境に起因する問題への対処 |
-| [spec/](spec/README.md) | 開発者 | 設計仕様。要件、責務分担、各層の設計、実装方針 |
+| [manual/](manual/README.md) | Users | How to use `idev`: installation, tutorial, command and `dev.yml` reference, recipes |
+| [troubleshooting.md](troubleshooting.md) | Users | Problems caused by the host environment |
+| [spec/](spec/README.md) | Developers | Design specification: requirements, responsibilities, layer design, implementation policy. **Japanese only** |
 
-## どこから読むか
+## Where to start
 
-- **使いたい** → [manual/02-getting-started.md](manual/02-getting-started.md)
-- **動かない** → [troubleshooting.md](troubleshooting.md)
-- **設定項目を調べたい** → [manual/04-dev-yml.md](manual/04-dev-yml.md)
-- **なぜそう設計されているか知りたい** → [spec/01-overview.md](spec/01-overview.md)
-- **devkit自体を開発する** → [../CLAUDE.md](../CLAUDE.md) → [spec/07-implementation.md](spec/07-implementation.md)
+- **I want to use it** → [manual/02-getting-started.md](manual/02-getting-started.md)
+- **It does not work** → [troubleshooting.md](troubleshooting.md)
+- **I am looking up a setting** → [manual/04-dev-yml.md](manual/04-dev-yml.md)
+- **I want to know why it is designed this way** → [spec/01-overview.md](spec/01-overview.md)
+- **I am working on devkit itself** → [../CLAUDE.md](../CLAUDE.md) → [spec/07-implementation.md](spec/07-implementation.md)
+
+## Languages
+
+The user-facing documentation is available in English and Japanese.
+
+| | English | 日本語 |
+| --- | --- | --- |
+| Manual | [manual/](manual/README.md) | [manual/ja/](manual/ja/README.md) |
+| Troubleshooting | [troubleshooting.md](troubleshooting.md) | [troubleshooting.ja.md](troubleshooting.ja.md) |
+| Agent Skill | [skills/incus-devkit/](../skills/incus-devkit/) | [skills/incus-devkit-ja/](../skills/incus-devkit-ja/) |
+
+The design specification under [spec/](spec/README.md) is written in Japanese
+only. It is the criterion for implementation decisions, not a user document.

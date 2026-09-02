@@ -8,15 +8,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
 )
 
-// Plan は idev up が行う操作を、実行せずに表示する（仕様 04-cli.md 4.8）。
+// Plan prints what idev up would do, without doing it (spec 04-cli.md 4.8).
 //
-// ホスト側の前提（idmap、Profileの存在）は up と同じように確認する。
-// Incusへの読み取りは行うが、変更は一切行わない。
+// It checks the host-side prerequisites — idmap, the profiles existing — just
+// as up does. It reads from Incus, and changes nothing.
 func (a *App) Plan(ctx context.Context) error {
 	plan, err := a.idmapPlan()
 	if err != nil {
@@ -52,11 +52,10 @@ func (a *App) Plan(ctx context.Context) error {
 	return nil
 }
 
-// planActions は実行予定の操作を列挙する。
+// planActions lists the operations that would run.
 //
-// 副作用を持たない純粋関数として組み立てることで、
-// 実際に適用する経路（desiredConfig / desiredDevices）と
-// 同じ計算結果を表示できる。
+// Building it as a pure function with no side effects is what lets it show the
+// same result the applying path (desiredConfig, desiredDevices) computes.
 func planActions(cfg *config.Config, name string, current *incus.Instance, idmap idmapPlan) []string {
 	var out []string
 
@@ -90,10 +89,10 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 	return append(out, provisionActions(cfg)...)
 }
 
-// configActions はinstance configへの変更を列挙する。
+// configActions lists the changes to the instance config.
 //
-// devkitの管理用キー（user.incus-devkit.*）は、利用者が書いたものではなく
-// 常に設定されるため、1行にまとめる。
+// devkit's bookkeeping keys (user.incus-devkit.*) are not something the user
+// wrote and are always set, so they collapse into one line.
 func configActions(current, desired map[string]string, stale []string) []string {
 	var out []string
 	for _, k := range stale {
@@ -117,7 +116,7 @@ func configActions(current, desired map[string]string, stale []string) []string 
 	return out
 }
 
-// deviceActions はdeviceへの変更を列挙する。
+// deviceActions lists the changes to the devices.
 func deviceActions(current, desired map[string]incus.Device) []string {
 	var out []string
 
@@ -136,7 +135,7 @@ func deviceActions(current, desired map[string]incus.Device) []string {
 	return out
 }
 
-// changedKeys は現状と異なるキーを key=value の形で返す。
+// changedKeys returns the keys that differ, as key=value.
 func changedKeys(have, want incus.Device) []string {
 	var out []string
 	for _, k := range slices.Sorted(maps.Keys(want)) {
@@ -147,7 +146,7 @@ func changedKeys(have, want incus.Device) []string {
 	return out
 }
 
-// deviceDetail はdeviceの要点（マウント元と先）を返す。
+// deviceDetail returns what matters about a device: what it mounts, and where.
 func deviceDetail(dev incus.Device) string {
 	if src, path := dev["source"], dev["path"]; src != "" && path != "" {
 		return fmt.Sprintf(" %s -> %s", src, path)
@@ -155,7 +154,7 @@ func deviceDetail(dev incus.Device) string {
 	return ""
 }
 
-// provisionActions はbootstrapとprovisionの実行予定を列挙する。
+// provisionActions lists the bootstrap and provisioning that would run.
 func provisionActions(cfg *config.Config) []string {
 	steps := provision.BootstrapSteps(cfg)
 
@@ -184,7 +183,7 @@ func provisionActions(cfg *config.Config) []string {
 	return out
 }
 
-// singleLine は複数行の値を1行にまとめる。
+// singleLine folds a multi-line value onto one line.
 func singleLine(v string) string {
 	return strings.ReplaceAll(strings.TrimRight(v, "\n"), "\n", " / ")
 }

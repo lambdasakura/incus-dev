@@ -1,4 +1,4 @@
-module github.com/lambdasakura/incus-dev
+module github.com/lambdasakura/incus-devkit
 
 go 1.27.0
 
@@ -8,6 +8,7 @@ require (
 	github.com/lxc/incus/v6 v6.0.6
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	golang.org/x/term v0.45.0
 	golang.org/x/text v0.35.0
 	sigs.k8s.io/yaml v1.6.0
@@ -44,7 +45,6 @@ require (
 	github.com/rootless-containers/proto/go-proto v0.0.0-20260207013450-f6ee952d53d9 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/urfave/cli v1.22.17 // indirect
 	github.com/vbatts/go-mtree v0.7.0 // indirect
 	github.com/zitadel/logging v0.7.0 // indirect

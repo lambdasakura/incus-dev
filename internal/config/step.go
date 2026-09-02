@@ -7,8 +7,8 @@ import (
 	"strconv"
 )
 
-// Step は bootstrap / provision の1ステップ。
-// Run と Ansible は排他であり、両方nilまたは両方非nilの状態はvalidationで報告される。
+// Step is one bootstrap or provision step. Run and Ansible are mutually
+// exclusive; validation reports both being nil, and both being set.
 type Step struct {
 	Name    string
 	Run     *RunStep
@@ -16,7 +16,7 @@ type Step struct {
 	Galaxy  *GalaxyStep
 }
 
-// RunStep はコンテナ内でのコマンド実行。
+// RunStep runs a command inside the container.
 type RunStep struct {
 	Script string
 	Shell  string
@@ -25,7 +25,7 @@ type RunStep struct {
 	Env    map[string]string
 }
 
-// ShellOrDefault はスクリプトを解釈するシェルを返す。
+// ShellOrDefault returns the shell that interprets the script.
 func (r *RunStep) ShellOrDefault() string {
 	if r.Shell == "" {
 		return DefaultShell
@@ -33,7 +33,7 @@ func (r *RunStep) ShellOrDefault() string {
 	return r.Shell
 }
 
-// AnsibleStep はホスト側での ansible-playbook 実行。
+// AnsibleStep runs ansible-playbook on the host.
 type AnsibleStep struct {
 	Playbook  string   `json:"playbook"`
 	Vars      string   `json:"vars,omitempty"`
@@ -43,15 +43,16 @@ type AnsibleStep struct {
 	ExtraArgs []string `json:"extra_args,omitempty"`
 }
 
-// GalaxyStep はホスト側での ansible-galaxy install 実行。
+// GalaxyStep runs ansible-galaxy install on the host.
 //
-// Ansible Roleやcollectionの導入をプロジェクト側で完結させるために使う。
+// It lets a project install its own Ansible roles and collections without
+// help from devkit.
 type GalaxyStep struct {
 	Requirements string   `json:"requirements"`
 	ExtraArgs    []string `json:"extra_args,omitempty"`
 }
 
-// DisplayName はログ表示用の名前を返す。index は1始まり。
+// DisplayName returns the name to show in logs. index is 1-based.
 func (s Step) DisplayName(index int) string {
 	if s.Name != "" {
 		return s.Name
@@ -59,7 +60,8 @@ func (s Step) DisplayName(index int) string {
 	return fmt.Sprintf("step %d", index)
 }
 
-// stepJSON は run 短縮形とフル形式の両方を受けるための中間表現。
+// stepJSON is the intermediate form that accepts both the short run form and
+// the full form.
 type stepJSON struct {
 	Name    string       `json:"name"`
 	Run     *string      `json:"run"`
@@ -71,10 +73,11 @@ type stepJSON struct {
 	Galaxy  *GalaxyStep  `json:"galaxy"`
 }
 
-// UnmarshalJSON はステップをデコードする。
+// UnmarshalJSON decodes a step.
 //
-// run と ansible の排他性のような意味的な問題はここではエラーにせず、
-// validation側で位置情報付きで報告する（仕様 07-implementation.md 7.3.4）。
+// Semantic problems, such as run and ansible being mutually exclusive, are not
+// errors here; validation reports them with their position
+// (spec 07-implementation.md 7.3.4).
 func (s *Step) UnmarshalJSON(b []byte) error {
 	var raw stepJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -83,7 +86,7 @@ func (s *Step) UnmarshalJSON(b []byte) error {
 
 	s.Name = raw.Name
 
-	// 種別が1つに定まらない場合はvalidationが位置付きで報告する。
+	// When the kind is not exactly one, validation reports it with a position.
 	kinds := 0
 	for _, present := range []bool{raw.Run != nil, raw.Ansible != nil, raw.Galaxy != nil} {
 		if present {
@@ -111,10 +114,10 @@ func (s *Step) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// StringMap はスカラ値を文字列へ正規化するmap（仕様 3.6.4）。
+// StringMap is a map that normalises scalar values to strings (spec 3.6.4).
 type StringMap map[string]string
 
-// UnmarshalJSON は string / number / boolean を文字列として受け取る。
+// UnmarshalJSON accepts a string, a number or a boolean, and keeps a string.
 func (m *StringMap) UnmarshalJSON(b []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {

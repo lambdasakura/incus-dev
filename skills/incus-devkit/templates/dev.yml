@@ -1,0 +1,72 @@
+# .incus-dev/dev.yml
+#
+# Keep this file, and what sits beside it, enough to reproduce the development
+# environment on its own. Every relative path is resolved from the project root
+# (the parent of .incus-dev/).
+schema: 1
+
+project:
+  # The instance is named dev-<name>. Pick something that will not collide with
+  # another project on the same machine.
+  name: my-project
+
+instance:
+  # Match the Dockerfile or the CI configuration.
+  #   images:ubuntu/24.04 / images:debian/12 / images:alpine/3.21
+  image: images:ubuntu/24.04
+
+  # A reference by name to profiles that exist on the host. devkit creates none.
+  # profiles: [default]
+
+  # Passed straight to the Incus instance config. Quoting values is the safest
+  # habit; numbers and booleans are accepted and converted to strings.
+  config:
+    limits.cpu: "4"
+    limits.memory: 8GiB
+
+  # To share host directories other than the workspace.
+  # devices:
+  #   assets:
+  #     type: disk
+  #     source: ./assets
+  #     path: /assets
+
+# By default the project root is shared at /workspace. You rarely need to change this.
+# workspace:
+#   target: /workspace
+#   idmap: auto
+
+# The default user, shell and working directory inside the container.
+# shell:
+#   user: developer
+#   command: /bin/bash
+
+# Things to keep across a recreated instance (a build cache, say).
+# volumes:
+#   cache:
+#     path: /root/.cache
+#     size: 10GiB
+
+# Never write the value here. Inject it from a host environment variable or file.
+# secrets:
+#   GITHUB_TOKEN:
+#     env: GITHUB_TOKEN
+
+# What the environment is made of. **Write it so any number of runs is safe.**
+provision:
+  - name: base packages
+    run: |
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        ca-certificates curl git make
+
+  # An idempotent example: do nothing if it is already there
+  # - name: go toolchain
+  #   run: |
+  #     test -x /usr/local/go/bin/go && exit 0
+  #     curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
+
+  - name: project deps
+    run: make deps
+    cwd: /workspace

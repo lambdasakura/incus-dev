@@ -1,4 +1,4 @@
-// Command idev はIncusでプロジェクト単位の開発環境を構築・管理する。
+// Command idev builds and manages per-project development environments with Incus.
 package main
 
 import (
@@ -8,21 +8,21 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/lambdasakura/incus-dev/internal/cli"
+	"github.com/lambdasakura/incus-devkit/internal/cli"
 )
 
-// version はビルド時に -ldflags で埋め込む。
+// version is stamped in at build time with -ldflags.
 var version = "dev"
 
-// osExit はテストから差し替えるための間接参照。
+// osExit is an indirection so tests can replace it.
 var osExit = os.Exit
 
 func main() {
 	osExit(run(os.Args[1:], os.Stderr))
 }
 
-// run はCLIを実行し、プロセスの終了コードを返す。
-// os.Exit を呼ばないため、テストから実行できる。
+// run executes the CLI and returns the process exit code.
+// It never calls os.Exit, so tests can call it.
 func run(args []string, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

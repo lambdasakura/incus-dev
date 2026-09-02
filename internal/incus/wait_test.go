@@ -10,13 +10,13 @@ import (
 	"github.com/lxc/incus/v6/shared/api"
 )
 
-// nic は eth0 を持つinstanceにする。
+// nic gives an instance an eth0.
 func nic(full *api.InstanceFull) *api.InstanceFull {
 	full.ExpandedDevices = map[string]map[string]string{"eth0": {"type": "nic"}}
 	return full
 }
 
-// addresses は割り当て済みアドレスを設定する。
+// addresses sets the assigned addresses.
 func addresses(full *api.InstanceFull, addrs ...api.InstanceStateNetworkAddress) *api.InstanceFull {
 	full.State = &api.InstanceState{Network: map[string]api.InstanceStateNetwork{
 		"eth0": {Addresses: addrs},
@@ -30,7 +30,7 @@ var (
 	ipv6 = api.InstanceStateNetworkAddress{Family: "inet6", Address: "fd42::2", Scope: "global"}
 )
 
-// fastWait は待ち時間を詰めたテスト用の指定。
+// fastWait is a test configuration with the waits shortened.
 func fastWait() WaitOptions {
 	return WaitOptions{
 		Timeout:        200 * time.Millisecond,
@@ -40,7 +40,7 @@ func fastWait() WaitOptions {
 	}
 }
 
-// コマンドを実行でき、IPv4が付いていれば待たない
+// With commands runnable and IPv4 assigned, it does not wait.
 func TestWaitReadyReturnsWhenReady(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv4)
@@ -51,7 +51,7 @@ func TestWaitReadyReturnsWhenReady(t *testing.T) {
 	}
 }
 
-// 既定値でも動くこと（呼び出し側が指定を省略できる）
+// It works on the defaults, so callers may omit the options.
 func TestWaitReadyUsesDefaults(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv4)
@@ -62,7 +62,7 @@ func TestWaitReadyUsesDefaults(t *testing.T) {
 	}
 }
 
-// 起動直後はexecできないため、できるようになるまで繰り返す
+// exec does not work right after a start, so it retries until it does.
 func TestWaitReadyRetriesUntilExecSucceeds(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv4)
@@ -81,11 +81,11 @@ func TestWaitReadyRetriesUntilExecSucceeds(t *testing.T) {
 		t.Fatalf("WaitReady() error = %v", err)
 	}
 	if attempts < 3 {
-		t.Errorf("試行回数 = %d, 成功するまで繰り返すこと", attempts)
+		t.Errorf("attempts = %d, want it to retry until it succeeds", attempts)
 	}
 }
 
-// 時間切れは、待った時間が分かるエラーにする
+// A timeout produces an error that says how long it waited.
 func TestWaitReadyTimesOut(t *testing.T) {
 	tests := []struct {
 		name string
@@ -93,12 +93,12 @@ func TestWaitReadyTimesOut(t *testing.T) {
 		want string
 	}{
 		{
-			name: "実行できるが終了コードが0にならない",
+			name: "it runs but never exits 0",
 			exec: func(f *fakeServer) { f.execMeta = map[string]any{"return": float64(1)} },
 			want: "did not become ready within",
 		},
 		{
-			name: "実行そのものが失敗し続ける",
+			name: "running it keeps failing",
 			exec: func(f *fakeServer) { f.err["ExecInstance"] = errAPI },
 			want: "api failed",
 		},
@@ -119,7 +119,7 @@ func TestWaitReadyTimesOut(t *testing.T) {
 	}
 }
 
-// 中断されたら待たずに戻る
+// Once interrupted, it returns without waiting.
 func TestWaitReadyStopsOnCancel(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv4)
@@ -134,7 +134,7 @@ func TestWaitReadyStopsOnCancel(t *testing.T) {
 	}
 }
 
-// NICを持たないinstanceではアドレスを待たない
+// An instance with no NIC is not waited on for an address.
 func TestWaitReadyWithoutNIC(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -145,7 +145,7 @@ func TestWaitReadyWithoutNIC(t *testing.T) {
 	}
 }
 
-// IPv4のDHCPが完了するまで待つ
+// It waits for IPv4 DHCP to complete.
 func TestWaitReadyWaitsForIPv4(t *testing.T) {
 	f := newFakeServer()
 	full := addresses(nic(f.addInstance("dev-x", api.InstancePut{})))
@@ -163,11 +163,11 @@ func TestWaitReadyWaitsForIPv4(t *testing.T) {
 		t.Fatalf("WaitReady() error = %v", err)
 	}
 	if calls < 3 {
-		t.Errorf("取得回数 = %d, IPv4が付くまで待つこと", calls)
+		t.Errorf("fetches = %d, want it to wait for IPv4", calls)
 	}
 }
 
-// IPv6しか付かない環境で無期限に待たない
+// On an IPv6-only host it does not wait forever.
 func TestWaitReadyGivesUpWaitingForIPv4(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv6)
@@ -178,11 +178,11 @@ func TestWaitReadyGivesUpWaitingForIPv4(t *testing.T) {
 		t.Fatalf("WaitReady() error = %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
-		t.Errorf("待ち時間 = %v, IPv4の猶予を超えて待たないこと", elapsed)
+		t.Errorf("waited %v, want it not to exceed the IPv4 grace period", elapsed)
 	}
 }
 
-// アドレスが1つも付かない場合は、呼び出し側が判断できるエラーにする
+// With no address at all, the error is one the caller can act on.
 func TestWaitReadyReportsNetworkNotReady(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})))
@@ -194,7 +194,7 @@ func TestWaitReadyReportsNetworkNotReady(t *testing.T) {
 	}
 }
 
-// アドレスを待つ間に中断された場合
+// Interrupted while waiting for an address.
 func TestWaitNetworkStopsOnCancel(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})))
@@ -208,7 +208,7 @@ func TestWaitNetworkStopsOnCancel(t *testing.T) {
 	}
 }
 
-// instanceの状態を取得できない場合はそのまま返す
+// Failing to fetch the instance state is returned as it is.
 func TestWaitNetworkPropagatesError(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})))
@@ -221,15 +221,16 @@ func TestWaitNetworkPropagatesError(t *testing.T) {
 	}
 }
 
-// IPv6だけが付いた状態でも、NetworkTimeout を超えたら待たない。
-// grace の判定だけが唯一の脱出路だと、退行時に永久に待ち続けてしまう。
+// Even with IPv6 alone assigned, it stops once NetworkTimeout has passed.
+// If the grace check were the only way out, a regression would leave it waiting
+// forever.
 func TestWaitNetworkStopsAtTimeout(t *testing.T) {
 	f := newFakeServer()
 	addresses(nic(f.addInstance("dev-x", api.InstancePut{})), ipv6)
 	a, _ := newAPI(f)
 
 	opt := fastWait()
-	opt.IPv4Grace = time.Hour // grace では抜けられない
+	opt.IPv4Grace = time.Hour // the grace period offers no way out
 	opt.NetworkTimeout = 50 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -239,11 +240,11 @@ func TestWaitNetworkStopsAtTimeout(t *testing.T) {
 		t.Fatalf("WaitReady() error = %v", err)
 	}
 	if ctx.Err() != nil {
-		t.Error("NetworkTimeout を超えても待ち続けている")
+		t.Error("still waiting past NetworkTimeout")
 	}
 }
 
-// instanceを取得できなくなった場合
+// When the instance can no longer be fetched.
 func TestStopInstanceMissing(t *testing.T) {
 	a, _ := newAPI(newFakeServer())
 

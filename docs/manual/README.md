@@ -1,11 +1,14 @@
-# idev マニュアル
+# idev manual
 
-Incusでプロジェクト単位の開発環境を構築・管理するCLIツール `idev` の使い方。
+How to use `idev`, a CLI that builds and manages per-project development
+environments with Incus.
 
-## これは何をするツールか
+*[日本語版 / Japanese](ja/README.md)*
 
-プロジェクトのリポジトリに `.incus-dev/dev.yml` を1つ置いておくと、
-`git clone` した人が以下だけで同じ開発環境を再現できる。
+## What the tool does
+
+Put a single `.incus-dev/dev.yml` in your repository, and anyone who clones it
+reproduces the same development environment with two commands.
 
 ```bash
 git clone <repository>
@@ -15,35 +18,37 @@ idev up
 idev shell
 ```
 
-- ソースコードはコピーされず、ホストのworking treeがコンテナへマウントされる。
-  IDE・Git・AIコーディングツールはホスト側から、ビルド・テスト・実行はコンテナ内で行える
-- コンテナの中身をどう構成するかは **プロジェクトが決める**。
-  idev はAnsible Roleも言語ランタイムの導入手順も持たない
+- Your source is not copied. The host's working tree is mounted into the
+  container, so your IDE, Git and AI coding tools stay on the host while
+  builds, tests and runs happen inside the container
+- **The project decides** what goes into the container. idev carries no Ansible
+  roles and no language-runtime installers
 
-## 目次
+## Contents
 
-| # | ドキュメント | 内容 |
+| # | Document | Contents |
 | --- | --- | --- |
-| 1 | [01-installation.md](01-installation.md) | 前提と導入、動作確認 |
-| 2 | [02-getting-started.md](02-getting-started.md) | 最初のプロジェクトを作る（チュートリアル） |
-| 3 | [03-commands.md](03-commands.md) | コマンドリファレンス |
-| 4 | [04-dev-yml.md](04-dev-yml.md) | `dev.yml` リファレンス |
-| 5 | [05-provisioning.md](05-provisioning.md) | 環境構築手順の書き方 |
-| 6 | [06-recipes.md](06-recipes.md) | 用途別の構成例 |
-| 7 | [07-ai-agents.md](07-ai-agents.md) | AIコーディングツールからの利用 |
+| 1 | [01-installation.md](01-installation.md) | Requirements, installation, smoke test |
+| 2 | [02-getting-started.md](02-getting-started.md) | Building your first project (tutorial) |
+| 3 | [03-commands.md](03-commands.md) | Command reference |
+| 4 | [04-dev-yml.md](04-dev-yml.md) | `dev.yml` reference |
+| 5 | [05-provisioning.md](05-provisioning.md) | Writing the provisioning steps |
+| 6 | [06-recipes.md](06-recipes.md) | Recipes by use case |
+| 7 | [07-ai-agents.md](07-ai-agents.md) | Driving idev from AI coding tools |
 
-うまく動かないときは [トラブルシューティング](../troubleshooting.md) を参照。
+When something does not work, see [troubleshooting](../troubleshooting.md).
 
-設計の意図や「なぜそうなっているか」は [仕様書](../spec/README.md) にある。
+The intent behind the design — the "why is it like this" — is recorded in the
+[design specification](../spec/README.md), which is written in Japanese.
 
-## 用語
+## Terminology
 
-| 用語 | 意味 |
+| Term | Meaning |
 | --- | --- |
-| `idev` | コマンド名 |
-| `.incus-dev/` | プロジェクト側の設定ディレクトリ |
-| `dev.yml` | 開発環境定義ファイル（`.incus-dev/dev.yml`） |
-| workspace | コンテナへマウントされるプロジェクトのworking tree |
-| instance | idevが作るIncusコンテナ。名前は `dev-<プロジェクト名>` |
-| provision | コンテナ内部を構成する手順。`dev.yml` に宣言する |
-| bootstrap | provisionを動かすための最小限の準備 |
+| `idev` | The command |
+| `.incus-dev/` | The project's configuration directory |
+| `dev.yml` | The environment definition file (`.incus-dev/dev.yml`) |
+| workspace | The project working tree, mounted into the container |
+| instance | The Incus container idev creates. Named `dev-<project name>` |
+| provision | The steps that configure the inside of the container, declared in `dev.yml` |
+| bootstrap | The minimum preparation needed before provisioning can run |

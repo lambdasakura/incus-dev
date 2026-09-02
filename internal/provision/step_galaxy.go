@@ -3,14 +3,15 @@ package provision
 import (
 	"context"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
 )
 
-// execGalaxy はホスト側で ansible-galaxy install を実行する。
+// execGalaxy runs ansible-galaxy install on the host.
 //
-// Roleやcollectionの導入を .incus-dev/ 内で完結させるためのステップ
-// （仕様 06-provisioning.md 6.5.5）。導入先はansibleの既定に従う。
+// It lets a project install its roles and collections entirely from within
+// .incus-dev/ (spec 06-provisioning.md 6.5.5). Where they land is Ansible's
+// default.
 func (e *Executor) execGalaxy(ctx context.Context, step *config.GalaxyStep, env Env) error {
 	if err := e.checkPrerequisites(ctx); err != nil {
 		return err

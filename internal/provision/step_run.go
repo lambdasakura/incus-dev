@@ -5,22 +5,22 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
 )
 
-// execRun はコンテナ内でスクリプトを実行する（仕様 06-provisioning.md 6.4）。
+// execRun runs a script inside the container (spec 06-provisioning.md 6.4).
 func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) error {
-	// devkitが注入する変数は診断に役立つため表示してよい。
-	// プロジェクトが指定した値はSecretを含みうるため隠す。
+	// The variables devkit injects help with diagnosis and are safe to show.
+	// Values the project supplied may be secrets, so they are hidden.
 	public := env.EnvVars()
 	secret := make(map[string]string, len(step.Env)+len(env.Secrets))
 	for k, v := range env.Secrets {
 		secret[k] = v
 	}
 	for k, v := range step.Env {
-		delete(public, k) // プロジェクト指定を優先する
+		delete(public, k) // what the project set wins
 		secret[k] = v
 	}
 
@@ -38,17 +38,18 @@ func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) e
 		return err
 	}
 	if code != 0 {
-		// どのスクリプトが失敗したかを示す（仕様 04-cli.md 4.10）。
-		// 値がSecretを含みうる env は決して含めない。
+		// Say which script failed (spec 04-cli.md 4.10). Never include env,
+		// whose values may be secrets.
 		return fmt.Errorf("%s: exited with code %d", runner.Collapse(step.Script), code)
 	}
 	return nil
 }
 
-// runArgv はコンテナ内で実行するargvと、Incusへ渡すユーザー指定を返す。
+// runArgv returns the argv to run inside the container, and the user to pass
+// to Incus.
 //
-// Incusのexecはuidしか受け付けない（ユーザー名を解決しない）ため、
-// 名前が指定された場合は su で切り替え、Incusへは何も渡さない。
+// The Incus exec API only accepts a uid — it does not resolve user names — so
+// a name is switched to with su, and nothing is passed to Incus.
 func runArgv(step *config.RunStep) (argv []string, user string) {
 	shell := step.ShellOrDefault()
 

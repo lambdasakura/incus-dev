@@ -17,20 +17,20 @@ import (
 	"golang.org/x/text/message"
 	"sigs.k8s.io/yaml"
 
-	"github.com/lambdasakura/incus-dev/schemas"
+	"github.com/lambdasakura/incus-devkit/schemas"
 )
 
-// Options は Parse の挙動を制御する。
+// Options controls how Parse behaves.
 type Options struct {
-	// Root はパス解決の基準となるプロジェクトroot。
-	// 空の場合、参照パスの存在検査を行わない。
+	// Root is the project root that paths are resolved from. Left empty,
+	// referenced paths are not checked for existence.
 	Root string
 }
 
-// Load は dev.yml を読み込み、validationを行う。
-// configPath は <root>/.incus-dev/dev.yml を想定する。
+// Load reads dev.yml and validates it. configPath is expected to be
+// <root>/.incus-dev/dev.yml.
 func Load(configPath string) (*Config, error) {
-	data, err := os.ReadFile(configPath) //nolint:gosec // 利用者が指定した設定ファイルを読むことが目的
+	data, err := os.ReadFile(configPath) //nolint:gosec // reading the configuration file the user named is the point
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", configPath, err)
 	}
@@ -42,7 +42,7 @@ func Load(configPath string) (*Config, error) {
 	return c, nil
 }
 
-// Parse は dev.yml の内容を解釈しvalidationを行う。
+// Parse interprets and validates the contents of dev.yml.
 func Parse(data []byte, opt Options) (*Config, error) {
 	jsonData, err := yaml.YAMLToJSON(data)
 	if err != nil {
@@ -58,7 +58,7 @@ func Parse(data []byte, opt Options) (*Config, error) {
 		return nil, fmt.Errorf("parse yaml: document must be a mapping")
 	}
 
-	// schema versionは他のvalidationより先に確認する（仕様 3.2）。
+	// The schema version is checked before anything else (spec 3.2).
 	if err := checkSchemaVersion(raw); err != nil {
 		return nil, err
 	}
@@ -83,8 +83,8 @@ func Parse(data []byte, opt Options) (*Config, error) {
 	return &c, nil
 }
 
-// decodeDocument はJSONを、JSON Schema検証にもそのまま渡せる形へデコードする。
-// 数値は json.Number として保持する。
+// decodeDocument decodes JSON into a shape that can be handed to JSON Schema
+// validation as it is, keeping numbers as json.Number.
 func decodeDocument(jsonData []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(jsonData))
 	dec.UseNumber()
@@ -121,11 +121,12 @@ func checkSchemaVersion(raw map[string]any) error {
 	return nil
 }
 
-// devSchema は同梱されたJSON Schemaを返す。
+// devSchema returns the embedded JSON Schema.
 //
-// Schemaはバイナリへ同梱されており、これが壊れているのは利用者の入力ではなく
-// ビルド成果物の不具合であるため、regexp.MustCompile と同様にpanicさせる。
-// test/structure_test.go と config のテストで常に検証される。
+// The schema is embedded in the binary, so a broken one is a defect in the
+// build artifact rather than in the user's input; panic on it, as
+// regexp.MustCompile does. test/structure_test.go and the config tests check
+// it on every run.
 var devSchema = sync.OnceValue(func() *jsonschema.Schema {
 	sch, err := compileSchema(schemas.DevV1)
 	if err != nil {
@@ -134,9 +135,9 @@ var devSchema = sync.OnceValue(func() *jsonschema.Schema {
 	return sch
 })
 
-// compileSchema はJSON SchemaをコンパイルするJSON。
+// compileSchema compiles a JSON Schema.
 func compileSchema(raw []byte) (*jsonschema.Schema, error) {
-	const url = "https://github.com/lambdasakura/incus-dev/schemas/dev-v1.schema.json"
+	const url = "https://github.com/lambdasakura/incus-devkit/schemas/dev-v1.schema.json"
 
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
@@ -149,7 +150,8 @@ func compileSchema(raw []byte) (*jsonschema.Schema, error) {
 	return c.Compile(url)
 }
 
-// validateSchema はJSON Schemaによる構造検証を行い、問題を ps へ追加する。
+// validateSchema checks the structure against the JSON Schema and appends what
+// it finds to ps.
 func validateSchema(doc any, ps *problems) {
 	err := devSchema().Validate(doc)
 	if err == nil {
@@ -158,13 +160,13 @@ func validateSchema(doc any, ps *problems) {
 
 	var verr *jsonschema.ValidationError
 	if !errors.As(err, &verr) {
-		// Validate は *ValidationError しか返さない。
+		// Validate returns nothing but a *ValidationError.
 		*ps = append(*ps, Problem{Path: "(root)", Message: err.Error()})
 		return
 	}
 
-	// 中間ノードは "validation failed" のような要約しか持たないため、
-	// 葉ノードだけを収集する。
+	// Intermediate nodes carry only a summary such as "validation failed", so
+	// collect the leaves alone.
 	found := make([]Problem, 0, 8)
 	collectLeafProblems(verr, message.NewPrinter(language.English), &found)
 	sort.SliceStable(found, func(i, j int) bool { return found[i].Path < found[j].Path })
@@ -184,8 +186,8 @@ func collectLeafProblems(e *jsonschema.ValidationError, p *message.Printer, out 
 	}
 }
 
-// pointerToPath はJSON Pointerを人間向けの表記へ変換する。
-// 例: /provision/0/ansible -> provision[0].ansible
+// pointerToPath rewrites a JSON Pointer into something a person can read.
+// For example /provision/0/ansible becomes provision[0].ansible.
 func pointerToPath(ptr string) string {
 	ptr = strings.TrimPrefix(ptr, "/")
 	if ptr == "" {

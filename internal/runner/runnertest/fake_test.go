@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-dev/internal/runner"
-	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
 )
 
 func TestFakeRecordsCommands(t *testing.T) {
@@ -40,10 +40,10 @@ func TestFakeRecordsCommands(t *testing.T) {
 		t.Fatalf("Calls = %d, want 2", len(f.Calls))
 	}
 	if got := f.LastCommand(); !strings.Contains(got, "TOKEN=***") {
-		t.Errorf("LastCommand() = %q, マスクされた表示を返すこと", got)
+		t.Errorf("LastCommand() = %q, want the masked rendering", got)
 	}
 	if got := f.LastArgv(); !strings.Contains(got, "TOKEN=s3cret") {
-		t.Errorf("LastArgv() = %q, 実引数を返すこと", got)
+		t.Errorf("LastArgv() = %q, want the real arguments", got)
 	}
 	if got := f.LastStdin(); got != "payload" {
 		t.Errorf("LastStdin() = %q", got)
@@ -80,7 +80,7 @@ func TestFakeStdoutAndError(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, wantErr)
 	}
 
-	// 一致しないコマンドは成功扱い
+	// A command that matches nothing is treated as a success.
 	if _, err := f.Run(context.Background(), runner.Command{Name: "other"}); err != nil {
 		t.Errorf("error = %v, want nil", err)
 	}

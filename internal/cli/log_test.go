@@ -18,7 +18,7 @@ func TestLoggerFormat(t *testing.T) {
 		{"info", func(l *slog.Logger) { l.Info("creating instance") }, "[idev] creating instance"},
 		{"warn", func(l *slog.Logger) { l.Warn("falling back") }, "[idev] warning: falling back"},
 		{"error", func(l *slog.Logger) { l.Error("failed") }, "[idev] error: failed"},
-		{"属性付き", func(l *slog.Logger) { l.Info("exec", "command", "incus list") }, "command=incus list"},
+		{"with attributes", func(l *slog.Logger) { l.Info("exec", "command", "incus list") }, "command=incus list"},
 	}
 
 	for _, tt := range tests {
@@ -27,14 +27,14 @@ func TestLoggerFormat(t *testing.T) {
 			tt.log(newLogger(&buf, false))
 
 			if !strings.Contains(buf.String(), tt.want) {
-				t.Errorf("output = %q, %q を含むこと", buf.String(), tt.want)
+				t.Errorf("output = %q, want it to contain %q", buf.String(), tt.want)
 			}
 		})
 	}
 }
 
 func TestLoggerLevel(t *testing.T) {
-	t.Run("通常はdebugを出さない", func(t *testing.T) {
+	t.Run("debug is not printed by default", func(t *testing.T) {
 		var buf bytes.Buffer
 		newLogger(&buf, false).Debug("detail")
 
@@ -43,7 +43,7 @@ func TestLoggerLevel(t *testing.T) {
 		}
 	})
 
-	t.Run("verboseでdebugを出す", func(t *testing.T) {
+	t.Run("verbose prints debug", func(t *testing.T) {
 		var buf bytes.Buffer
 		newLogger(&buf, true).Debug("detail", "key", "value")
 
@@ -61,12 +61,13 @@ func TestLoggerWithAttrs(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{"running", "step=provision", "index=2"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("output = %q, %q を含むこと", out, want)
+			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
 	}
 }
 
-// グループは出力形式を変えない（この実装では属性として平坦に扱う）
+// A group does not change the output; this implementation flattens it into the
+// attributes.
 func TestLoggerWithGroup(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -77,15 +78,15 @@ func TestLoggerWithGroup(t *testing.T) {
 	}
 }
 
-// 出力先への書き込みが失敗しても、ログ呼び出しは処理を止めない
+// A failed write to the output does not stop the call that logged it.
 func TestLoggerWriteError(t *testing.T) {
 	h := &handler{w: errWriter{}, level: slog.LevelInfo}
 
 	err := h.Handle(context.Background(), slog.NewRecord(time.Time{}, slog.LevelInfo, "message", 0))
 	if err == nil {
-		t.Error("Handle() = nil error, 書き込み失敗を返すこと")
+		t.Error("Handle() = nil error, want the write failure returned")
 	}
 
-	// slog経由ではエラーが捨てられ、panicもしないこと
+	// Through slog the error is dropped, and nothing panics.
 	newLogger(errWriter{}, false).Info("message")
 }

@@ -1,10 +1,13 @@
-# 2. 最初のプロジェクトを作る
+# 2. Building your first project
 
-既存のプロジェクトへ開発環境定義を追加する手順を、順に追う。
+A walk through adding a development environment definition to an existing
+project.
 
-## 2.1 定義ファイルを置く
+*[日本語版 / Japanese](ja/02-getting-started.md)*
 
-プロジェクトのルートで以下を作る。
+## 2.1 Add the definition file
+
+At the root of your project:
 
 ```bash
 mkdir -p .incus-dev
@@ -21,7 +24,7 @@ instance:
   image: images:ubuntu/24.04
 ```
 
-必須なのは `schema` `project.name` `instance.image` の3つだけである。
+Only three things are required: `schema`, `project.name` and `instance.image`.
 
 ```bash
 idev validate
@@ -34,9 +37,9 @@ Instance:   dev-my-project
 Provision:  0 step(s)
 ```
 
-`validate` はIncusへ触れないため、CIでも実行できる。
+`validate` never touches Incus, so it is safe to run in CI.
 
-## 2.2 起動する
+## 2.2 Bring it up
 
 ```bash
 idev up
@@ -50,7 +53,7 @@ idev up
 [idev] Development environment is ready
 ```
 
-この時点で、プロジェクトのworking treeがコンテナの `/workspace` に見えている。
+Your working tree is now visible at `/workspace` inside the container.
 
 ```bash
 idev shell
@@ -61,11 +64,12 @@ idev shell
 README.md  src  .incus-dev
 ```
 
-ホスト側でファイルを編集すると、コンテナ内へ即座に反映される。コピーではない。
+Edit a file on the host and the container sees it immediately. It is not a
+copy.
 
-## 2.3 必要なものを入れる
+## 2.3 Install what you need
 
-環境構築の手順は `provision` に書く。ステップは上から順に実行される。
+Provisioning steps go in `provision`, and run top to bottom.
 
 ```yaml
 # .incus-dev/dev.yml
@@ -92,39 +96,39 @@ provision:
 idev up
 ```
 
-既にinstanceがあるため作り直されない。設定変更（CPU・メモリ）が反映され、
-provisionが再実行される。
+The instance already exists, so it is not recreated. The configuration changes
+(CPU, memory) are applied and provisioning runs again.
 
-コンテナを作り直さずにprovisionだけ流したい場合は次を使う。
+To run only provisioning, without recreating the container:
 
 ```bash
 idev provision
 ```
 
-## 2.4 手順は再実行できるように書く
+## 2.4 Write steps so they can be re-run
 
-`idev provision` は何度でも実行される前提のため、
-**各ステップが再実行できることはプロジェクト側の責任** である。
+`idev provision` is meant to be run any number of times, so **making each step
+re-runnable is the project's responsibility**.
 
 ```yaml
 provision:
-  # 良い例: 既に入っていれば何もしない
+  # Good: does nothing if it is already installed
   - run: command -v jq >/dev/null 2>&1 || apt-get install -y jq
 
-  # 良い例: apt install は元々再実行できる
+  # Good: apt install is re-runnable to begin with
   - run: apt-get install -y --no-install-recommends make
 
-  # 悪い例: 実行のたびに追記されてしまう
+  # Bad: appends another line every single run
   - run: echo 'export PATH=$PATH:/opt/bin' >> /root/.bashrc
 ```
 
-確認方法は単純で、2回続けて実行して成功すればよい。
+Checking this is simple: run it twice in a row and see that it succeeds.
 
 ```bash
 idev provision && idev provision
 ```
 
-## 2.5 状態を確認する
+## 2.5 Check the state
 
 ```bash
 idev status
@@ -142,41 +146,43 @@ limits.cpu: 4
 Provision:  1 step(s)
 ```
 
-## 2.6 コミットする
+## 2.6 Commit it
 
 ```bash
 git add .incus-dev
-git commit -m "開発環境定義を追加"
+git commit -m "Add development environment definition"
 ```
 
-これで、cloneした人が `idev up` だけで同じ環境を再現できる。
+From now on, anyone who clones the repository reproduces the same environment
+with `idev up` alone.
 
-README には以下を書いておくとよい。
+It is worth putting this in your README:
 
 ```markdown
-## 開発環境
+## Development environment
 
     idev up
     idev shell
 ```
 
-## 2.7 片付ける
+## 2.7 Clean up
 
 ```bash
-idev destroy          # 確認あり
-idev destroy --force  # 確認なし
+idev destroy          # asks for confirmation
+idev destroy --force  # does not
 ```
 
-instanceだけが削除され、**ホスト側のソースツリーには一切触れない**。
+Only the instance is deleted. **The source tree on the host is left completely
+alone.**
 
-作り直したい場合は次を使う。コンテナ内の状態は破棄される。
+To start over — discarding everything inside the container:
 
 ```bash
 idev rebuild --force
 ```
 
-## 次に読む
+## What to read next
 
-- 設定項目の詳細: [04-dev-yml.md](04-dev-yml.md)
-- Ansibleを使う場合: [05-provisioning.md](05-provisioning.md)
-- 言語・用途別の例: [06-recipes.md](06-recipes.md)
+- Every setting in detail: [04-dev-yml.md](04-dev-yml.md)
+- Using Ansible: [05-provisioning.md](05-provisioning.md)
+- Examples by language and use case: [06-recipes.md](06-recipes.md)

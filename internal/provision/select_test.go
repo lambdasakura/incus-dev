@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
 )
 
 func selectSteps(t *testing.T, yaml string, sel provision.Selection) []int {
@@ -44,10 +44,10 @@ func TestSelectOnly(t *testing.T) {
 		only []string
 		want []int
 	}{
-		{"名前で指定", []string{"provision"}, []int{1}},
-		{"番号で指定", []string{"2"}, []int{1}},
-		{"複数指定", []string{"base packages", "3"}, []int{0, 2}},
-		{"名前の無いステップを番号で", []string{"step 3"}, []int{2}},
+		{"by name", []string{"provision"}, []int{1}},
+		{"by number", []string{"2"}, []int{1}},
+		{"several at once", []string{"base packages", "3"}, []int{0, 2}},
+		{"an unnamed step by number", []string{"step 3"}, []int{2}},
 	}
 
 	for _, tt := range tests {
@@ -67,9 +67,9 @@ func TestSelectFrom(t *testing.T) {
 		from string
 		want []int
 	}{
-		{"名前で指定", "provision", []int{1, 2}},
-		{"番号で指定", "1", []int{0, 1, 2}},
-		{"最後のステップ", "3", []int{2}},
+		{"by name", "provision", []int{1, 2}},
+		{"by number", "1", []int{0, 1, 2}},
+		{"the last step", "3", []int{2}},
 	}
 
 	for _, tt := range tests {
@@ -83,7 +83,7 @@ func TestSelectFrom(t *testing.T) {
 	}
 }
 
-// 同じ名前のステップが複数ある場合は、すべて選ぶ
+// Several steps sharing a name are all selected.
 func TestSelectMatchesAllWithSameName(t *testing.T) {
 	got := selectSteps(t, base+`
 provision:
@@ -104,25 +104,25 @@ func TestSelectErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		sel  provision.Selection
-		want []string // エラーに含まれるべき文字列
+		want []string // strings the error must contain
 	}{
 		{
-			name: "存在しない名前",
+			name: "a name that does not exist",
 			sel:  provision.Selection{Only: []string{"nope"}},
 			want: []string{"nope", "base packages", "provision"},
 		},
 		{
-			name: "範囲外の番号",
+			name: "a number out of range",
 			sel:  provision.Selection{Only: []string{"9"}},
 			want: []string{"9"},
 		},
 		{
-			name: "fromが存在しない",
+			name: "from does not exist",
 			sel:  provision.Selection{From: "nope"},
 			want: []string{"nope"},
 		},
 		{
-			name: "onlyとfromの併用",
+			name: "only and from together",
 			sel:  provision.Selection{Only: []string{"provision"}, From: "provision"},
 			want: []string{"only", "from"},
 		},
@@ -138,14 +138,14 @@ func TestSelectErrors(t *testing.T) {
 			}
 			for _, want := range tt.want {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+					t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 				}
 			}
 		})
 	}
 }
 
-// ステップが無い場合に指定するとエラーになる
+// Naming a step when there are none is an error.
 func TestSelectWithoutSteps(t *testing.T) {
 	cfg := parseConfig(t, base)
 
@@ -153,11 +153,11 @@ func TestSelectWithoutSteps(t *testing.T) {
 		t.Error("Select() = nil error, want error")
 	}
 	if got, err := provision.Select(cfg.Provision, provision.Selection{}); err != nil || len(got) != 0 {
-		t.Errorf("Select() = %v, %v, 指定が無ければ空でよい", got, err)
+		t.Errorf("Select() = %v, %v, want empty when nothing was asked for", got, err)
 	}
 }
 
-// 同じステップを2回指定しても、実行は1回
+// Naming the same step twice still runs it once.
 func TestSelectDeduplicates(t *testing.T) {
 	got := selectSteps(t, threeSteps, provision.Selection{Only: []string{"provision", "2"}})
 

@@ -2,7 +2,7 @@ package incus
 
 import "testing"
 
-// 状態を取得していないinstanceでもアドレス判定が成り立つこと
+// The address checks hold up on an instance whose state was never fetched.
 func TestInstanceAddressesWithoutState(t *testing.T) {
 	inst := &Instance{Name: "dev-x"}
 
@@ -10,6 +10,6 @@ func TestInstanceAddressesWithoutState(t *testing.T) {
 		t.Errorf("GlobalAddresses() = %v, want nil", got)
 	}
 	if inst.HasGlobalAddress() || inst.HasIPv4Address() {
-		t.Error("状態が無いのにアドレスがあると判定している")
+		t.Error("reported an address despite there being no state")
 	}
 }

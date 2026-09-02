@@ -1,10 +1,12 @@
-# 6. 用途別の構成例
+# 6. Recipes
 
-そのまま `.incus-dev/dev.yml` へ貼って使える例。
+Examples you can paste straight into `.incus-dev/dev.yml`.
 
-動作するサンプル一式は [examples/](../../examples/) にもある。
+*[日本語版 / Japanese](ja/06-recipes.md)*
 
-## 6.1 最小
+Complete, working samples also live in [examples/](../../examples/).
+
+## 6.1 Minimal
 
 ```yaml
 schema: 1
@@ -14,7 +16,7 @@ instance:
   image: images:ubuntu/24.04
 ```
 
-workspaceがマウントされた素のコンテナが起動する。
+Starts a bare container with the workspace mounted.
 
 ---
 
@@ -94,8 +96,8 @@ provision:
       [ -f requirements.txt ] && ./.venv/bin/pip install -r requirements.txt || true
 ```
 
-仮想環境を `/workspace/.venv` に置くとホスト側からも見える。
-`.gitignore` への追加を忘れないこと。
+Putting the virtualenv at `/workspace/.venv` makes it visible from the host
+too. Do not forget to add it to `.gitignore`.
 
 ---
 
@@ -127,13 +129,13 @@ provision:
       [ -f package-lock.json ] && npm ci || true
 ```
 
-`node_modules` はネイティブモジュールがOS依存になるため、
-ホスト側とコンテナ内で共有すると壊れることがある。
-その場合は workspace の外へ置く構成を検討する。
+Native modules in `node_modules` are OS-specific, so sharing that directory
+between the host and the container can break it. If that happens, consider
+putting it outside the workspace.
 
 ---
 
-## 6.5 コンテナ内でDockerを使う
+## 6.5 Docker inside the container
 
 ```yaml
 schema: 1
@@ -144,7 +146,7 @@ project:
 instance:
   image: images:ubuntu/24.04
   config:
-    security.nesting: "true"     # これが必要
+    security.nesting: "true"     # this is what makes it work
 
 provision:
   - name: docker
@@ -157,14 +159,14 @@ provision:
       curl -fsSL https://get.docker.com | sh
 ```
 
-必要な設定を `instance.config` に直接書けるため、
-専用のProfileをホストに用意する必要はない。
+Because the setting goes directly into `instance.config`, no dedicated profile
+has to exist on the host.
 
 ---
 
-## 6.6 データベースを併走させる
+## 6.6 Running a database alongside
 
-コンテナ内でサービスを動かし、ホストからポートで触る。
+Run the service inside the container and reach it from the host over a port.
 
 ```yaml
 schema: 1
@@ -177,8 +179,8 @@ instance:
   devices:
     postgres:
       type: proxy
-      listen: tcp:127.0.0.1:15432      # ホスト側
-      connect: tcp:127.0.0.1:5432      # コンテナ側
+      listen: tcp:127.0.0.1:15432      # host side
+      connect: tcp:127.0.0.1:5432      # container side
 
 provision:
   - name: postgres
@@ -190,7 +192,7 @@ provision:
       systemctl enable --now postgresql || service postgresql start
 ```
 
-ホストから `psql -h 127.0.0.1 -p 15432` で接続できる。
+From the host: `psql -h 127.0.0.1 -p 15432`.
 
 ---
 
@@ -210,8 +212,9 @@ instance:
       gputype: physical
 ```
 
-ホスト固有の事情（GPUの有無やベンダー）に依存するため、
-ホスト管理者が用意したProfileを参照する方が可搬性が高い場合もある。
+This depends on host specifics — whether there is a GPU, and from which vendor
+— so referring to a profile prepared by the host's administrator is sometimes
+the more portable choice.
 
 ```yaml
 instance:
@@ -220,11 +223,11 @@ instance:
     - host-gpu
 ```
 
-参照したProfileが無いホストでは `idev up` が明示的に失敗する。
+On a host without that profile, `idev up` fails explicitly.
 
 ---
 
-## 6.8 ホストのProfileに一切依存しない
+## 6.8 Depending on no host profile at all
 
 ```yaml
 schema: 1
@@ -245,65 +248,65 @@ instance:
       network: incusbr0
 ```
 
-storage pool名とnetwork名はホスト依存になる点に注意する。
+Note that the storage pool and network names then become host-specific.
 
 ---
 
-## 6.9 複数のリポジトリをマウントする
+## 6.9 Mounting several repositories
 
-`instance.devices` に追加すれば、workspace以外のディレクトリも共有できる。
-workspaceと同じuid/gid対応付けが自動的に適用される。
+Add them to `instance.devices` and directories other than the workspace are
+shared too. They get the same uid/gid mapping as the workspace, automatically.
 
 ```yaml
 instance:
   devices:
     other-repo:
       type: disk
-      source: ../other-repo      # project root基準
+      source: ../other-repo      # from the project root
       path: /other-repo
 ```
 
 ---
 
-## 6.10 追加のデータをマウントする
+## 6.10 Mounting extra data
 
 ```yaml
 instance:
   devices:
     dataset:
       type: disk
-      source: /srv/dataset        # ホスト側の絶対パス
+      source: /srv/dataset        # absolute path on the host
       path: /data
       readonly: "true"
 
     assets:
       type: disk
-      source: ./assets            # project root基準
+      source: ./assets            # from the project root
       path: /assets
 ```
 
 ---
 
-## 6.11 CIから使う
+## 6.11 Using it from CI
 
 ```bash
-idev validate                     # Incus不要。設定の妥当性だけ確認する
+idev validate                     # no Incus needed; only checks the configuration
 ```
 
-Incusが使えるランナーであれば、実際に構築して検証できる。
+On a runner with Incus available, you can build the environment for real.
 
 ```bash
 idev up
-idev shell -- make test
+idev exec -- make test
 idev destroy --force
 ```
 
-`idev shell -- <command>` はコマンドの終了コードをそのまま返すため、
-CIの成否判定にそのまま使える。
+`idev exec -- <command>` passes the command's exit code straight through, so it
+works as a CI pass/fail check as it is.
 
 ---
 
-## 6.12 Ansibleを使う構成
+## 6.12 An Ansible-based layout
 
 ```text
 my-project/
@@ -335,4 +338,4 @@ provision:
       vars: .incus-dev/ansible/vars.yml
 ```
 
-書き方は [05-provisioning.md](05-provisioning.md) 5.3 を参照。
+See [05-provisioning.md](05-provisioning.md) 5.3 for how to write it.

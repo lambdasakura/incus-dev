@@ -12,14 +12,14 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/project"
-	"github.com/lambdasakura/incus-dev/internal/provision"
-	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/project"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
 )
 
-// globalFlags は全コマンド共通のフラグ。
+// globalFlags are the flags every command shares.
 type globalFlags struct {
 	verbose      bool
 	directory    string
@@ -27,16 +27,16 @@ type globalFlags struct {
 	incusProject string
 }
 
-// defaultIncusProject は指定が無い場合に使うIncus project。
+// defaultIncusProject is the Incus project used when none was named.
 const defaultIncusProject = "default"
 
-// errAborted は確認を拒否したことを示す。
+// errAborted reports that the confirmation was declined.
 var errAborted = errors.New("aborted")
 
-// appFactory はコマンドが使う App を生成する。テストでは差し替える。
+// appFactory builds the App a command uses. Tests replace it.
 type appFactory func(*globalFlags) (*App, error)
 
-// NewRootCommand は idev のルートコマンドを構成する。
+// NewRootCommand builds the root command of idev.
 func NewRootCommand(version string) *cobra.Command {
 	return newRootCommand(version, newApp)
 }
@@ -46,20 +46,21 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "idev",
-		Short: "Incusでプロジェクト単位の開発環境を構築・管理する",
-		Long: "idev は .incus-dev/dev.yml に宣言された内容に従って\n" +
-			"Incus instanceを用意し、宣言された手順を実行する。",
+		Short: "Manage per-project development environments with Incus",
+		Long: "idev prepares an Incus instance as declared in .incus-dev/dev.yml\n" +
+			"and runs the provisioning steps declared there.",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
 	pf := root.PersistentFlags()
-	pf.BoolVarP(&g.verbose, "verbose", "v", false, "詳細を出力する")
-	pf.StringVarP(&g.directory, "directory", "C", "", "探索を開始するディレクトリ（既定: カレントディレクトリ）")
+	pf.BoolVarP(&g.verbose, "verbose", "v", false, "print detailed output")
+	pf.StringVarP(&g.directory, "directory", "C", "",
+		"directory to start looking for .incus-dev/dev.yml in (default: current directory)")
 	pf.StringVar(&g.incusRemote, "incus-remote", "local", "Incus remote")
 	pf.StringVar(&g.incusProject, "incus-project", "",
-		"Incus project（未指定なら dev.yml の incus.project、それも無ければ default）")
+		"Incus project (defaults to incus.project in dev.yml, then \"default\")")
 
 	root.AddCommand(
 		newUpCommand(g, factory),
@@ -75,9 +76,9 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	return root
 }
 
-// resolveTarget は操作対象のIncusを決める。
+// resolveTarget decides which Incus to operate on.
 //
-// Incus projectはCLIの指定を優先し、無ければ dev.yml、それも無ければ default。
+// The CLI wins for the Incus project, then dev.yml, then "default".
 func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 	project := g.incusProject
 	if project == "" {
@@ -89,7 +90,7 @@ func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 	return incus.Target{Remote: g.incusRemote, Project: project}
 }
 
-// newApp はproject探索と設定読み込みを行い、Appを構成する。
+// newApp discovers the project, loads the configuration and builds the App.
 func newApp(g *globalFlags) (*App, error) {
 	start := g.directory
 	if start == "" {
@@ -118,7 +119,7 @@ func newApp(g *globalFlags) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	// --verbose でIncusへの操作を追えるようにする。
+	// So --verbose can follow what is done to Incus.
 	client.Logger = log
 
 	return NewAppFor(AppOptions{
@@ -137,10 +138,10 @@ func newApp(g *globalFlags) (*App, error) {
 	})
 }
 
-// isTerminal はファイルが端末に接続されているかを返す。
+// isTerminal reports whether a file is attached to a terminal.
 //
-// 端末でない場合に擬似端末を割り当てると出力へCRが混入するため、
-// idev shell の判断に使う。
+// Allocating a pseudo-terminal when it is not puts carriage returns into the
+// output, so idev shell decides by this.
 func isTerminal(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
@@ -153,7 +154,7 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 
 	c := &cobra.Command{
 		Use:   "up",
-		Short: "instanceを用意し、bootstrapとprovisionを実行する",
+		Short: "Create the instance, then run bootstrap and provisioning",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -167,9 +168,9 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", false,
-		"実行予定の操作を表示するだけで、Incusへ変更を加えない")
+		"show the planned operations without changing anything in Incus")
 	c.Flags().BoolVar(&restart, "restart", false,
-		"反映に再起動が必要な変更があれば、instanceを再起動する")
+		"restart the instance if a change needs it to take effect")
 
 	c.MarkFlagsMutuallyExclusive("dry-run", "restart")
 
@@ -185,7 +186,7 @@ func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 
 	c := &cobra.Command{
 		Use:   "provision",
-		Short: "instanceを作り直さずにprovisionのみ再実行する",
+		Short: "Re-run provisioning without recreating the instance",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -200,11 +201,11 @@ func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	}
 
 	c.Flags().StringArrayVar(&only, "step", nil,
-		"指定したステップのみ実行する（名前または番号。複数指定可）")
+		"run only the given steps (name or number; may be repeated)")
 	c.Flags().StringVar(&from, "from", "",
-		"指定したステップ以降を実行する（名前または番号）")
+		"run from the given step onwards (name or number)")
 	c.Flags().BoolVar(&listOnly, "list", false,
-		"provisionステップの一覧を表示する（Incusへは触れない）")
+		"list the provisioning steps (does not touch Incus)")
 
 	c.MarkFlagsMutuallyExclusive("step", "from")
 	c.MarkFlagsMutuallyExclusive("step", "list")
@@ -216,7 +217,7 @@ func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "shell [-- command...]",
-		Short: "コンテナ内でshell（または指定コマンド）を実行する",
+		Short: "Open a shell in the container, or run the given command",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
 			if err != nil {
@@ -225,7 +226,8 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			return app.Shell(cmd.Context(), args)
 		},
 	}
-	// idev shell -- bash -lc "..." の -lc を idev のフラグと解釈させない。
+	// Keep idev from reading the -lc of idev shell -- bash -lc "..." as its own
+	// flag.
 	c.Flags().SetInterspersed(false)
 
 	return c
@@ -234,7 +236,7 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "exec -- <command>",
-		Short: "コンテナ内でコマンドを実行する（端末を割り当てない）",
+		Short: "Run a command in the container without allocating a terminal",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
 			if err != nil {
@@ -243,7 +245,7 @@ func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			return app.Exec(cmd.Context(), args)
 		},
 	}
-	// idev exec -- ls -l の -l を idev のフラグと解釈させない。
+	// Keep idev from reading the -l of idev exec -- ls -l as its own flag.
 	c.Flags().SetInterspersed(false)
 
 	return c
@@ -253,7 +255,7 @@ func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	var asJSON bool
 	c := &cobra.Command{
 		Use:   "status",
-		Short: "対象instanceの状態を表示する",
+		Short: "Show the state of the instance",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -263,7 +265,7 @@ func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			return app.Status(cmd.Context(), asJSON)
 		},
 	}
-	c.Flags().BoolVar(&asJSON, "json", false, "JSONで出力する")
+	c.Flags().BoolVar(&asJSON, "json", false, "print machine-readable JSON")
 	return c
 }
 
@@ -274,7 +276,7 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "destroy",
-		Short: "instanceを削除する（ホスト側のソースは削除しない）",
+		Short: "Delete the instance (the sources on the host are left alone)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -282,14 +284,14 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("instance %s を削除します。よろしいですか?", app.InstanceName())) {
+				fmt.Sprintf("Delete instance %s?", app.InstanceName())) {
 				return errAborted
 			}
 			return app.Destroy(cmd.Context(), DestroyOptions{Volumes: volumes})
 		},
 	}
-	c.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
-	c.Flags().BoolVar(&volumes, "volumes", false, "永続ボリュームも削除する")
+	c.Flags().BoolVarP(&force, "force", "f", false, "skip the confirmation prompt")
+	c.Flags().BoolVar(&volumes, "volumes", false, "delete the persistent volumes as well")
 
 	return c
 }
@@ -298,7 +300,7 @@ func newRebuildCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	var force bool
 	c := &cobra.Command{
 		Use:   "rebuild",
-		Short: "instanceを破棄して作り直す",
+		Short: "Destroy the instance and create it again",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -306,25 +308,25 @@ func newRebuildCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("instance %s を破棄して作り直します。よろしいですか?", app.InstanceName())) {
+				fmt.Sprintf("Destroy and recreate instance %s?", app.InstanceName())) {
 				return errAborted
 			}
 			return app.Rebuild(cmd.Context())
 		},
 	}
-	c.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
+	c.Flags().BoolVarP(&force, "force", "f", false, "skip the confirmation prompt")
 	return c
 }
 
 func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "snapshot",
-		Short: "instanceのスナップショットを操作する",
+		Short: "Manage snapshots of the instance",
 	}
 
 	c.AddCommand(&cobra.Command{
 		Use:   "create [name]",
-		Short: "スナップショットを作成する（名前を省略すると日時）",
+		Short: "Create a snapshot (named after the current time if omitted)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
@@ -341,7 +343,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 
 	c.AddCommand(&cobra.Command{
 		Use:   "list",
-		Short: "スナップショットの一覧を表示する",
+		Short: "List the snapshots",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -355,7 +357,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	var force bool
 	restore := &cobra.Command{
 		Use:   "restore <name>",
-		Short: "スナップショットの状態へ戻す（instance内の現在の状態は失われる）",
+		Short: "Roll the instance back to a snapshot (its current state is lost)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
@@ -363,20 +365,20 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("instance %s を %s の状態へ戻します。現在の状態は失われます。よろしいですか?",
+				fmt.Sprintf("Roll instance %s back to %s? Its current state will be lost.",
 					app.InstanceName(), args[0])) {
 				return errAborted
 			}
 			return app.RestoreSnapshot(cmd.Context(), args[0])
 		},
 	}
-	restore.Flags().BoolVarP(&force, "force", "f", false, "確認せずに実行する")
+	restore.Flags().BoolVarP(&force, "force", "f", false, "skip the confirmation prompt")
 	c.AddCommand(restore)
 
 	var deleteForce bool
 	del := &cobra.Command{
 		Use:   "delete <name>",
-		Short: "スナップショットを削除する",
+		Short: "Delete a snapshot",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp(g)
@@ -384,13 +386,13 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 				return err
 			}
 			if !deleteForce && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("スナップショット %s を削除します。よろしいですか?", args[0])) {
+				fmt.Sprintf("Delete snapshot %s?", args[0])) {
 				return errAborted
 			}
 			return app.DeleteSnapshot(cmd.Context(), args[0])
 		},
 	}
-	del.Flags().BoolVarP(&deleteForce, "force", "f", false, "確認せずに実行する")
+	del.Flags().BoolVarP(&deleteForce, "force", "f", false, "skip the confirmation prompt")
 	c.AddCommand(del)
 
 	return c
@@ -399,7 +401,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate",
-		Short: "dev.ymlを検証する（Incusへは一切変更を加えない）",
+		Short: "Validate dev.yml (makes no change to Incus at all)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			app, err := newApp(g)
@@ -411,11 +413,12 @@ func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	}
 }
 
-// confirm は破壊操作の確認を求める。
+// confirm asks for confirmation before a destructive operation.
 func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	_, _ = fmt.Fprintf(out, "%s [y/N]: ", prompt)
 
-	// EOF でも、読み取れた内容があれば回答として扱う（末尾改行なしの入力）。
+	// Even at EOF, whatever was read counts as the answer, so input without a
+	// trailing newline works.
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && line == "" {
 		return false
@@ -429,17 +432,18 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	}
 }
 
-// Execute はルートコマンドを実行する。
+// Execute runs the root command.
 func Execute(ctx context.Context, version string, args []string) error {
 	root := NewRootCommand(version)
 	root.SetArgs(args)
 	return root.ExecuteContext(ctx)
 }
 
-// Report はエラーを出力し、プロセスの終了コードを返す。
+// Report prints the error and returns the process exit code.
 //
-// コンテナ内コマンドが異常終了しただけの場合は、その終了コードを返し、
-// devkit自身のエラーとしては表示しない（出力は既に中継済みであるため）。
+// A command inside the container that merely exited non-zero has its exit code
+// returned without being shown as devkit's own error: its output was already
+// streamed.
 func Report(w io.Writer, err error) int {
 	if err == nil {
 		return 0

@@ -3,53 +3,55 @@ package cli
 import (
 	"fmt"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/config"
 )
 
-// idmapPlan は解決済みのuid/gid対応付け方針。
+// idmapPlan is a resolved uid/gid mapping strategy.
 //
-// 「どの方式を使うか」と「そもそもdevkitが管理するか」を1つの値にまとめ、
-// 計画の算出（plan.go）と適用（app.go）が同じ判断を共有できるようにする。
+// Holding "which strategy" and "does devkit manage this at all" in one value is
+// what lets planning (plan.go) and applying (app.go) share the same decision.
 type idmapPlan struct {
-	// Mode は適用する方式。Managed が偽の場合は意味を持たない。
+	// Mode is the strategy to apply. It is meaningless when Managed is false.
 	Mode config.IDMapMode
-	// Managed はdevkitが対応付けを管理するか。
-	// 利用者が instance.config で raw.idmap を明示した場合や、
-	// コンテナ以外のinstanceでは偽になる。
+	// Managed reports whether devkit manages the mapping. It is false when the
+	// user set raw.idmap in instance.config, and for instances that are not
+	// containers.
 	Managed bool
-	// UID / GID はホスト側の実行ユーザー。
+	// UID and GID are the invoking host user.
 	UID, GID int
-	// Warning は利用者へ伝えるべき事項。空なら無し。
+	// Warning is what to tell the user. Empty means nothing.
 	Warning string
 }
 
-// shiftEnabled はdisk deviceに shift を設定すべきかを返す。
+// shiftEnabled reports whether disk devices should get shift set.
 func (p idmapPlan) shiftEnabled() bool {
 	return p.Managed && p.Mode == config.IDMapShift
 }
 
-// rawIDMap は raw.idmap へ設定すべき値を返す。設定しない場合は空。
+// rawIDMap returns the value to set raw.idmap to, or the empty string to set
+// nothing.
 func (p idmapPlan) rawIDMap() string {
 	if !p.Managed || p.Mode != config.IDMapRaw {
 		return ""
 	}
-	// uidとgidは異なりうるため個別に写像する。
+	// The uid and the gid can differ, so map them separately.
 	return fmt.Sprintf("uid %d 0\ngid %d 0", p.UID, p.GID)
 }
 
-// userManagesIDMap は利用者が自分で対応付けを指定しているかを返す。
+// userManagesIDMap reports whether the user set the mapping themselves.
 func userManagesIDMap(cfg *config.Config) bool {
 	_, explicit := cfg.Instance.Config[idmapConfigKey]
 	return explicit
 }
 
-// resolveIDMap は適用するidmap方針を決める。
+// resolveIDMap decides which idmap strategy to apply.
 //
-//   - 利用者が raw.idmap を明示している場合は介入しない
-//   - コンテナ以外では対応付けの概念が異なるため介入しない
-//   - auto : raw が使えれば raw、使えなければ shift へ退避（警告を返す）
-//   - raw  : 使えない場合はエラー
-//   - shift / none : そのまま
+//   - With raw.idmap set by the user, it stays out of the way
+//   - Outside a container the mapping means something else, so it stays out of
+//     the way there too
+//   - auto: raw when raw works, otherwise fall back to shift and warn
+//   - raw: an error when raw does not work
+//   - shift and none: as they are
 func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) error) (idmapPlan, error) {
 	plan := idmapPlan{UID: uid, GID: gid}
 	declared := cfg.WorkspaceOrDefault().IDMap
@@ -62,7 +64,7 @@ func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) err
 		return plan, nil
 	}
 	if cfg.Instance.TypeOrDefault() != "container" {
-		// raw.idmap も disk の shift もコンテナ固有の仕組みである。
+		// Both raw.idmap and a disk's shift are container-only mechanisms.
 		return plan, nil
 	}
 
@@ -76,10 +78,11 @@ func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) err
 		}
 	case config.IDMapAuto:
 		if err := check(uid, gid); err != nil {
-			// ホストへ手を入れなくても動くよう、エラーとせずshiftへ退避する。
+			// Fall back to shift rather than failing, so it works without the host
+			// being touched.
 			plan.Mode = config.IDMapShift
 			plan.Warning = fallbackWarning(uid, gid)
-			//nolint:nilerr // 退避は意図した動作であり、警告として利用者へ伝える
+			//nolint:nilerr // the fallback is deliberate, and the user is told through the warning
 			return plan, nil
 		}
 		plan.Mode = config.IDMapRaw
@@ -87,7 +90,7 @@ func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) err
 	return plan, nil
 }
 
-// fallbackWarning は shift へ退避したことと、より良い設定方法を伝える。
+// fallbackWarning says that it fell back to shift, and how to do better.
 func fallbackWarning(uid, gid int) string {
 	return fmt.Sprintf(
 		"workspace is mounted with shift (idmapped mount) because raw.idmap is not permitted on this host.\n"+

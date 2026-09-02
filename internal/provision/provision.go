@@ -7,23 +7,26 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
 )
 
-// defaultBootstrapScript は provision に ansible ステップがある場合の既定bootstrap。
+// defaultBootstrapScript is the bootstrap used when provision has an ansible
+// step.
 //
-// Ansible Moduleの実行にはコンテナ内のPythonが必要なため、これのみdevkitが持つ。
-// Debian系イメージを前提とするため、他のOSではプロジェクト側で bootstrap を
-// 明示すること（仕様 06-provisioning.md 6.3.2、REQ-007の唯一の例外）。
+// Ansible modules need Python in the container, which is why devkit carries
+// this one thing. It assumes a Debian-family image; on any other OS the
+// project must declare bootstrap itself (spec 06-provisioning.md 6.3.2 — the
+// sole exception to REQ-007).
 const defaultBootstrapScript = `command -v python3 >/dev/null 2>&1 || ` +
 	`(apt-get update && apt-get install -y python3)`
 
-// DefaultBootstrapName は既定bootstrapステップの表示名。
+// DefaultBootstrapName is the display name of the default bootstrap step.
 const DefaultBootstrapName = "bootstrap (default)"
 
-// defaultBootstrapHint は既定bootstrapが失敗したときの案内。
+// defaultBootstrapHint is what to tell the user when the default bootstrap
+// fails.
 const defaultBootstrapHint = `The default bootstrap assumes a Debian-family image (apt-get).
 Define bootstrap explicitly in dev.yml for this image, for example:
 
@@ -32,11 +35,11 @@ Define bootstrap explicitly in dev.yml for this image, for example:
 
 Use "bootstrap: []" to skip it entirely.`
 
-// BootstrapSteps は実行すべきbootstrapステップを返す。
+// BootstrapSteps returns the bootstrap steps to run.
 //
-//   - bootstrap が明示されていればそれを使う（空リストは無効化）
-//   - 省略時、ansible ステップがあれば既定bootstrapを使う
-//   - それ以外は何もしない
+//   - Declared bootstrap wins (an empty list disables it)
+//   - Omitted, the default bootstrap is used when there is an ansible step
+//   - Otherwise nothing runs
 func BootstrapSteps(cfg *config.Config) []config.Step {
 	if cfg.Bootstrap != nil {
 		return *cfg.Bootstrap
@@ -50,27 +53,26 @@ func BootstrapSteps(cfg *config.Config) []config.Step {
 	}}
 }
 
-// Executor はステップを実行する。
+// Executor runs steps.
 type Executor struct {
 	Incus  incus.Client
 	Runner runner.Runner
 	Logger *slog.Logger
-	// Stdout / Stderr はステップ出力の中継先。nilの場合は破棄する。
+	// Stdout and Stderr are where step output is streamed. nil discards it.
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// ansibleステップの前提確認は1度だけ行う。
+	// The prerequisites for ansible steps are checked once.
 	ansibleCheck sync.Once
 	ansibleErr   error
 }
 
-// Bootstrap はbootstrapステップを実行する。
+// Bootstrap runs the bootstrap steps.
 func (e *Executor) Bootstrap(ctx context.Context, cfg *config.Config, env Env) error {
 	return e.RunSteps(ctx, BootstrapSteps(cfg), "bootstrap", env)
 }
 
-// Provision はprovisionステップを実行する。
-// sel が指定されていれば、その一部だけを実行する。
+// Provision runs the provision steps, or only the subset sel names.
 func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env, sel Selection) error {
 	indices, err := Select(cfg.Provision, sel)
 	if err != nil {
@@ -79,7 +81,7 @@ func (e *Executor) Provision(ctx context.Context, cfg *config.Config, env Env, s
 	return e.runSteps(ctx, cfg.Provision, indices, "provision", env)
 }
 
-// RunSteps はステップを順に実行する。失敗した時点で後続を実行しない。
+// RunSteps runs the steps in order, stopping at the first failure.
 func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind string, env Env) error {
 	indices := make([]int, len(steps))
 	for i := range steps {
@@ -88,10 +90,10 @@ func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind strin
 	return e.runSteps(ctx, steps, indices, kind, env)
 }
 
-// runSteps は indices で指定された位置のステップを、宣言順に実行する。
+// runSteps runs the steps at the given indices, in declaration order.
 //
-// ラベルには全体の中での位置を示す。一部だけを実行した場合に
-// "step 1/1" と表示されると、どれを流したのか分からなくなるため。
+// The label shows the position within the whole list. Showing "step 1/1" for a
+// partial run would leave no way to tell which step it was.
 func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []int, kind string, env Env) error {
 	total := len(steps)
 	for _, i := range indices {
@@ -101,8 +103,9 @@ func (e *Executor) runSteps(ctx context.Context, steps []config.Step, indices []
 
 		if err := e.runStep(ctx, step, env); err != nil {
 			if step.Name == DefaultBootstrapName {
-				// 既定bootstrapはDebian系を前提とする。失敗した場合は
-				// プロジェクト側で明示するよう促す（仕様 06-provisioning.md 6.3.2）。
+				// The default bootstrap assumes a Debian family. When it fails,
+				// tell the project to declare its own (spec 06-provisioning.md
+				// 6.3.2).
 				return fmt.Errorf("%s: %w\n\n%s", label, err, defaultBootstrapHint)
 			}
 			return fmt.Errorf("%s: %w", label, err)

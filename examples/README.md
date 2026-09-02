@@ -1,21 +1,24 @@
 # examples
 
-プロジェクト側 `.incus-dev/` の構成例。
+Worked examples of a project-side `.incus-dev/`.
 
-これらは **ドキュメントとしてのみ** 存在し、`idev` の実行時には参照されない。
-バイナリにも同梱しない（REQ-007）。
+*[日本語版 / Japanese](README.ja.md)*
 
-| 例 | 内容 |
+These exist **as documentation only**. `idev` never reads them at run time, and
+they are not embedded in the binary.
+
+| Example | Contents |
 | --- | --- |
-| [minimal](minimal/) | `dev.yml` 1ファイルのみ |
-| [shell-based](shell-based/) | シェルスクリプトで構成（Ansible不要） |
-| [ansible-based](ansible-based/) | Ansibleで構成 |
+| [minimal](minimal/) | A single `dev.yml`, nothing else |
+| [shell-based](shell-based/) | Provisioned with shell scripts; no Ansible |
+| [ansible-based](ansible-based/) | Provisioned with Ansible |
 
-各例のディレクトリで以下を実行できる。
+You can run the following inside any of these directories.
 
 ```bash
 idev validate
 idev up
 ```
 
-構成の説明は [docs/spec/10-examples.md](../docs/spec/10-examples.md) を参照。
+Each example is explained in [docs/spec/10-examples.md](../docs/spec/10-examples.md)
+(Japanese).

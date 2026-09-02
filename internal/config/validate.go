@@ -11,13 +11,13 @@ import (
 	"strings"
 )
 
-// Problem はvalidationで検出した1件の問題。
+// Problem is one thing validation found.
 type Problem struct {
 	Path    string
 	Message string
 }
 
-// ValidationError は検出した問題をまとめて報告する。
+// ValidationError reports everything validation found, together.
 type ValidationError struct {
 	Problems []Problem
 }
@@ -46,7 +46,8 @@ func (p problems) err() error {
 	return &ValidationError{Problems: p}
 }
 
-// validateSemantics は構造検証を通過した設定に対する意味的な検証を行う。
+// validateSemantics checks the meaning of a configuration that already passed
+// the structural checks.
 func validateSemantics(c *Config, raw map[string]any, ps *problems) {
 	validateRuntime(c, ps)
 	validateSteps(raw, "bootstrap", false, ps)
@@ -77,8 +78,8 @@ func validateRuntime(c *Config, ps *problems) {
 	}
 }
 
-// runtimeCompatible は required が current で満たせるかを判定する。
-// majorが一致し、かつ required の minor が current 以下であれば互換とする。
+// runtimeCompatible reports whether current satisfies required: the majors
+// must match, and required's minor must not exceed current's.
 func runtimeCompatible(required, current string) (bool, error) {
 	rMajor, rMinor, err := parseVersion(required)
 	if err != nil {
@@ -117,7 +118,7 @@ func parseVersion(v string) (major, minor int, err error) {
 	return major, minor, nil
 }
 
-// validateVolumes は永続ボリュームの宣言を検証する。
+// validateVolumes checks the persistent volume declarations.
 func validateVolumes(c *Config, ps *problems) {
 	for _, name := range sortedKeys(c.Volumes) {
 		vol := c.Volumes[name]
@@ -135,7 +136,7 @@ func validateVolumes(c *Config, ps *problems) {
 	}
 }
 
-// validateSecrets は秘密情報の宣言を検証する。
+// validateSecrets checks the secret declarations.
 func validateSecrets(c *Config, ps *problems) {
 	for _, name := range sortedKeys(c.Secrets) {
 		secret := c.Secrets[name]
@@ -153,7 +154,7 @@ func validateSecrets(c *Config, ps *problems) {
 	}
 }
 
-// validateShell は shell 設定を検証する。
+// validateShell checks the shell settings.
 func validateShell(c *Config, ps *problems) {
 	if c.Shell == nil {
 		return
@@ -171,8 +172,8 @@ func validateShell(c *Config, ps *problems) {
 	}
 }
 
-// validateStepValues は、コンテナ内でのコマンド実行時に
-// オプションとして解釈されうる値を拒否する。
+// validateStepValues rejects values that would be taken for options when the
+// command runs inside the container.
 func validateStepValues(c *Config, ps *problems) {
 	check := func(steps []Step, kind string) {
 		for i, s := range steps {
@@ -197,14 +198,15 @@ func validateStepValues(c *Config, ps *problems) {
 	check(c.Provision, "provision")
 }
 
-// runOnlyFields は run ステップ専用のフィールド。
+// runOnlyFields are the fields only a run step may have.
 var runOnlyFields = []string{"cwd", "env", "shell", "user"}
 
-// stepKinds はステップの種別を表すキー。
+// stepKinds are the keys that name a step's kind.
 var stepKinds = []string{"run", "ansible", "galaxy"}
 
-// validateSteps はステップの形（run/ansibleの排他性など）を生のドキュメントから検証する。
-// 位置情報を正確に報告するため、構造体ではなく raw を見る。
+// validateSteps checks the shape of the steps — run and ansible being mutually
+// exclusive, and so on — against the raw document rather than the struct, so
+// that positions can be reported exactly.
 func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *problems) {
 	list, ok := raw[key].([]any)
 	if !ok {
@@ -248,14 +250,15 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 	}
 }
 
-// devkitEnvPrefix はdevkitが注入する環境変数の接頭辞。
+// devkitEnvPrefix is the prefix of the environment variables devkit injects.
 const devkitEnvPrefix = "DEVKIT_"
 
-// profileNamePattern はIncusのProfile名として妥当な形。
+// profileNamePattern is the shape of a valid Incus profile name.
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func validateInstance(c *Config, ps *problems) {
-	// "-" で始まるimage参照は、remoteと名前への分解が成り立たない。
+	// An image reference starting with "-" cannot be split into a remote and a
+	// name.
 	if strings.HasPrefix(c.Instance.Image, "-") {
 		ps.add("instance.image", "must not start with %q", "-")
 	}
@@ -269,8 +272,8 @@ func validateInstance(c *Config, ps *problems) {
 		}
 	}
 
-	// Incusが受け付けないキー形式を、適用する前に知らせる。
-	// "-" で始まるキー、"=" を含むキーはいずれも拒否される。
+	// Report key shapes Incus will not accept before we try to apply them. It
+	// rejects keys starting with "-" and keys containing "=".
 	for _, k := range sortedKeys(c.Instance.Config) {
 		if strings.HasPrefix(k, "-") {
 			ps.add("instance.config."+k, "key must not start with %q", "-")
@@ -295,8 +298,8 @@ func validateInstance(c *Config, ps *problems) {
 		}
 	}
 
-	// profiles: [] はProfileを一切適用しないため、Incusが必要とする
-	// root diskをプロジェクト側で宣言しなければならない。
+	// profiles: [] applies no profile at all, so the project has to declare
+	// the root disk Incus requires.
 	if c.Instance.Profiles != nil && len(*c.Instance.Profiles) == 0 && !hasRootDisk(c.Instance.Devices) {
 		ps.add("instance.devices",
 			"a root disk device is required because instance.profiles is empty; "+
@@ -314,12 +317,13 @@ func validateInstance(c *Config, ps *problems) {
 	}
 }
 
-// isVolumeSource は source がホストのパスではなくストレージボリューム名かを返す。
+// isVolumeSource reports whether source names a storage volume rather than a
+// path on the host.
 func isVolumeSource(dev StringMap) bool {
 	return dev["type"] == "disk" && dev["pool"] != ""
 }
 
-// hasRootDisk はコンテナのrootを提供するdiskがあるかを返す。
+// hasRootDisk reports whether a disk provides the container's root.
 func hasRootDisk(devices map[string]StringMap) bool {
 	for _, dev := range devices {
 		if dev["type"] == "disk" && dev["path"] == "/" {
@@ -349,11 +353,11 @@ func validatePaths(c *Config, ps *problems) {
 		dev := c.Instance.Devices[name]
 		source, ok := dev["source"]
 		if !ok || source == "" || filepath.IsAbs(source) {
-			// ホスト側の絶対パスは環境依存のため検査しない。
+			// An absolute host path is environment-specific, so leave it alone.
 			continue
 		}
 		if isVolumeSource(dev) {
-			// pool を伴うdiskの source はストレージボリューム名であり、パスではない。
+			// The source of a disk with a pool is a volume name, not a path.
 			continue
 		}
 		if _, err := os.Stat(c.ResolvePath(source)); err != nil {

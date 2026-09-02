@@ -19,7 +19,7 @@ import (
 
 var errAPI = errors.New("api failed")
 
-// fakeOp は完了済みの操作を表す。
+// fakeOp is an operation that has already finished.
 type fakeOp struct {
 	err      error
 	metadata map[string]any
@@ -33,7 +33,7 @@ func (o *fakeOp) RemoveHandler(*incusclient.EventTarget) error                  
 func (o *fakeOp) Refresh() error                                                   { return nil }
 func (o *fakeOp) Wait() error                                                      { return o.err }
 
-// WaitContext は本物同様、中断されたら待たずに戻る。
+// WaitContext returns without waiting once interrupted, as the real one does.
 func (o *fakeOp) WaitContext(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -43,12 +43,12 @@ func (o *fakeOp) WaitContext(ctx context.Context) error {
 	}
 }
 
-// fakeRemoteOp は転送を伴う操作を表す。
+// fakeRemoteOp is an operation that involves a transfer.
 type fakeRemoteOp struct {
 	err error
-	// block が非nilの場合、閉じるまで完了しない。
+	// block, when non-nil, holds the operation open until it is closed.
 	block chan struct{}
-	// canceled は取り消しが要求されたか。
+	// canceled reports whether a cancellation was requested.
 	canceled chan struct{}
 }
 
@@ -69,45 +69,46 @@ func (o *fakeRemoteOp) Wait() error {
 	return o.err
 }
 
-// fakeServer はIncus APIのfake。
+// fakeServer is a fake of the Incus API.
 type fakeServer struct {
 	instances map[string]*api.InstanceFull
 	profiles  []string
 	volumes   map[string][]api.StorageVolume
 	snapshots map[string][]api.InstanceSnapshot
 
-	// calls は呼び出しの記録。
+	// calls records the calls.
 	calls []string
-	// err は操作名に対して返すエラー。
+	// err maps an operation name to the error to return.
 	err map[string]error
-	// opErr は操作の完了時に返すエラー。
+	// opErr maps an operation name to the error to return on completion.
 	opErr map[string]error
-	// execMeta は ExecInstance の完了時メタデータ。
+	// execMeta is the metadata ExecInstance completes with.
 	execMeta map[string]any
-	// beforeExec は ExecInstance の直前に呼ばれる。
+	// beforeExec runs just before ExecInstance.
 	beforeExec func()
-	// holdData が非nilの場合、閉じるまで出力の中継が終わらない。
+	// holdData, when non-nil, keeps the output streaming until it is closed.
 	holdData chan struct{}
-	// beforeInstance は GetInstanceFull の直前に呼ばれる。
+	// beforeInstance runs just before GetInstanceFull.
 	beforeInstance func()
-	// beforeState は UpdateInstanceState の直前に呼ばれる。
+	// beforeState runs just before UpdateInstanceState.
 	beforeState func()
-	// lastExec は最後の exec 要求。
+	// lastExec is the most recent exec request.
 	lastExec api.InstanceExecPost
-	// lastExecArgs は最後の exec に渡された入出力・制御の指定。
+	// lastExecArgs are the stream and control settings the last exec was given.
 	lastExecArgs *incusclient.InstanceExecArgs
-	// lastCreate は最後の作成要求。
+	// lastCreate is the most recent create request.
 	lastCreate api.InstancesPost
-	// lastImage / lastSource は作成に使ったimageと取得元。
+	// lastImage and lastSource are the image and its source used to create.
 	lastImage  api.Image
 	lastSource incusclient.ImageServer
-	// createOp は CreateInstanceFromImage が返す操作。nilなら既定。
+	// createOp is the operation CreateInstanceFromImage returns. nil means the
+	// default.
 	createOp *fakeRemoteOp
-	// lastUpdate は最後に送った更新内容。
+	// lastUpdate is the most recent update that was sent.
 	lastUpdate api.InstancePut
-	// lastVolume は最後のボリューム作成要求。
+	// lastVolume is the most recent volume creation request.
 	lastVolume api.StorageVolumesPost
-	// lastState は最後の状態変更要求。
+	// lastState is the most recent state change request.
 	lastState api.InstanceStatePut
 }
 
@@ -152,7 +153,8 @@ func (f *fakeServer) GetInstanceFull(name string) (*api.InstanceFull, string, er
 	if !ok {
 		return nil, "", api.StatusErrorf(404, "Instance not found")
 	}
-	// 本物はレスポンスを毎回組み立てる。保持している値を共有しない。
+	// The real thing builds a response every time, so do not share the value
+	// we hold.
 	copied := *inst
 	copied.Config = maps.Clone(inst.Config)
 	copied.Devices = cloneDevices(inst.Devices)
@@ -182,8 +184,8 @@ func (f *fakeServer) UpdateInstance(name string, put api.InstancePut, _ string) 
 		return nil, err
 	}
 	if inst, ok := f.instances[name]; ok {
-		// 本物は送った内容で置き換える。呼び出し側が保持しているマップを
-		// そのまま共有すると、更新を送っていない実装でもテストが通ってしまう。
+		// The real thing replaces it with what was sent. Sharing the caller's
+		// map would let an implementation that never sends an update pass.
 		inst.Config = maps.Clone(put.Config)
 		inst.Devices = cloneDevices(put.Devices)
 		inst.Profiles = slices.Clone(put.Profiles)
@@ -239,7 +241,7 @@ func (f *fakeServer) ExecInstance(_ string, exec api.InstanceExecPost, args *inc
 		return nil, err
 	}
 	if args != nil && args.DataDone != nil {
-		// 本物は出力の中継が終わってから閉じる。
+		// The real thing closes only once the output has finished streaming.
 		done, hold := args.DataDone, f.holdData
 		go func() {
 			if hold != nil {
@@ -319,7 +321,8 @@ func (f *fakeServer) DeleteInstanceSnapshot(name, snapshot string) (incusclient.
 	if err := f.record("DeleteInstanceSnapshot"); err != nil {
 		return nil, err
 	}
-	// 本物は "instance/snapshot" 形式で返すことがあるため、名前部分で比較する。
+	// The real thing may return the "instance/snapshot" form, so compare on
+	// the name alone.
 	kept := f.snapshots[name][:0]
 	for _, s := range f.snapshots[name] {
 		if snapshotName(s.Name) != snapshot {
@@ -331,13 +334,13 @@ func (f *fakeServer) DeleteInstanceSnapshot(name, snapshot string) (incusclient.
 	return f.op("DeleteInstanceSnapshot"), nil
 }
 
-// fakeImages はimage参照の解決をfakeする。
+// fakeImages fakes resolving an image reference.
 type fakeImages struct {
 	err error
-	// ref / instanceType は解決を求められた内容。
+	// ref and instanceType are what it was asked to resolve.
 	ref          string
 	instanceType string
-	// server は取得元として返すサーバ。
+	// server is the source it returns.
 	server incusclient.ImageServer
 }
 
@@ -388,10 +391,10 @@ func TestAPIInstance(t *testing.T) {
 		t.Errorf("Devices = %v", got.Devices)
 	}
 	if !got.HasNIC() {
-		t.Error("HasNIC() = false, expanded_devices を読めていない")
+		t.Error("HasNIC() = false, expanded_devices was not read")
 	}
 	if !got.HasIPv4Address() {
-		t.Error("HasIPv4Address() = false, state を読めていない")
+		t.Error("HasIPv4Address() = false, state was not read")
 	}
 	if diff := cmp.Diff([]string{"default"}, got.Profiles); diff != "" {
 		t.Errorf("Profiles mismatch (-want +got):\n%s", diff)
@@ -424,14 +427,15 @@ func TestAPICreateInstance(t *testing.T) {
 	}
 
 	if images.ref != "images:alpine/3.21" || images.instanceType != "container" {
-		t.Errorf("image解決 = %q / %q", images.ref, images.instanceType)
+		t.Errorf("image resolution = %q / %q", images.ref, images.instanceType)
 	}
-	// 解決結果をそのままIncusへ渡すこと（fingerprintが違えば別のimageになる）
+	// What was resolved goes to Incus as it is: a different fingerprint is a
+	// different image.
 	if f.lastImage.Fingerprint != "abc123" {
-		t.Errorf("image = %+v, 解決したimageを渡すこと", f.lastImage)
+		t.Errorf("image = %+v, want the resolved image passed", f.lastImage)
 	}
 	if f.lastSource != images.server {
-		t.Errorf("取得元 = %v, 解決した取得元を渡すこと", f.lastSource)
+		t.Errorf("source = %v, want the resolved source passed", f.lastSource)
 	}
 	req := f.lastCreate
 	if req.Name != "dev-x" || string(req.Type) != "container" {
@@ -445,7 +449,7 @@ func TestAPICreateInstance(t *testing.T) {
 	}
 }
 
-// profiles: [] は「Profileを適用しない」を意味する
+// profiles: [] means "apply no profile".
 func TestAPICreateInstanceWithoutProfiles(t *testing.T) {
 	f := newFakeServer()
 	a, _ := newAPI(f)
@@ -456,7 +460,7 @@ func TestAPICreateInstanceWithoutProfiles(t *testing.T) {
 		t.Fatalf("CreateInstance() error = %v", err)
 	}
 	if got := f.lastCreate.Profiles; len(got) != 0 || got == nil {
-		t.Errorf("Profiles = %v, 空リストを渡すこと", got)
+		t.Errorf("Profiles = %v, want an empty list passed", got)
 	}
 }
 
@@ -469,10 +473,10 @@ func TestAPIStartStop(t *testing.T) {
 		t.Fatalf("StopInstance() error = %v", err)
 	}
 	if f.lastState.Action != "stop" || f.lastState.Force {
-		t.Errorf("state = %+v, 作業中のプロセスを殺さないよう正常停止すること", f.lastState)
+		t.Errorf("state = %+v, want a graceful stop so running work is not killed", f.lastState)
 	}
 	if f.lastState.Timeout <= 0 {
-		t.Errorf("timeout = %d, 応答しないinstanceで待ち続けないこと", f.lastState.Timeout)
+		t.Errorf("timeout = %d, want a bound so an unresponsive instance is not waited on forever", f.lastState.Timeout)
 	}
 
 	if err := a.StartInstance(context.Background(), "dev-x"); err != nil {
@@ -483,15 +487,15 @@ func TestAPIStartStop(t *testing.T) {
 	}
 }
 
-// 正常停止できないinstanceは強制停止する。
-// idev up --restart / destroy が固まってしまうのを避ける。
+// An instance that will not stop gracefully is forced, so idev up --restart
+// and destroy do not hang.
 func TestAPIStopFallsBackToForce(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
 	f.opErr["UpdateInstanceState"] = errAPI
 	a, _ := newAPI(f)
 
-	// 2回目（強制停止）は成功させる
+	// Let the second call, the forced stop, succeed.
 	calls := 0
 	f.beforeState = func() {
 		calls++
@@ -504,14 +508,14 @@ func TestAPIStopFallsBackToForce(t *testing.T) {
 		t.Fatalf("StopInstance() error = %v", err)
 	}
 	if calls != 2 {
-		t.Errorf("呼び出し回数 = %d, 正常停止のあとに強制停止すること", calls)
+		t.Errorf("calls = %d, want a forced stop after the graceful one", calls)
 	}
 	if !f.lastState.Force {
-		t.Errorf("state = %+v, 2回目は強制停止すること", f.lastState)
+		t.Errorf("state = %+v, want the second attempt forced", f.lastState)
 	}
 }
 
-// 停止中のinstanceを停止しようとしない
+// A stopped instance is not asked to stop.
 func TestAPIStopAlreadyStopped(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{}).Status = "Stopped"
@@ -522,12 +526,12 @@ func TestAPIStopAlreadyStopped(t *testing.T) {
 	}
 	for _, c := range f.calls {
 		if c == "UpdateInstanceState" {
-			t.Error("停止中のinstanceへ停止要求を出している")
+			t.Error("sent a stop request to an already-stopped instance")
 		}
 	}
 }
 
-// 稼働中のinstanceは停止してから削除する
+// A running instance is stopped before it is deleted.
 func TestAPIDeleteStopsRunningInstance(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -537,7 +541,7 @@ func TestAPIDeleteStopsRunningInstance(t *testing.T) {
 		t.Fatalf("DeleteInstance() error = %v", err)
 	}
 	if _, ok := f.instances["dev-x"]; ok {
-		t.Error("削除されていない")
+		t.Error("it was not removed")
 	}
 
 	var stopped, deleted bool
@@ -547,7 +551,7 @@ func TestAPIDeleteStopsRunningInstance(t *testing.T) {
 			stopped = true
 		case "DeleteInstance":
 			if !stopped {
-				t.Error("停止する前に削除している")
+				t.Error("deleted it before stopping it")
 			}
 			deleted = true
 		}
@@ -557,7 +561,7 @@ func TestAPIDeleteStopsRunningInstance(t *testing.T) {
 	}
 }
 
-// Running 以外の非停止状態でも削除できること
+// It deletes from a non-stopped state other than Running too.
 func TestAPIDeleteStopsNonRunningInstance(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{}).Status = "Frozen"
@@ -567,10 +571,10 @@ func TestAPIDeleteStopsNonRunningInstance(t *testing.T) {
 		t.Fatalf("DeleteInstance() error = %v", err)
 	}
 	if _, ok := f.instances["dev-x"]; ok {
-		t.Error("削除されていない")
+		t.Error("it was not removed")
 	}
 	if !f.lastState.Force {
-		t.Errorf("state = %+v, 削除前の停止は強制でよい", f.lastState)
+		t.Errorf("state = %+v, forcing the stop before a delete is fine", f.lastState)
 	}
 }
 
@@ -585,16 +589,16 @@ func TestAPIApplyConfig(t *testing.T) {
 
 	got := f.lastUpdate.Config
 	if got["limits.cpu"] != "8" || got["keep"] != "yes" {
-		t.Errorf("送信したconfig = %v, 宣言外のキーは残すこと", got)
+		t.Errorf("config sent = %v, want undeclared keys kept", got)
 	}
 
-	// 空なら呼び出さない
+	// Nothing to apply means no call.
 	before := len(f.calls)
 	if err := a.ApplyConfig(context.Background(), "dev-x", nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.calls) != before {
-		t.Errorf("calls = %v, 空のconfigでは呼び出さないこと", f.calls[before:])
+		t.Errorf("calls = %v, want no call for an empty config", f.calls[before:])
 	}
 }
 
@@ -608,10 +612,10 @@ func TestAPIUnsetConfig(t *testing.T) {
 	}
 	got := f.lastUpdate.Config
 	if _, ok := got["a"]; ok {
-		t.Errorf("送信したconfig = %v, 削除されていない", got)
+		t.Errorf("config sent = %v, it was not removed", got)
 	}
 	if got["b"] != "2" {
-		t.Errorf("config = %v, 指定外のキーを消している", got)
+		t.Errorf("config = %v, a key that was not named got removed", got)
 	}
 }
 
@@ -625,7 +629,7 @@ func TestAPIApplyDevices(t *testing.T) {
 
 	err := a.ApplyDevices(context.Background(), "dev-x", map[string]Device{
 		"workspace": {"type": "disk", "path": "/workspace2"},
-		"data":      {"type": "proxy", "listen": "tcp:1"}, // 型が変わる
+		"data":      {"type": "proxy", "listen": "tcp:1"}, // the type changes
 		"new":       {"type": "nic"},
 	})
 	if err != nil {
@@ -634,13 +638,13 @@ func TestAPIApplyDevices(t *testing.T) {
 
 	got := f.lastUpdate.Devices
 	if got["workspace"]["path"] != "/workspace2" || got["workspace"]["shift"] != "true" {
-		t.Errorf("workspace = %v, 宣言外のキーは残すこと", got["workspace"])
+		t.Errorf("workspace = %v, want undeclared keys kept", got["workspace"])
 	}
 	if got["data"]["type"] != "proxy" {
-		t.Errorf("data = %v, 型変更時は作り直すこと", got["data"])
+		t.Errorf("data = %v, want it recreated when the type changed", got["data"])
 	}
 	if _, ok := got["data"]["source"]; ok {
-		t.Errorf("data = %v, 作り直したのに古いキーが残っている", got["data"])
+		t.Errorf("data = %v, an old key survived the recreation", got["data"])
 	}
 	if got["new"]["type"] != "nic" {
 		t.Errorf("new = %v", got["new"])
@@ -659,10 +663,10 @@ func TestAPIRemoveDevices(t *testing.T) {
 	}
 	got := f.lastUpdate.Devices
 	if _, ok := got["gone"]; ok {
-		t.Error("削除されていない")
+		t.Error("it was not removed")
 	}
 	if _, ok := got["keep"]; !ok {
-		t.Error("指定外のdeviceを消している")
+		t.Error("a device that was not named got removed")
 	}
 }
 
@@ -675,7 +679,7 @@ func TestAPIProfileExists(t *testing.T) {
 		t.Errorf("ProfileExists(gpu) = %v, %v", ok, err)
 	}
 	if ok, _ := a.ProfileExists(context.Background(), "missing"); ok {
-		t.Error("存在しないProfileを存在すると判定している")
+		t.Error("reported a profile that does not exist as existing")
 	}
 }
 
@@ -695,20 +699,20 @@ func TestAPIVolumes(t *testing.T) {
 		t.Errorf("request = %+v", f.lastVolume)
 	}
 	if ok, _ := a.VolumeExists(ctx, "default", "vol"); !ok {
-		t.Error("作成したボリュームが見つからない")
+		t.Error("the volume that was created cannot be found")
 	}
 
-	// custom以外は対象外
+	// Anything but custom is out of scope.
 	f.volumes["default"] = append(f.volumes["default"], api.StorageVolume{Name: "img", Type: "image"})
 	if ok, _ := a.VolumeExists(ctx, "default", "img"); ok {
-		t.Error("custom以外のvolumeを存在扱いしないこと")
+		t.Error("want a non-custom volume not treated as existing")
 	}
 
 	if err := a.DeleteVolume(ctx, "default", "vol"); err != nil {
 		t.Fatalf("DeleteVolume() error = %v", err)
 	}
 	if ok, _ := a.VolumeExists(ctx, "default", "vol"); ok {
-		t.Error("削除されていない")
+		t.Error("it was not removed")
 	}
 }
 
@@ -730,11 +734,11 @@ func TestAPISnapshots(t *testing.T) {
 		t.Errorf("Snapshots() = %+v", got)
 	}
 
-	// APIは "instance/snapshot" 形式で返すことがある
+	// The API may return the "instance/snapshot" form.
 	f.snapshots["dev-x"] = []api.InstanceSnapshot{{Name: "dev-x/s2"}}
 	got, _ = a.Snapshots(ctx, "dev-x")
 	if len(got) != 1 || got[0].Name != "s2" {
-		t.Errorf("Snapshots() = %+v, instance名を取り除くこと", got)
+		t.Errorf("Snapshots() = %+v, want the instance name stripped", got)
 	}
 
 	if err := a.RestoreSnapshot(ctx, "dev-x", "s1"); err != nil {
@@ -779,15 +783,16 @@ func TestAPIExec(t *testing.T) {
 		t.Errorf("Environment mismatch (-want +got):\n%s", diff)
 	}
 	if req.Interactive {
-		t.Error("非対話実行で Interactive を立てないこと")
+		t.Error("want Interactive unset for a non-interactive run")
 	}
-	// WaitForWS が無いとIncusは出力用のwebsocketを用意しない
+	// Without WaitForWS, Incus sets up no websocket for the output.
 	if !req.WaitForWS {
-		t.Error("WaitForWS = false, 出力を受け取れない")
+		t.Error("WaitForWS = false, the output cannot be received")
 	}
 }
 
-// 同名の変数はプロジェクト指定が優先される（仕様 06-provisioning.md 6.4）
+// For a variable of the same name, what the project set wins
+// (spec 06-provisioning.md 6.4).
 func TestAPIExecEnvPrecedence(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -800,17 +805,18 @@ func TestAPIExecEnvPrecedence(t *testing.T) {
 		t.Fatalf("Exec() error = %v", err)
 	}
 	if got := f.lastExec.Environment["DEVKIT_WORKSPACE"]; got != "/elsewhere" {
-		t.Errorf("DEVKIT_WORKSPACE = %q, プロジェクト指定を優先すること", got)
+		t.Errorf("DEVKIT_WORKSPACE = %q, want what the project set to win", got)
 	}
 }
 
-// 出力の中継が終わるまで待つ。待たないと最後の出力を取りこぼす。
+// It waits for the output to finish streaming; otherwise the last of it is
+// lost.
 func TestAPIExecWaitsForOutput(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
 	a, _ := newAPI(f)
 
-	// 出力の中継が終わるまで Exec が返らないこと
+	// Exec must not return until the output has finished streaming.
 	f.holdData = make(chan struct{})
 
 	returned := make(chan struct{})
@@ -823,7 +829,7 @@ func TestAPIExecWaitsForOutput(t *testing.T) {
 
 	select {
 	case <-returned:
-		t.Fatal("出力の中継を待たずに返っている")
+		t.Fatal("returned without waiting for the output")
 	case <-time.After(20 * time.Millisecond):
 	}
 
@@ -831,11 +837,11 @@ func TestAPIExecWaitsForOutput(t *testing.T) {
 	select {
 	case <-returned:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Exec() が返らない")
+		t.Fatal("Exec() never returned")
 	}
 }
 
-// 中断されたら待ち続けない
+// Once interrupted, it stops waiting.
 func TestAPIOperationsHonorCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -862,7 +868,7 @@ func TestAPIOperationsHonorCancellation(t *testing.T) {
 	}
 }
 
-// imageの取得中に中断されたら取り消す
+// An interruption while fetching the image cancels it.
 func TestAPICreateInstanceCancellation(t *testing.T) {
 	f := newFakeServer()
 	f.createOp = &fakeRemoteOp{block: make(chan struct{}), canceled: make(chan struct{})}
@@ -881,12 +887,12 @@ func TestAPICreateInstanceCancellation(t *testing.T) {
 	select {
 	case <-f.createOp.canceled:
 	case <-time.After(2 * time.Second):
-		t.Error("転送を取り消していない")
+		t.Error("the transfer was not cancelled")
 	}
 	close(f.createOp.block)
 }
 
-// ユーザー名は解決できないため呼び出し側の責務とする
+// User names cannot be resolved here, so that is the caller's job.
 func TestAPIExecRejectsNonNumericUser(t *testing.T) {
 	f := newFakeServer()
 	a, _ := newAPI(f)
@@ -934,7 +940,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 	}
 }
 
-// 操作の完了待ちで失敗した場合も伝播すること
+// A failure while waiting for an operation propagates too.
 func TestAPIPropagatesOperationErrors(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -963,8 +969,8 @@ func TestExitCodeOf(t *testing.T) {
 	}{
 		{"float64", map[string]any{"return": float64(3)}, 3},
 		{"int", map[string]any{"return": 4}, 4},
-		{"メタデータ無し", nil, 0},
-		{"想定外の型", map[string]any{"return": "x"}, 0},
+		{"no metadata", nil, 0},
+		{"an unexpected type", map[string]any{"return": "x"}, 0},
 	}
 
 	for _, tt := range tests {
@@ -976,7 +982,7 @@ func TestExitCodeOf(t *testing.T) {
 	}
 }
 
-// 通信できないことを「存在しない」と混同しないこと
+// Failing to reach Incus is not confused with "does not exist".
 func TestAPIInstanceDistinguishesFailureFromAbsence(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -988,11 +994,11 @@ func TestAPIInstanceDistinguishesFailureFromAbsence(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, errAPI)
 	}
 	if errors.Is(err, ErrInstanceNotFound) {
-		t.Error("通信失敗を「存在しない」として扱っている")
+		t.Error("treated a communication failure as \"does not exist\"")
 	}
 }
 
-// 変更が無ければIncusを呼ばない
+// With nothing to change, Incus is not called.
 func TestAPIUpdateSkipsEmptyChanges(t *testing.T) {
 	tests := map[string]func(*API) error{
 		"UnsetConfig":   func(a *API) error { return a.UnsetConfig(context.Background(), "dev-x", nil) },
@@ -1015,7 +1021,7 @@ func TestAPIUpdateSkipsEmptyChanges(t *testing.T) {
 	}
 }
 
-// instanceが無い場合は、原因が分かるエラーにする
+// A missing instance produces an error that says why.
 func TestAPIUpdateMissingInstance(t *testing.T) {
 	a, _ := newAPI(newFakeServer())
 
@@ -1033,7 +1039,7 @@ func TestAPIDeleteMissingInstance(t *testing.T) {
 	}
 }
 
-// 停止に失敗したら削除へ進まない
+// A failed stop does not go on to delete.
 func TestAPIDeleteStopError(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -1044,11 +1050,11 @@ func TestAPIDeleteStopError(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, errAPI)
 	}
 	if _, ok := f.instances["dev-x"]; !ok {
-		t.Error("停止に失敗したのに削除している")
+		t.Error("deleted it despite the stop failing")
 	}
 }
 
-// 操作は受理されても完了時に失敗しうる
+// An accepted operation can still fail on completion.
 func TestAPIPropagatesAsyncErrors(t *testing.T) {
 	ops := map[string]struct {
 		call string
@@ -1080,7 +1086,7 @@ func TestAPIPropagatesAsyncErrors(t *testing.T) {
 	}
 }
 
-// WaitReady は共通の待機処理へ委ねる
+// WaitReady delegates to the shared waiting logic.
 func TestAPIWaitReady(t *testing.T) {
 	f := newFakeServer()
 	full := f.addInstance("dev-x", api.InstancePut{})
@@ -1098,8 +1104,8 @@ func TestAPIWaitReady(t *testing.T) {
 	}
 }
 
-// --verbose でIncusへの操作を追えること。
-// ただしSecretを含みうる値は決して出さない（仕様 04-cli.md 4.10）。
+// --verbose makes the Incus operations visible, while values that may be
+// secrets are never printed (spec 04-cli.md 4.10).
 func TestAPILogsOperationsWithoutValues(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -1126,18 +1132,18 @@ func TestAPILogsOperationsWithoutValues(t *testing.T) {
 	log := out.String()
 	for _, want := range []string{"set config", "limits.cpu", "set devices", "secret-mount", "exec", "dev-x"} {
 		if !strings.Contains(log, want) {
-			t.Errorf("ログ = %q, %q を含むこと", log, want)
+			t.Errorf("log = %q, want it to contain %q", log, want)
 		}
 	}
-	// 値は出さない
+	// Values stay out.
 	for _, leak := range []string{"s3cret", "/home/u/.ssh", "deploy"} {
 		if strings.Contains(log, leak) {
-			t.Errorf("ログ = %q, %q を含めないこと", log, leak)
+			t.Errorf("log = %q, want it not to contain %q", log, leak)
 		}
 	}
 }
 
-// ログ出力先を設定しなくても動くこと
+// It works with no logger set.
 func TestAPIWithoutLogger(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -1150,8 +1156,8 @@ func TestAPIWithoutLogger(t *testing.T) {
 
 func TestAPIRestoreSnapshotErrors(t *testing.T) {
 	tests := map[string]func(*fakeServer){
-		"要求が拒否される": func(f *fakeServer) { f.err["UpdateInstance"] = errAPI },
-		"復元に失敗する":  func(f *fakeServer) { f.opErr["UpdateInstance"] = errAPI },
+		"the request is refused": func(f *fakeServer) { f.err["UpdateInstance"] = errAPI },
+		"the restore fails":      func(f *fakeServer) { f.opErr["UpdateInstance"] = errAPI },
 	}
 
 	for name, setup := range tests {
@@ -1168,7 +1174,8 @@ func TestAPIRestoreSnapshotErrors(t *testing.T) {
 	}
 }
 
-// 復元は現在の設定を送り返さない（取得と書き戻しの間の変更を巻き戻さないため）
+// A restore does not send the current configuration back, so a change made
+// between reading and writing is not undone.
 func TestAPIRestoreSnapshotSendsOnlyRestore(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{Config: map[string]string{"limits.cpu": "8"}})
@@ -1181,11 +1188,11 @@ func TestAPIRestoreSnapshotSendsOnlyRestore(t *testing.T) {
 		t.Errorf("Restore = %q, want s1", f.lastUpdate.Restore)
 	}
 	if len(f.lastUpdate.Config) != 0 {
-		t.Errorf("config = %v, 復元先だけを送ること", f.lastUpdate.Config)
+		t.Errorf("config = %v, want nothing but the restore target sent", f.lastUpdate.Config)
 	}
 }
 
-// 出力の中継を待っている間に中断された場合
+// Interrupted while waiting for the output to stream.
 func TestAPIExecCancelledWhileWaitingForOutput(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -1196,14 +1203,15 @@ func TestAPIExecCancelledWhileWaitingForOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	f.beforeExec = cancel
 
-	// 操作の完了待ちは通るが、中継の待ちで中断される
+	// Waiting for the operation succeeds; the interruption lands on the
+	// streaming wait.
 	f.opErr["ExecInstance"] = nil
 	if _, err := a.Exec(ctx, "dev-x", []string{"true"}, ExecOptions{}); !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context.Canceled", err)
 	}
 }
 
-// instanceの状態を取得できなければ削除しない
+// Without being able to read the instance state, it does not delete.
 func TestAPIDeleteKeepsInstanceWhenStopFails(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{})
@@ -1214,7 +1222,7 @@ func TestAPIDeleteKeepsInstanceWhenStopFails(t *testing.T) {
 		t.Errorf("error = %v, want %v", err, errAPI)
 	}
 	if _, ok := f.instances["dev-x"]; !ok {
-		t.Error("停止に失敗したのに削除している")
+		t.Error("deleted it despite the stop failing")
 	}
 }
 

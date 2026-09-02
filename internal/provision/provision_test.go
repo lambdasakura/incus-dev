@@ -11,12 +11,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-dev/internal/config"
-	"github.com/lambdasakura/incus-dev/internal/incus"
-	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
-	"github.com/lambdasakura/incus-dev/internal/provision"
-	"github.com/lambdasakura/incus-dev/internal/runner"
-	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
+	"github.com/lambdasakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
 )
 
 func testEnv() provision.Env {
@@ -39,17 +39,18 @@ func newExecutorWith(f *runnertest.Fake, client *fakeIncus) *provision.Executor 
 	return &provision.Executor{Incus: client, Runner: f}
 }
 
-// execCall は run ステップの実行内容。
+// execCall is what a run step executed.
 type execCall struct {
 	Argv []string
 	Opt  incus.ExecOptions
 }
 
-// fakeIncus は run ステップの実行内容を記録するIncusクライアント。
+// fakeIncus is an Incus client that records what run steps executed.
 type fakeIncus struct {
 	*incustest.Fake
 	calls []execCall
-	// code はスクリプトに対して返す終了コード。キー "" は全スクリプトに適用する。
+	// code maps a script to the exit code to return. The key "" applies to
+	// every script.
 	code map[string]int
 }
 
@@ -66,16 +67,16 @@ func newIncus() *fakeIncus {
 	return f
 }
 
-// last は最後の実行内容を返す。
+// last returns the most recent execution.
 func (f *fakeIncus) last(t *testing.T) execCall {
 	t.Helper()
 	if len(f.calls) == 0 {
-		t.Fatal("run ステップが実行されていない")
+		t.Fatal("no run step was executed")
 	}
 	return f.calls[len(f.calls)-1]
 }
 
-// scripts は実行されたスクリプトを順に返す。
+// scripts returns the scripts that ran, in order.
 func (f *fakeIncus) scripts() []string {
 	out := make([]string, 0, len(f.calls))
 	for _, c := range f.calls {
@@ -84,7 +85,7 @@ func (f *fakeIncus) scripts() []string {
 	return out
 }
 
-// script は run ステップのargvからスクリプト部分を取り出す。
+// script pulls the script out of a run step's argv.
 func script(argv []string) string {
 	if len(argv) == 0 {
 		return ""
@@ -109,7 +110,7 @@ instance:
   image: images:ubuntu/24.04
 `
 
-// --- bootstrapの既定動作（仕様 06-provisioning.md 6.3.2） ---
+// --- The default bootstrap (spec 06-provisioning.md 6.3.2) ---
 
 func TestBootstrapStepsDefaultWhenAnsibleStepExists(t *testing.T) {
 	cfg := parseConfig(t, base+`
@@ -123,10 +124,10 @@ provision:
 		t.Fatalf("BootstrapSteps() = %d steps, want 1", len(steps))
 	}
 	if steps[0].Run == nil {
-		t.Fatal("既定bootstrapは run ステップであること")
+		t.Fatal("want the default bootstrap to be a run step")
 	}
 	if !strings.Contains(steps[0].Run.Script, "python3") {
-		t.Errorf("script = %q, python3の導入を含むこと", steps[0].Run.Script)
+		t.Errorf("script = %q, want it to install python3", steps[0].Run.Script)
 	}
 }
 
@@ -136,7 +137,7 @@ provision:
   - run: echo hi
 `)
 	if steps := provision.BootstrapSteps(cfg); len(steps) != 0 {
-		t.Errorf("BootstrapSteps() = %+v, ansibleが無ければ何もしないこと", steps)
+		t.Errorf("BootstrapSteps() = %+v, want nothing without an ansible step", steps)
 	}
 }
 
@@ -154,7 +155,7 @@ provision:
 		t.Fatalf("BootstrapSteps() = %d steps, want 1", len(steps))
 	}
 	if steps[0].Run.Script != "dnf install -y python3" {
-		t.Errorf("script = %q, 既定を置き換えること", steps[0].Run.Script)
+		t.Errorf("script = %q, want it to replace the default", steps[0].Run.Script)
 	}
 }
 
@@ -166,11 +167,11 @@ provision:
       playbook: p.yml
 `)
 	if steps := provision.BootstrapSteps(cfg); len(steps) != 0 {
-		t.Errorf("BootstrapSteps() = %+v, 空リストは無効化を意味すること", steps)
+		t.Errorf("BootstrapSteps() = %+v, want an empty list to disable it", steps)
 	}
 }
 
-// --- run ステップ（仕様 06-provisioning.md 6.4） ---
+// --- run steps (spec 06-provisioning.md 6.4) ---
 
 func TestRunStepExecutesInContainer(t *testing.T) {
 	client := newIncus()
@@ -189,7 +190,7 @@ provision:
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
 	if got.Opt.TTY {
-		t.Error("provisionは端末を割り当てないこと")
+		t.Error("want provisioning not to allocate a terminal")
 	}
 	if !client.Called("exec dev-example-project") {
 		t.Errorf("calls = %v", client.Calls)
@@ -216,7 +217,7 @@ provision:
 		"DEVKIT_INCUS_REMOTE":     "local",
 	}
 	if diff := cmp.Diff(want, client.last(t).Opt.PublicEnv); diff != "" {
-		t.Errorf("環境変数 mismatch (-want +got):\n%s", diff)
+		t.Errorf("environment mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -236,10 +237,10 @@ provision:
 
 	got := client.last(t)
 	if got.Opt.Env["DEVKIT_WORKSPACE"] != "/elsewhere" {
-		t.Errorf("env = %v, ステップのenvが優先されること", got.Opt.Env)
+		t.Errorf("env = %v, want the step's env to win", got.Opt.Env)
 	}
 	if _, ok := got.Opt.PublicEnv["DEVKIT_WORKSPACE"]; ok {
-		t.Errorf("env = %v, 上書きされた値が残っている", got.Opt.PublicEnv)
+		t.Errorf("env = %v, the overridden value is still there", got.Opt.PublicEnv)
 	}
 	if got.Opt.Env["EXTRA"] != "value" {
 		t.Errorf("env = %v", got.Opt.Env)
@@ -261,7 +262,7 @@ provision:
 
 	got := client.last(t)
 	if got.Opt.Cwd != "/workspace" {
-		t.Errorf("cwd = %q, cwdを反映すること", got.Opt.Cwd)
+		t.Errorf("cwd = %q, want cwd to take effect", got.Opt.Cwd)
 	}
 	if diff := cmp.Diff([]string{"/bin/bash", "-c", "echo hi"}, got.Argv); diff != "" {
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)
@@ -280,11 +281,11 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if got := client.last(t).Opt.User; got != "1000" {
-		t.Errorf("user = %q, 数値ユーザーはそのまま渡すこと", got)
+		t.Errorf("user = %q, want a numeric user passed through", got)
 	}
 }
 
-// Incusのexecはユーザー名を解決できないため、su で切り替える
+// The Incus exec API cannot resolve a user name, so su switches to it.
 func TestRunStepNamedUser(t *testing.T) {
 	client := newIncus()
 	cfg := parseConfig(t, base+`
@@ -303,7 +304,7 @@ provision:
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
 	if got.Opt.User != "" {
-		t.Errorf("user = %q, 名前をIncusへ渡さないこと", got.Opt.User)
+		t.Errorf("user = %q, want the name not passed to Incus", got.Opt.User)
 	}
 }
 
@@ -321,13 +322,13 @@ provision:
 	}
 
 	if diff := cmp.Diff([]string{"first", "second", "third"}, client.scripts()); diff != "" {
-		t.Errorf("実行順が違う (-want +got):\n%s", diff)
+		t.Errorf("wrong order (-want +got):\n%s", diff)
 	}
 }
 
-// 失敗したステップを特定できること（仕様 04-cli.md 4.10）
-// 失敗したスクリプトが分かること。名前を付けていないステップでは
-// 番号だけでは何が落ちたのか分からない（仕様 04-cli.md 4.10）
+// A failed step can be identified, and so can the script that failed. For an
+// unnamed step, a number alone leaves no way to tell what broke
+// (spec 04-cli.md 4.10).
 func TestStepFailureShowsScript(t *testing.T) {
 	client := newIncus()
 	client.code[""] = 1
@@ -346,17 +347,17 @@ provision:
 
 	msg := err.Error()
 	if !strings.Contains(msg, "first-line") {
-		t.Errorf("error = %q, 失敗したスクリプトを示すこと", msg)
+		t.Errorf("error = %q, want it to show the failing script", msg)
 	}
 	if strings.Contains(msg, "third-line") {
-		t.Errorf("error = %q, 全文は載せないこと", msg)
+		t.Errorf("error = %q, want it not to carry the whole script", msg)
 	}
 	if !strings.Contains(msg, "+2 lines") {
-		t.Errorf("error = %q, 省略した行数を示すこと", msg)
+		t.Errorf("error = %q, want it to say how many lines were dropped", msg)
 	}
 }
 
-// エラーへ環境変数の値を混ぜないこと（Secretを含みうる）
+// Environment values stay out of errors, since they may be secrets.
 func TestStepFailureDoesNotLeakEnv(t *testing.T) {
 	client := newIncus()
 	client.code[""] = 1
@@ -376,7 +377,7 @@ provision:
 	}
 	for _, secret := range []string{"s3cret-value", "s3cret-key"} {
 		if strings.Contains(err.Error(), secret) {
-			t.Errorf("error = %q, 秘密情報を含めないこと", err.Error())
+			t.Errorf("error = %q, want it not to contain the secret", err.Error())
 		}
 	}
 }
@@ -399,11 +400,11 @@ provision:
 	}
 	for _, want := range []string{"broken step", "2/3"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
 	}
 	if diff := cmp.Diff([]string{"ok", "failing"}, client.scripts()); diff != "" {
-		t.Errorf("失敗後のステップを実行しないこと (-want +got):\n%s", diff)
+		t.Errorf("want no step run after the failure (-want +got):\n%s", diff)
 	}
 }
 
@@ -418,11 +419,11 @@ bootstrap:
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
 	if diff := cmp.Diff([]string{"bootstrap-command"}, client.scripts()); diff != "" {
-		t.Errorf("スクリプト mismatch (-want +got):\n%s", diff)
+		t.Errorf("script mismatch (-want +got):\n%s", diff)
 	}
 }
 
-// --- ansible ステップ（仕様 06-provisioning.md 6.5） ---
+// --- ansible steps (spec 06-provisioning.md 6.5) ---
 
 type ansibleCall struct {
 	cmd       runner.Command
@@ -430,7 +431,8 @@ type ansibleCall struct {
 	vars      map[string]any
 }
 
-// captureAnsible は ansible-playbook 実行時に一時ファイルの内容を記録する。
+// captureAnsible records the contents of the temporary files as
+// ansible-playbook runs.
 func captureAnsible(t *testing.T, f *runnertest.Fake) *ansibleCall {
 	t.Helper()
 	call := &ansibleCall{}
@@ -494,7 +496,7 @@ func TestAnsibleStepCommand(t *testing.T) {
 		t.Fatalf("command = %q, want ansible-playbook", call.cmd.Name)
 	}
 	if call.cmd.Dir != root {
-		t.Errorf("Dir = %q, want %q (project rootで実行すること)", call.cmd.Dir, root)
+		t.Errorf("Dir = %q, want %q (it must run from the project root)", call.cmd.Dir, root)
 	}
 	last := call.cmd.Args[len(call.cmd.Args)-1]
 	if want := filepath.Join(root, ".incus-dev", "ansible", "site.yml"); last != want {
@@ -513,7 +515,7 @@ func TestAnsibleInventoryContent(t *testing.T) {
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	// 仕様 6.5.2: ホスト名 dev、community.general.incus 接続
+	// Spec 6.5.2: host name dev, community.general.incus connection.
 	for _, want := range []string{
 		"dev:",
 		"ansible_host: dev-example-project",
@@ -523,7 +525,7 @@ func TestAnsibleInventoryContent(t *testing.T) {
 		"devkit:",
 	} {
 		if !strings.Contains(call.inventory, want) {
-			t.Errorf("inventory =\n%s\n%q を含むこと", call.inventory, want)
+			t.Errorf("inventory =\n%s\nwant it to contain %q", call.inventory, want)
 		}
 	}
 }
@@ -547,7 +549,7 @@ func TestAnsibleDevkitVars(t *testing.T) {
 		"devkit_incus_remote":     "local",
 		"devkit_incus_project":    "default",
 	}
-	// workspace_source は env の値を使う
+	// workspace_source takes its value from env.
 	want["devkit_workspace_source"] = env.WorkspaceSource
 	if diff := cmp.Diff(want, call.vars); diff != "" {
 		t.Errorf("devkit vars mismatch (-want +got):\n%s", diff)
@@ -591,12 +593,12 @@ provision:
 		"--extra-vars=@" + filepath.Join(root, ".incus-dev", "ansible", "vars.yml"),
 	} {
 		if !strings.Contains(joined, want) {
-			t.Errorf("args = %q, %q を含むこと", joined, want)
+			t.Errorf("args = %q, want it to contain %q", joined, want)
 		}
 	}
 }
 
-// プロジェクトの ansible.cfg があれば ANSIBLE_CONFIG として使う（仕様 6.5.3）
+// A project ansible.cfg, when present, is used as ANSIBLE_CONFIG (spec 6.5.3).
 func TestAnsibleUsesProjectConfig(t *testing.T) {
 	root, cfg := ansibleProject(t)
 	cfgPath := filepath.Join(root, ".incus-dev", "ansible", "ansible.cfg")
@@ -611,7 +613,7 @@ func TestAnsibleUsesProjectConfig(t *testing.T) {
 	}
 
 	if !containsString(call.cmd.Env, "ANSIBLE_CONFIG="+cfgPath) {
-		t.Errorf("Env = %v, ANSIBLE_CONFIG を設定すること", call.cmd.Env)
+		t.Errorf("Env = %v, want ANSIBLE_CONFIG set", call.cmd.Env)
 	}
 }
 
@@ -635,10 +637,10 @@ func TestAnsibleTempFilesAreRemoved(t *testing.T) {
 	}
 
 	if inventoryPath == "" {
-		t.Fatal("inventoryが生成されていない")
+		t.Fatal("no inventory was generated")
 	}
 	if _, err := os.Stat(inventoryPath); !os.IsNotExist(err) {
-		t.Errorf("一時inventory %q が残っている", inventoryPath)
+		t.Errorf("the temporary inventory %q was left behind", inventoryPath)
 	}
 }
 
@@ -675,8 +677,8 @@ func containsString(list []string, want string) bool {
 	return false
 }
 
-// ステップのenvはSecretを含みうるため、表示しうる値と分けて渡す
-// （仕様 04-cli.md 4.10）
+// A step's env may hold secrets, so it is passed separately from the values
+// that may be displayed (spec 04-cli.md 4.10).
 func TestRunStepEnvIsSeparatedFromPublicEnv(t *testing.T) {
 	client := newIncus()
 	cfg := parseConfig(t, base+`
@@ -692,15 +694,15 @@ provision:
 
 	got := client.last(t)
 	if got.Opt.Env["API_TOKEN"] != "s3cret-value" {
-		t.Errorf("env = %v, 実際の値を渡すこと", got.Opt.Env)
+		t.Errorf("env = %v, want the real value passed", got.Opt.Env)
 	}
 	if _, ok := got.Opt.PublicEnv["API_TOKEN"]; ok {
-		t.Errorf("公開env = %v, 利用者指定の値を含めないこと", got.Opt.PublicEnv)
+		t.Errorf("public env = %v, want it not to carry user-supplied values", got.Opt.PublicEnv)
 	}
 }
 
-// run も ansible も持たないステップは実行時にエラーとする
-// （通常はvalidationで弾かれるため、防御的な検査）
+// A step with neither run nor ansible is an error at run time. Validation
+// normally rejects it, so this is a defensive check.
 func TestRunStepsRejectsEmptyStep(t *testing.T) {
 	f := &runnertest.Fake{}
 
@@ -709,11 +711,11 @@ func TestRunStepsRejectsEmptyStep(t *testing.T) {
 		t.Fatal("RunSteps() = nil error, want error")
 	}
 	if !strings.Contains(err.Error(), "empty") {
-		t.Errorf("error = %q, ステップ名を含むこと", err.Error())
+		t.Errorf("error = %q, want it to name the step", err.Error())
 	}
 }
 
-// コンテナ内でのコマンド実行が失敗した場合
+// When the command inside the container fails.
 func TestRunStepReportsNonZeroExit(t *testing.T) {
 	client := newIncus()
 	client.code[""] = 5
@@ -722,12 +724,13 @@ func TestRunStepReportsNonZeroExit(t *testing.T) {
 	err := newExecutorWith(&runnertest.Fake{}, client).Provision(
 		context.Background(), cfg, testEnv(), provision.Selection{})
 	if err == nil || !strings.Contains(err.Error(), "5") {
-		t.Errorf("error = %v, 終了コードを報告すること", err)
+		t.Errorf("error = %v, want the exit code reported", err)
 	}
 }
 
-// 既定bootstrapが失敗した場合、bootstrapを明示するよう促すこと
-// （仕様 06-provisioning.md 6.3.2、REQ-007例外の成立条件）
+// When the default bootstrap fails, the user is told to declare their own
+// (spec 06-provisioning.md 6.3.2; the condition on which the REQ-007 exception
+// rests).
 func TestDefaultBootstrapFailureGuidesUser(t *testing.T) {
 	client := newIncus()
 	client.code[""] = 127
@@ -743,12 +746,12 @@ provision:
 	}
 	for _, want := range []string{"bootstrap", "dev.yml"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error =\n%v\n%q を含むこと", err, want)
+			t.Errorf("error =\n%v\nwant it to contain %q", err, want)
 		}
 	}
 }
 
-// 明示されたbootstrapの失敗には案内を付けない
+// A declared bootstrap's failure carries no such guidance.
 func TestExplicitBootstrapFailureHasNoGuidance(t *testing.T) {
 	client := newIncus()
 	client.code[""] = 1
@@ -762,12 +765,12 @@ bootstrap:
 		t.Fatal("Bootstrap() = nil error, want error")
 	}
 	if strings.Contains(err.Error(), "dev.yml") {
-		t.Errorf("error = %v, 明示済みの場合は案内しないこと", err)
+		t.Errorf("error = %v, want no guidance when it was declared", err)
 	}
 }
 
-// ansible ステップの extra_args はSecretを含みうるため表示時に隠す
-// （仕様 04-cli.md 4.10）
+// extra_args on an ansible step may hold secrets, so they are hidden when
+// displayed (spec 04-cli.md 4.10).
 func TestAnsibleExtraArgsAreRedacted(t *testing.T) {
 	root, _ := ansibleProject(t)
 	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), base+`
@@ -789,15 +792,15 @@ provision:
 	}
 
 	if display := f.LastCommand(); strings.Contains(display, "s3cret") {
-		t.Errorf("表示 = %q, extra_args の値を含めないこと", display)
+		t.Errorf("display = %q, want it not to contain the extra_args value", display)
 	}
 	if raw := f.LastArgv(); !strings.Contains(raw, "vault_pass=s3cret") {
-		t.Errorf("実引数 = %q, 実際の値を渡すこと", raw)
+		t.Errorf("argv = %q, want the real value passed", raw)
 	}
 }
 
-// 一部だけ実行しても、ラベルは全体の中での位置を示すこと。
-// "step 1/1" では、どのステップを流したのか分からなくなる。
+// Even for a partial run, the label shows the position within the whole list.
+// "step 1/1" would leave no way to tell which step ran.
 func TestSelectedStepKeepsItsPosition(t *testing.T) {
 	client := newIncus()
 	client.code["third"] = 1
@@ -815,12 +818,12 @@ provision:
 		t.Fatal("Provision() = nil error, want error")
 	}
 	if !strings.Contains(err.Error(), "3/3") {
-		t.Errorf("error = %q, 全体の中での位置を示すこと", err.Error())
+		t.Errorf("error = %q, want the position within the whole list", err.Error())
 	}
 
-	// 選ばれなかったステップは実行しない
+	// Steps that were not selected do not run.
 	if diff := cmp.Diff([]string{"third"}, client.scripts()); diff != "" {
-		t.Errorf("実行したステップ mismatch (-want +got):\n%s", diff)
+		t.Errorf("executed steps mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -842,9 +845,9 @@ provision:
 		t.Fatalf("Provision() error = %v", err)
 	}
 
-	// 指定順ではなく、宣言順で実行する
+	// They run in declaration order, not in the order given.
 	if diff := cmp.Diff([]string{"first", "third"}, client.scripts()); diff != "" {
-		t.Errorf("実行順が違う (-want +got):\n%s", diff)
+		t.Errorf("wrong order (-want +got):\n%s", diff)
 	}
 }
 
@@ -858,12 +861,12 @@ func TestProvisionRejectsUnknownStep(t *testing.T) {
 		t.Fatal("Provision() = nil error, want error")
 	}
 	if len(f.Calls) != 0 {
-		t.Errorf("calls = %v, 解決できない指定では何も実行しないこと", f.Commands())
+		t.Errorf("calls = %v, want nothing run when the selection cannot be resolved", f.Commands())
 	}
 }
 
-// ansibleステップの前提が揃っていない場合、対処方法を示して止まる
-// （仕様 06-provisioning.md 6.5.1）
+// Without the prerequisites for an ansible step, it stops and says what to do
+// (spec 06-provisioning.md 6.5.1).
 func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 	root, cfg := ansibleProject(t)
 
@@ -873,12 +876,12 @@ func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 		wantAny []string
 	}{
 		{
-			name:    "ansible-playbookが無い",
+			name:    "ansible-playbook is missing",
 			failOn:  "ansible-playbook --version",
 			wantAny: []string{"ansible-playbook", "install"},
 		},
 		{
-			name:    "community.generalが無い",
+			name:    "community.general is missing",
 			failOn:  "ansible-doc",
 			wantAny: []string{"community.general", "ansible-galaxy collection install"},
 		},
@@ -896,21 +899,21 @@ func TestAnsiblePrerequisiteGuidance(t *testing.T) {
 			}
 			for _, want := range tt.wantAny {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error = %q, %q を含むこと", err.Error(), want)
+					t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 				}
 			}
 
-			// 前提が揃っていないなら playbook は実行しない
+			// Without the prerequisites, the playbook does not run.
 			for _, c := range f.Argvs() {
 				if strings.HasPrefix(c, "ansible-playbook -i") {
-					t.Errorf("前提を満たさないのに実行している: %q", c)
+					t.Errorf("ran despite the prerequisites being unmet: %q", c)
 				}
 			}
 		})
 	}
 }
 
-// 前提の確認は1度だけ行う
+// The prerequisites are checked once.
 func TestAnsiblePrerequisiteCheckedOnce(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "site.yml"), "---\n")
@@ -940,11 +943,11 @@ provision:
 		}
 	}
 	if checks != 1 {
-		t.Errorf("前提確認 = %d回, want 1", checks)
+		t.Errorf("prerequisite checks = %d, want 1", checks)
 	}
 }
 
-// galaxy ステップはホスト側で ansible-galaxy install を実行する
+// A galaxy step runs ansible-galaxy install on the host.
 func TestGalaxyStep(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".incus-dev", "ansible", "requirements.yml"), "collections: []\n")
@@ -974,7 +977,7 @@ provision:
 		"--force",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("command = %q, %q を含むこと", got, want)
+			t.Errorf("command = %q, want it to contain %q", got, want)
 		}
 	}
 	if dir := f.Calls[len(f.Calls)-1].Dir; dir != root {
@@ -982,7 +985,7 @@ provision:
 	}
 }
 
-// galaxy ステップでも ansible の前提を確認する
+// A galaxy step checks the Ansible prerequisites too.
 func TestGalaxyStepChecksPrerequisites(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".incus-dev", "requirements.yml"), "collections: []\n")
@@ -1002,11 +1005,11 @@ provision:
 
 	err = newExecutor(f).Provision(context.Background(), cfg, env, provision.Selection{})
 	if err == nil || !strings.Contains(err.Error(), "ansible") {
-		t.Errorf("error = %v, 前提の不足を報告すること", err)
+		t.Errorf("error = %v, want the missing prerequisite reported", err)
 	}
 }
 
-// 秘密情報は ansible ステップへも別ファイルで渡す
+// Secrets reach an ansible step through a file of their own.
 func TestSecretsArePassedToAnsible(t *testing.T) {
 	root, cfg := ansibleProject(t)
 
@@ -1049,14 +1052,14 @@ func TestSecretsArePassedToAnsible(t *testing.T) {
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if secretsFile == "" {
-		t.Fatal("秘密情報のファイルが渡されていない")
+		t.Fatal("no secrets file was passed")
 	}
 	if _, err := os.Stat(secretsFile); !os.IsNotExist(err) {
-		t.Errorf("一時ファイル %q が残っている", secretsFile)
+		t.Errorf("the temporary file %q was left behind", secretsFile)
 	}
 }
 
-// 秘密情報が無ければ余計なファイルを渡さない
+// With no secrets, no extra file is passed.
 func TestNoSecretsFileWhenEmpty(t *testing.T) {
 	root, cfg := ansibleProject(t)
 
@@ -1068,11 +1071,11 @@ func TestNoSecretsFileWhenEmpty(t *testing.T) {
 		t.Fatalf("Provision() error = %v", err)
 	}
 	if strings.Contains(f.LastArgv(), "secrets.json") {
-		t.Errorf("args = %q, 秘密情報が無ければ渡さないこと", f.LastArgv())
+		t.Errorf("args = %q, want nothing passed when there are no secrets", f.LastArgv())
 	}
 }
 
-// run ステップの env は秘密情報より優先される
+// A run step's env wins over a secret.
 func TestStepEnvOverridesSecret(t *testing.T) {
 	f := &runnertest.Fake{}
 	cfg := parseConfig(t, base+"provision:\n  - run: deploy\n    env:\n      API_TOKEN: from-step\n")

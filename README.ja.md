@@ -1,0 +1,171 @@
+# incus-devkit
+
+Incusを利用して、プロジェクト単位の開発環境を再現可能な形で構築・管理するCLIツール `idev`。
+
+*[English version](README.md)*
+
+[![CI](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml)
+
+```bash
+git clone <repository>
+cd <repository>
+
+idev up
+idev shell
+```
+
+## 設計方針
+
+`idev` は以下に特化する。
+
+- Incus instanceのライフサイクル管理
+- workspace（プロジェクトのworking tree）のマウント
+- コンテナのbootstrap
+- `.incus-dev/` に宣言された手順の実行
+
+**`idev` は環境固有の内容を持たない。**
+Ansible Role・Incus Profile・言語ランタイムの導入手順は同梱しない。
+環境を再現するために必要なものは、すべてプロジェクトの `.incus-dev/` に置く。
+
+同梱すると、使う側にとって不要なものまで入り込み、
+「この環境が何でできているか」が2箇所に分かれてしまうためである。
+
+## 使い方
+
+```yaml
+# .incus-dev/dev.yml
+schema: 1
+
+project:
+  name: my-project
+
+instance:
+  image: images:ubuntu/24.04
+  config:
+    limits.cpu: "8"
+    limits.memory: 16GiB
+
+provision:
+  - name: setup
+    run: sh /workspace/.incus-dev/scripts/setup.sh
+
+  - name: provision
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+```
+
+```bash
+idev validate      # dev.ymlを検証する（Incusへは変更を加えない）
+idev up            # instanceを用意し、bootstrapとprovisionを実行する
+idev status        # 状態を表示する（--json でmachine-readable）
+idev shell         # コンテナ内でshellを開く
+idev exec -- make test   # コンテナ内でコマンドを実行する（端末は割り当てない）
+idev provision     # instanceを作り直さずprovisionのみ再実行する
+idev snapshot create before-upgrade   # 退避しておく（restore で戻せる）
+idev rebuild       # 破棄して作り直す
+idev destroy       # instanceを削除する（ホスト側のソースは削除しない）
+```
+
+コンテナ内コマンドの終了コードはそのまま返る（`idev exec -- make test || exit 1`）。
+スクリプトやCIからは、端末の有無で挙動が変わらない `idev exec` を使う。
+
+詳しい使い方は **[マニュアル](docs/manual/ja/README.md)** を参照。
+構成例は [examples/](examples/README.ja.md) にもある。
+
+## 前提
+
+| 対象 | 必要なもの |
+| --- | --- |
+| ホスト | Incus、`idev` バイナリ |
+| ホスト（ansibleステップを使う場合） | `ansible-playbook`、`community.general` collection |
+| コンテナ | なし（SSH Serverは不要） |
+
+ホスト側の追加設定は不要。既定（`workspace.idmap: auto`）では、
+利用可能ならホストの実行ユーザーをコンテナのrootへ対応付け（`raw.idmap`）、
+利用できなければidmapped mount（`shift`）へ退避する。
+
+コンテナ内で作られたファイルをホスト側でも自分の所有にしたい場合は、
+`/etc/subuid`・`/etc/subgid` へ以下を追加する（incusの再起動は不要）。
+（一般的なIncusセットアップ手順に含まれる `root:1000000:1000000000` とは
+別に必要になる。）
+
+```text
+root:<uid>:1
+root:<gid>:1
+```
+
+## 導入
+
+Linux / macOS / Windows（amd64・arm64）のビルド済みバイナリを
+各[リリース](../../releases)に添付している。
+自分のプラットフォーム向けのアーカイブを取得し、`checksums.txt` で検証して
+`idev` を `PATH` の通った場所へ置く。
+
+```bash
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+sudo install -m 0755 idev /usr/local/bin/idev
+```
+
+`idev` はAPIクライアントであるため、remoteのIncusに対してなら
+macOS / Windows からも使える。Incus daemon自体はLinux上で動く。
+
+## ビルド
+
+```bash
+make build     # ./bin/idev
+make install   # $GOBIN へインストール
+```
+
+## 開発
+
+```bash
+make check              # lint + test（Incus不要）
+make test-integration   # Incus実機に対する統合テスト
+```
+
+`make lint` は golangci-lint を使い、無ければ gofmt / go vet で代替する
+（`make tools` で導入できる）。
+
+変更を加える場合は、開発方針を [CLAUDE.md](CLAUDE.md) に、
+設計の判断基準を [docs/spec/](docs/spec/README.md) にまとめてある。
+
+## ドキュメント
+
+| | |
+| --- | --- |
+| [マニュアル](docs/manual/ja/README.md) | 使い方。導入、チュートリアル、リファレンス、構成例 |
+| [トラブルシューティング](docs/troubleshooting.ja.md) | ホスト環境に起因する問題への対処 |
+| [skills/](skills/) | AIエージェント向けAgent Skill |
+| [設計仕様](docs/spec/README.md) | 内部設計。変更を加えるときの判断基準 |
+
+## 困ったときは
+
+ホスト環境に起因する典型的な問題（Dockerとのネットワーク競合、workspaceの
+所有者、Profile不足など）は [docs/troubleshooting.ja.md](docs/troubleshooting.ja.md) を参照。
+
+## 実装状況
+
+以下は実装済みで、Incus実機に対する統合テストで動作を確認している。
+
+| 機能 | 状態 |
+| --- | --- |
+| `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` / `destroy` / `snapshot` | 実装済み |
+| run / ansible / galaxy ステップ、bootstrap（既定・上書き・無効化） | 実装済み |
+| `provision --step` / `--from` / `--list`（部分実行） | 実装済み |
+| `up --dry-run` / `up --restart` | 実装済み |
+| `status --json` | 実装済み |
+| instance config / devices の素通し、削除追従 | 実装済み |
+| workspace mount と idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
+| `volumes`（永続ボリューム） | 実装済み |
+| `secrets`（ホスト環境変数・ファイルからの注入） | 実装済み |
+| `shell`（user / command / cwd）、`incus.project` | 実装済み |
+| Incus API（Go client library）での操作 | 実装済み（`incus` コマンドを必要としない） |
+| `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
+| `--incus-remote` | フラグは通るが未検証（workspaceの共有方式が未定） |
+| `instance.type: virtual-machine` | 未検証（workspaceの共有方式がコンテナ前提） |
+| `validate --check-host` | 未実装 |
+
+## ライセンス
+
+MIT。[LICENSE](LICENSE) を参照。
