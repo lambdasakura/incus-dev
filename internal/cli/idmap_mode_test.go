@@ -84,7 +84,7 @@ func TestResolveIDMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := resolveIDMap(mustParse(t, tt.yaml), 1000, 1001, tt.check)
+			plan, err := resolveIDMap(mustParse(t, tt.yaml), 1000, 1001, tt.check, nil)
 
 			if tt.wantErr {
 				if err == nil {
@@ -113,7 +113,7 @@ func TestResolveIDMap(t *testing.T) {
 
 // The fallback warning gives the reason and the better configuration.
 func TestFallbackWarningIsActionable(t *testing.T) {
-	plan, err := resolveIDMap(mustParse(t, planBase), 1000, 1001, denied)
+	plan, err := resolveIDMap(mustParse(t, planBase), 1000, 1001, denied, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,4 +307,66 @@ func TestDesiredDevicesLeavesNonHostMountsAlone(t *testing.T) {
 	if got := devices["volume"]["source"]; got != "myvolume" {
 		t.Errorf("source of volume = %q, want the volume name left alone", got)
 	}
+}
+
+// A host without idmapped mounts cannot use shift, and idev says so before it
+// tries (spec 03-configuration.md 3.7.3).
+//
+// Incus fails the mount with "idmapping abilities are required but aren't
+// supported on system", which names neither the setting that asked for it nor
+// anything to do about it. WSL is the host this happens on.
+func TestResolveIDMapWhenShiftIsUnsupported(t *testing.T) {
+	unsupported := func() (bool, error) { return false, nil }
+	supported := func() (bool, error) { return true, nil }
+
+	tests := []struct {
+		name    string
+		yaml    string
+		check   func(int, int) error
+		shift   func() (bool, error)
+		wantErr []string
+	}{
+		{
+			name:    "shift asked for on a host without it",
+			yaml:    planBase + "workspace:\n  idmap: shift\n",
+			check:   permitted,
+			shift:   unsupported,
+			wantErr: []string{"idmapped mounts", "raw", "none"},
+		},
+		{
+			// auto cannot fall back to shift here, and raw is not permitted
+			// either, so there is nothing left to choose.
+			name:    "auto with neither method available",
+			yaml:    planBase,
+			check:   denied,
+			shift:   unsupported,
+			wantErr: []string{"/etc/subuid", "idmapped mounts"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resolveIDMap(mustParse(t, tt.yaml), 1000, 1001, tt.check, tt.shift)
+			if err == nil {
+				t.Fatal("resolveIDMap() = nil error, want the host's limitation reported")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to mention %q", err, want)
+				}
+			}
+		})
+	}
+
+	// Nothing is asked of the daemon when raw is what will be used: the
+	// question is only about shift.
+	asked := false
+	if _, err := resolveIDMap(mustParse(t, planBase), 1000, 1001, permitted,
+		func() (bool, error) { asked = true; return true, nil }); err != nil {
+		t.Fatalf("resolveIDMap() error = %v", err)
+	}
+	if asked {
+		t.Error("the daemon was asked about idmapped mounts while choosing raw")
+	}
+	_ = supported
 }

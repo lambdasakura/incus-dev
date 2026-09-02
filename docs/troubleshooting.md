@@ -206,6 +206,29 @@ If you do not add it, the default `auto` falls back to `shift` (an idmapped
 mount) and keeps going. The workspace is still readable and writable, but files
 the container creates are owned by root on the host.
 
+### On WSL, `shift` is not available
+
+```text
+Failed to setup device mount "workspace": idmapping abilities are required
+but aren't supported on system
+```
+
+`shift` needs a kernel that can shift ids on a mount, and WSL's cannot. Check
+what your daemon reports:
+
+```bash
+incus info | grep idmapped_mounts
+```
+
+`false`, or no line at all, means `shift` will never work on that host. **Add
+the `/etc/subuid` and `/etc/subgid` entries above and use `raw`** -- it needs
+no kernel feature. `none` also works if you do not need to write to the
+workspace from inside.
+
+idev refuses `shift` up front on such a host rather than letting the mount
+fail, so a current version tells you this instead of the message above. The
+message above comes from Incus, when something else asked for `shift`.
+
 ---
 
 ## 3. Profile not found

@@ -55,6 +55,9 @@ type Fake struct {
 	// Users are the container's passwd entries, keyed by the name or uid a
 	// lookup asks for: "developer" -> "developer:x:1001:1001::/home/dev:/bin/sh".
 	Users map[string]string
+	// NoIDMappedMounts makes the host one whose kernel cannot shift ids on a
+	// mount, as WSL's cannot.
+	NoIDMappedMounts bool
 	// Execs records the argv of each execution.
 	Execs [][]string
 }
@@ -341,6 +344,16 @@ func (f *Fake) UpdateInstance(_ context.Context, name string, change incus.Insta
 	}
 	f.bumpETag(name)
 	return nil
+}
+
+// SupportsIDMappedMounts answers from IDMappedMounts, which is true unless a
+// test says otherwise: most hosts can do it, and a test about something else
+// should not have to say so.
+func (f *Fake) SupportsIDMappedMounts(_ context.Context) (bool, error) {
+	if err := f.record("idmapped mounts"); err != nil {
+		return false, err
+	}
+	return !f.NoIDMappedMounts, nil
 }
 
 // ProfileNames returns Profiles.

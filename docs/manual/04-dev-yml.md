@@ -390,6 +390,13 @@ So an ordinary account can work under `shift` and not under `raw`: there the
 workspace looks root-owned from inside. That is what `examples/dev-user/` does,
 and why it sets `idmap: shift`.
 
+`shift` needs a kernel that can shift ids on a mount. **WSL's cannot**, and
+neither can some older kernels; idev asks the daemon before it chooses `shift`
+and says so rather than letting Incus fail the mount with "idmapping abilities
+are required but aren't supported on system" once the instance already exists.
+On such a host, `raw` is the way -- it needs the `/etc/subuid` and
+`/etc/subgid` entries above -- or `none`.
+
 `auto` uses `raw` when it can, falls back to `shift` when it cannot, and warns.
 Either way the workspace is readable and writable; the only difference is who
 owns what the container creates.

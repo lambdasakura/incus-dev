@@ -327,6 +327,14 @@ type Client interface {
 	// does not have, or devices nothing records.
 	UpdateInstance(ctx context.Context, name string, change InstanceChange, etag string) error
 
+	// SupportsIDMappedMounts reports whether this kernel can shift ids on a
+	// mount, which is what a disk device's shift property asks for.
+	//
+	// The daemon knows: it reports kernel_features.idmapped_mounts. Without
+	// it, Incus refuses the mount with "idmapping abilities are required but
+	// aren't supported on system" after the instance already exists.
+	SupportsIDMappedMounts(ctx context.Context) (bool, error)
+
 	// ProfileNames lists the profiles on the host.
 	//
 	// The whole list rather than one name at a time: Incus has no call that

@@ -302,6 +302,13 @@ type Client interface {
     // Incusには単一のprofileの存在を問う呼び出しが無く、どの答えも
     // 名前一覧を絞り込んだものになる。名前ごとに問うと同じ一覧を
     // 何度も取得することになるため、一覧を返す。
+    // カーネルがマウント時のid付け替えを行えるかを返す。
+    // daemonが kernel_features.idmapped_mounts として報告する。
+    // 無い場合、Incusはinstance作成後にmountで
+    // "idmapping abilities are required but aren't supported on system"
+    // として失敗する（WSLで起きる）。
+    SupportsIDMappedMounts(ctx context.Context) (bool, error)
+
     ProfileNames(ctx context.Context) ([]string, error)
 
     // CheckImage は image 参照が解決できるかを、何も作らずに確かめる。

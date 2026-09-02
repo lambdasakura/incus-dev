@@ -95,6 +95,9 @@ type fakeServer struct {
 
 	// calls records the calls.
 	calls []string
+	// kernelFeatures is what GetServer reports. Empty means the daemon says
+	// nothing about them.
+	kernelFeatures map[string]string
 	// err maps an operation name to the error to return.
 	err map[string]error
 	// opErr maps an operation name to the error to return on completion.
@@ -212,6 +215,18 @@ func (f *fakeServer) GetInstance(name string) (*api.Instance, string, error) {
 	copied.Profiles = slices.Clone(inst.Profiles)
 
 	return &copied, "etag", nil
+}
+
+// GetServer answers with the kernel features the test set, so a host without
+// idmapped mounts can be one.
+func (f *fakeServer) GetServer() (*api.Server, string, error) {
+	if err := f.record("GetServer"); err != nil {
+		return nil, "", err
+	}
+	return &api.Server{
+		ServerUntrusted: api.ServerUntrusted{},
+		Environment:     api.ServerEnvironment{KernelFeatures: f.kernelFeatures},
+	}, "", nil
 }
 
 func (f *fakeServer) CreateInstanceFromImage(source incusclient.ImageServer, image api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error) {
@@ -1089,6 +1104,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetDevices: map[string]Device{"d": {"type": "disk"}}}, "")
 		}},
 		"profiles":   {"GetProfileNames", func(a *API) error { _, err := a.ProfileNames(ctx); return err }},
+		"server":     {"GetServer", func(a *API) error { _, err := a.SupportsIDMappedMounts(ctx); return err }},
 		"volumes":    {"GetStoragePoolVolume", func(a *API) error { _, err := a.VolumeExists(ctx, "p", "v"); return err }},
 		"volcreate":  {"CreateStoragePoolVolume", func(a *API) error { return a.CreateVolume(ctx, "p", "v", nil) }},
 		"voldelete":  {"DeleteStoragePoolVolume", func(a *API) error { return a.DeleteVolume(ctx, "p", "v") }},
@@ -1752,5 +1768,36 @@ func TestAPIWriteDoesNotFetchTheFullInstance(t *testing.T) {
 	// And the merge still happened: the key that was there is still there.
 	if got := f.instances["dev-x"].Config["a"]; got != "1" {
 		t.Errorf("config[a] = %q, want the existing key kept by the merge", got)
+	}
+}
+
+// The daemon is asked whether the kernel can shift ids on a mount.
+//
+// Absent is not false: a daemon that reports no kernel features at all should
+// not have shift refused on its behalf, since it may well work.
+func TestAPISupportsIDMappedMounts(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		features map[string]string
+		want     bool
+	}{
+		{"the kernel has them", map[string]string{"idmapped_mounts": "true"}, true},
+		{"the kernel has not", map[string]string{"idmapped_mounts": "false"}, false},
+		{"the daemon says nothing about them", map[string]string{}, true},
+		{"other features only", map[string]string{"seccomp_listener": "true"}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeServer()
+			f.kernelFeatures = tt.features
+			a, _ := newAPI(f)
+
+			got, err := a.SupportsIDMappedMounts(context.Background())
+			if err != nil {
+				t.Fatalf("SupportsIDMappedMounts() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("SupportsIDMappedMounts() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

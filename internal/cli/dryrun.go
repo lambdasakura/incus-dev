@@ -22,7 +22,7 @@ func (a *App) Plan(ctx context.Context) error {
 		return err
 	}
 
-	plan, err := a.idmapPlan()
+	plan, err := a.idmapPlan(ctx)
 	if err != nil {
 		return err
 	}

@@ -732,8 +732,9 @@ func (a *App) changedUnderfoot(err error) error {
 }
 
 // idmapPlan resolves the idmap strategy to apply.
-func (a *App) idmapPlan() (idmapPlan, error) {
-	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap)
+func (a *App) idmapPlan(ctx context.Context) (idmapPlan, error) {
+	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap,
+		func() (bool, error) { return a.client.SupportsIDMappedMounts(ctx) })
 }
 
 // warnImageChanged says so when instance.image no longer matches what the
@@ -944,7 +945,7 @@ func (a *App) preflight(ctx context.Context) (idmapPlan, provision.Env, error) {
 		return idmapPlan{}, provision.Env{}, err
 	}
 
-	plan, err := a.idmapPlan()
+	plan, err := a.idmapPlan(ctx)
 	if err != nil {
 		return idmapPlan{}, provision.Env{}, err
 	}

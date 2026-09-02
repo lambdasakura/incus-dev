@@ -51,8 +51,14 @@ func userManagesIDMap(cfg *config.Config) bool {
 //     the way there too
 //   - auto: raw when raw works, otherwise fall back to shift and warn
 //   - raw: an error when raw does not work
-//   - shift and none: as they are
-func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) error) (idmapPlan, error) {
+//   - shift: an error when the kernel has no idmapped mounts
+//   - none: as it is
+//
+// shiftOK is asked only when shift is what would be used. On a host where raw
+// works it is never called, so choosing raw costs no round trip.
+func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) error,
+	shiftOK func() (bool, error),
+) (idmapPlan, error) {
 	plan := idmapPlan{UID: uid, GID: gid}
 	declared := cfg.WorkspaceOrDefault().IDMap
 
@@ -71,18 +77,64 @@ func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) err
 		if err := check(uid, gid); err != nil {
 			return idmapPlan{}, err
 		}
+	case config.IDMapShift:
+		if err := requireIDMappedMounts(shiftOK); err != nil {
+			return idmapPlan{}, err
+		}
 	case config.IDMapAuto:
-		if err := check(uid, gid); err != nil {
-			// Fall back to shift rather than failing, so it works without the host
-			// being touched.
+		if rawErr := check(uid, gid); rawErr != nil {
+			// Fall back to shift rather than failing, so it works without the
+			// host being touched -- where the kernel can do it at all.
+			if err := requireIDMappedMounts(shiftOK); err != nil {
+				return idmapPlan{}, neitherMethodError(uid, gid, rawErr)
+			}
 			plan.Mode = config.IDMapShift
 			plan.Warning = fallbackWarning(uid, gid)
-			//nolint:nilerr // the fallback is deliberate, and the user is told through the warning
 			return plan, nil
 		}
 		plan.Mode = config.IDMapRaw
 	}
 	return plan, nil
+}
+
+// requireIDMappedMounts refuses shift on a kernel that cannot do it.
+//
+// Incus fails the mount with "idmapping abilities are required but aren't
+// supported on system", which names neither the setting that asked for it nor
+// anything to do about it, and does so only after the instance exists.
+func requireIDMappedMounts(shiftOK func() (bool, error)) error {
+	if shiftOK == nil {
+		// Nothing to ask. Letting the run continue leaves Incus to report it,
+		// which is what happened before this check existed.
+		return nil
+	}
+	ok, err := shiftOK()
+	if err != nil {
+		return fmt.Errorf("check whether this host can do idmapped mounts: %w", err)
+	}
+	if ok {
+		return nil
+	}
+	return fmt.Errorf(
+		"workspace idmap (shift) needs idmapped mounts, which this kernel does not have.\n"+
+			"WSL is the usual place this comes up.\n\n"+
+			"Use 'workspace: {idmap: raw}' instead, which needs an entry in\n"+
+			"%s and %s, or 'workspace: {idmap: none}' and handle ownership yourself",
+		subUIDPath, subGIDPath)
+}
+
+// neitherMethodError says that auto had nothing left to choose.
+func neitherMethodError(uid, gid int, rawErr error) error {
+	return fmt.Errorf(
+		"this host supports neither way of mapping the workspace.\n\n"+
+			"raw is not permitted: add 'root:%d:1' to %s and 'root:%d:1' to %s,\n"+
+			"then run 'idev up' again (no incus restart needed).\n\n"+
+			"shift is not available either: this kernel has no idmapped mounts,\n"+
+			"which is usual on WSL.\n\n"+
+			"Alternatively set 'workspace: {idmap: none}' and handle ownership yourself\n"+
+			"(host files will not be writable from the container).\n\n"+
+			"The raw check said: %w",
+		uid, subUIDPath, gid, subGIDPath, rawErr)
 }
 
 // fallbackWarning says that it fell back to shift, and how to do better.

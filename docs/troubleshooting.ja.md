@@ -197,6 +197,29 @@ incus config get dev-<project> raw.idmap    # "uid <uid> 0 / gid <gid> 0" が出
 追加しない場合、既定の `auto` は `shift`（idmapped mount）へ退避して動作を継続する。
 この場合もworkspaceは読み書きできるが、コンテナが作ったファイルはホスト側でrootの所有になる。
 
+### WSLでは `shift` が使えない
+
+```text
+Failed to setup device mount "workspace": idmapping abilities are required
+but aren't supported on system
+```
+
+`shift` はマウント時にidを付け替えられるカーネルを要求するが、WSLのカーネルは
+それを持たない。daemonが何を報告しているかを確認する。
+
+```bash
+incus info | grep idmapped_mounts
+```
+
+`false`、または行そのものが無ければ、そのホストで `shift` が動くことはない。
+**上記の `/etc/subuid` / `/etc/subgid` を追加して `raw` を使う。**
+`raw` はカーネルの機能を要求しない。
+コンテナ側からworkspaceへ書き込む必要が無ければ `none` でもよい。
+
+idevはそのようなホストでは `shift` を事前に拒否するため、現行版なら上のIncusの
+メッセージではなく理由と対処を述べる。上のメッセージは、
+idev以外が `shift` を要求した場合にIncusが出すものである。
+
 ---
 
 ## 3. Profileが見つからない

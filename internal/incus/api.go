@@ -29,6 +29,7 @@ type server interface {
 	DeleteInstance(name string) (incusclient.Operation, error)
 	ExecInstance(name string, exec api.InstanceExecPost, args *incusclient.InstanceExecArgs) (incusclient.Operation, error)
 
+	GetServer() (*api.Server, string, error)
 	GetProfileNames() ([]string, error)
 
 	GetStoragePoolVolume(pool, volType, name string) (*api.StorageVolume, string, error)
@@ -467,6 +468,18 @@ func (a *API) updateInstance(ctx context.Context, name, etag string, change func
 		return fmt.Errorf("update instance %s: %w", name, err)
 	}
 	return nil
+}
+
+// SupportsIDMappedMounts reports whether the kernel can shift ids on a mount.
+func (a *API) SupportsIDMappedMounts(_ context.Context) (bool, error) {
+	server, _, err := a.Server.GetServer()
+	if err != nil {
+		return false, fmt.Errorf("read the server info: %w", err)
+	}
+	// Absent rather than "false" on a daemon that does not report the feature
+	// at all; taking that for a no would refuse shift where it may work.
+	value, reported := server.Environment.KernelFeatures["idmapped_mounts"]
+	return !reported || value == "true", nil
 }
 
 // ProfileNames lists the profiles on the host. idev never creates one

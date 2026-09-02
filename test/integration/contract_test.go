@@ -58,7 +58,7 @@ func TestIncusMeetsTheClientContract(t *testing.T) {
 	for _, want := range []string{
 		"Instance", "ListInstances", "CreateInstance", "StartInstance",
 		"StopInstance", "DeleteInstance", "UpdateInstance",
-		"ProfileNames", "CheckImage",
+		"ProfileNames", "SupportsIDMappedMounts", "CheckImage",
 		"VolumeExists", "CreateVolume", "DeleteVolume",
 		"CreateSnapshot", "Snapshots", "RestoreSnapshot", "DeleteSnapshot",
 		"Exec", "WaitReady",
@@ -138,6 +138,11 @@ func (c *recordingClient) ListInstances(ctx context.Context) ([]incus.Instance, 
 func (c *recordingClient) StopInstance(ctx context.Context, name string) error {
 	c.note("StopInstance")
 	return c.client.StopInstance(ctx, name)
+}
+
+func (c *recordingClient) SupportsIDMappedMounts(ctx context.Context) (bool, error) {
+	c.note("SupportsIDMappedMounts")
+	return c.client.SupportsIDMappedMounts(ctx)
 }
 
 func (c *recordingClient) ProfileNames(ctx context.Context) ([]string, error) {

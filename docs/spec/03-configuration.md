@@ -574,6 +574,24 @@ idマップは `none` と同じままで、マウントを通る全てのidか�
 
 いずれも `test/integration` が実daemonに対して確かめている。
 
+#### 対応していないホスト
+
+`shift` はカーネルがマウント時のid付け替えを行えることを要求する。
+WSLのカーネルはこれを持たない。
+
+idevは `shift` を選ぶ前にdaemonへ問い合わせる
+（`kernel_features.idmapped_mounts`、[05-incus.md](05-incus.md) 5.7）。
+問い合わせずに進むと、Incusがinstanceを作ったあとのmountで
+`idmapping abilities are required but aren't supported on system`
+として失敗する。この文言は、どの設定が原因かも、どうすればよいかも述べない。
+
+`auto` は `raw` も使えない場合、退避先が無いためエラーとする。
+`raw` を使えるようにする手順（`/etc/subuid` への追加）と、
+`none` という選択肢の両方を示す。
+
+問い合わせは `shift` を使う場合にのみ行う。`raw` が選ばれるホストでは
+往復は発生しない。
+
 #### `auto`（既定）
 
 `raw` が利用可能であれば `raw`、そうでなければ `shift` へ退避する。

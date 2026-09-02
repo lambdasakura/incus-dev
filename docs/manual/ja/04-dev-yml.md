@@ -378,6 +378,14 @@ workspace:
 workspaceがコンテナ内からrootの所有に見え、書き込めない。
 `examples/dev-user/` がその構成であり、`idmap: shift` にしているのはこのためである。
 
+`shift` はマウント時にidを付け替えられるカーネルを要求する。
+**WSLのカーネルはこれを持たない**（古いカーネルも同様）。
+idevは `shift` を選ぶ前にdaemonへ問い合わせ、その場で理由を述べる。
+問い合わせない場合、Incusがinstance作成後にmountで
+"idmapping abilities are required but aren't supported on system" として失敗する。
+そのようなホストでは `raw`（上記の `/etc/subuid` / `/etc/subgid` の追加が要る）
+または `none` を使う。
+
 `auto` は `raw` が使えるならそれを、使えなければ `shift` へ退避し、警告を表示する。
 どちらでもworkspaceは読み書きできる。違いは生成物の所有者だけである。
 

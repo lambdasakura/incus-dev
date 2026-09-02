@@ -128,6 +128,27 @@ func Run(t *testing.T, env Env) []string {
 		}
 	})
 
+	check("the host answers the same way twice about idmapped mounts", func(t *testing.T) {
+		// What a host can do is the host's business, so the contract cannot
+		// say which answer is right. What it can hold is that both
+		// implementations answer at all, and answer consistently: idev
+		// decides between raw and shift on this, and a value that moved
+		// between two runs would send the same project down both paths.
+		ctx := context.Background()
+
+		first, err := env.Client.SupportsIDMappedMounts(ctx)
+		if err != nil {
+			t.Fatalf("SupportsIDMappedMounts() error = %v", err)
+		}
+		again, err := env.Client.SupportsIDMappedMounts(ctx)
+		if err != nil {
+			t.Fatalf("second SupportsIDMappedMounts() error = %v", err)
+		}
+		if first != again {
+			t.Errorf("SupportsIDMappedMounts() = %v then %v", first, again)
+		}
+	})
+
 	check("ProfileNames lists what is there and nothing else", func(t *testing.T) {
 		names, err := env.Client.ProfileNames(context.Background())
 		if err != nil {
@@ -156,7 +177,7 @@ func Run(t *testing.T, env Env) []string {
 //
 // A check deleted and replaced in the same edit keeps the count, which no
 // cheap guard catches -- but that is a deliberate act, not an oversight.
-const Checks = 35
+const Checks = 36
 
 // Critical are the checks that exist because the fake once disagreed with
 // Incus and a defect reached a user through the gap.

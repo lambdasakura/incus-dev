@@ -103,7 +103,7 @@ func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
   config:
     raw.idmap: "both 1234 0"
 `)
-	plan, err := resolveIDMap(cfg, 1000, 1000, permitted)
+	plan, err := resolveIDMap(cfg, 1000, 1000, permitted, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestStaleConfigKeys(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := mustParse(t, tt.yaml)
-			plan, err := resolveIDMap(cfg, 1000, 1000, permitted)
+			plan, err := resolveIDMap(cfg, 1000, 1000, permitted, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -404,7 +404,7 @@ func TestGitBranch(t *testing.T) {
 func TestDesiredDevicesClearsShiftWhenTheUserTakesOver(t *testing.T) {
 	cfg := mustParse(t, planBase+"  config:\n    raw.idmap: \"both 1000 0\"\n")
 
-	plan, err := resolveIDMap(cfg, 1000, 1000, func(int, int) error { return nil })
+	plan, err := resolveIDMap(cfg, 1000, 1000, func(int, int) error { return nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
