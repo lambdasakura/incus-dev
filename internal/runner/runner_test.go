@@ -228,22 +228,33 @@ func TestCommandStringWithoutArgs(t *testing.T) {
 
 // Arguments that may carry a secret are masked in the display string
 // (spec 04-cli.md 4.10).
+//
+// A marked argument is hidden whole. Showing anything of it, such as the part
+// before an "=", leaks a secret that happens to contain one — a base64 value
+// ending in "=" would be printed in full.
 func TestCommandStringRedactsMarkedArgs(t *testing.T) {
+	secrets := []string{
+		"token=s3cret",
+		`{"api_token":"dG9rZW4="}`,
+		"-----BEGIN KEY-----\nabc=\n",
+		"plain",
+	}
+
 	c := runner.Command{
 		Name:   "ansible-playbook",
-		Args:   []string{"site.yml", "-e", "token=s3cret", "-e", "mode=debug"},
-		Redact: []int{2, 4},
+		Args:   append([]string{"site.yml"}, secrets...),
+		Redact: []int{1, 2, 3, 4},
 	}
 
 	got := c.String()
 
-	if strings.Contains(got, "s3cret") || strings.Contains(got, "debug") {
-		t.Errorf("String() = %q, want it not to contain the values", got)
-	}
-	for _, want := range []string{"token=***", "mode=***", "ansible-playbook site.yml"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("String() = %q, want it to contain %q", got, want)
+	for _, secret := range []string{"s3cret", "dG9rZW4", "api_token", "BEGIN KEY", "plain", "token"} {
+		if strings.Contains(got, secret) {
+			t.Errorf("String() = %q, want no trace of %q", got, secret)
 		}
+	}
+	if !strings.Contains(got, "ansible-playbook site.yml") {
+		t.Errorf("String() = %q, want the command itself still readable", got)
 	}
 }
 

@@ -122,6 +122,66 @@ func TestDiscoverGitRootIsNotRequired(t *testing.T) {
 	}
 }
 
+// A start directory that is not there is a mistake, not a reason to use an
+// ancestor's project.
+func TestDiscoverRejectsMissingStartDir(t *testing.T) {
+	root := t.TempDir()
+	mkProject(t, root)
+
+	missing := filepath.Join(root, "services", "api-v2")
+
+	proj, err := project.Discover(missing)
+
+	if err == nil {
+		t.Fatalf("Discover() = %+v, want an error rather than the project above", proj)
+	}
+	if errors.Is(err, project.ErrNotFound) {
+		t.Errorf("error = %v, want a missing directory not to be reported as ErrNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "api-v2") {
+		t.Errorf("error = %v, want it to name the directory asked for", err)
+	}
+}
+
+// -C pointed at a file is a mistake too.
+func TestDiscoverRejectsAFileAsStartDir(t *testing.T) {
+	root := t.TempDir()
+	mkProject(t, root)
+
+	file := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := project.Discover(file)
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("error = %v, want it to say the start is not a directory", err)
+	}
+}
+
+// A file where .incus-dev/ would be is not a project, so the search carries on
+// upwards rather than stopping.
+func TestDiscoverPassesAFileNamedLikeTheConfigDir(t *testing.T) {
+	root := t.TempDir()
+	mkProject(t, root)
+
+	mid := filepath.Join(root, "mid")
+	if err := os.MkdirAll(mid, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mid, ".incus-dev"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	proj, err := project.Discover(mid)
+	if err != nil {
+		t.Fatalf("Discover() error = %v, want the project above to be found", err)
+	}
+	if proj.Root != mustEvalSymlinks(t, root) {
+		t.Errorf("Root = %q, want %q", proj.Root, root)
+	}
+}
+
 func mustEvalSymlinks(t *testing.T, p string) string {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(p)

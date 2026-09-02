@@ -37,7 +37,7 @@ func TestArgList(t *testing.T) {
 			t.Errorf("String() = %q, want it not to contain %q", display, secret)
 		}
 	}
-	for _, want := range []string{"incus exec dev-x", "--cwd /workspace", "TOKEN=***"} {
+	for _, want := range []string{"incus exec dev-x", "--cwd /workspace", "***"} {
 		if !strings.Contains(display, want) {
 			t.Errorf("String() = %q, want it to contain %q", display, want)
 		}

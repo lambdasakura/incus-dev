@@ -199,6 +199,9 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 	if err := a.checkProfiles(ctx); err != nil {
 		return err
 	}
+	if err := a.exec.CheckPrerequisites(ctx, a.cfg.Provision); err != nil {
+		return err
+	}
 
 	created := false
 
@@ -254,7 +257,11 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
 	// Reject a selection that cannot be resolved, and unmet prerequisites,
 	// before touching the instance.
-	if _, err := provision.Select(a.cfg.Provision, sel); err != nil {
+	selected, err := provision.Select(a.cfg.Provision, sel)
+	if err != nil {
+		return err
+	}
+	if err := a.exec.CheckPrerequisites(ctx, stepsAt(a.cfg.Provision, selected)); err != nil {
 		return err
 	}
 	env, err := a.env()
@@ -469,7 +476,20 @@ func asUser(argv []string, sh config.Shell) (out []string, user string) {
 		return argv, sh.User
 	}
 
-	return []string{"su", "-s", sh.Command, sh.User, "-c", strings.Join(argv, " ")}, ""
+	return []string{"su", "-s", sh.Command, sh.User, "-c", shellCommand(argv)}, ""
+}
+
+// shellCommand renders an argv as one string for a shell to run.
+//
+// su -c takes a single string, so the words have to be quoted rather than
+// joined: an argument holding a space or a shell metacharacter would
+// otherwise be re-split inside the container and run as something else.
+func shellCommand(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		quoted[i] = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
 }
 
 // statusReport is what status prints.

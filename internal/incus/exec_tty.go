@@ -85,6 +85,20 @@ type control struct {
 	// resized notifies of window-size changes, nil when running without a
 	// terminal.
 	resized <-chan struct{}
+	// sent is closed once an interruption has been forwarded to the container,
+	// so the caller can wait for it rather than exiting first.
+	sent chan struct{}
+}
+
+// forwardInterrupt tells the process in the container to stop.
+//
+// Left alone, a package installation keeps running and collides with the next
+// run (spec 05-incus.md 5.7.3).
+func (c control) forwardInterrupt(send func(any) error) {
+	_ = send(signalMessage(syscall.SIGTERM))
+	if c.sent != nil {
+		close(c.sent)
+	}
 }
 
 // controlHandler returns the handler for the control websocket.
@@ -111,13 +125,16 @@ func (c control) handle(send func(any) error) {
 	for {
 		select {
 		case <-c.done:
+			// Exec closes done as it returns, so an interruption makes both
+			// this and ctx.Done() ready at once and select picks at random.
+			// The interruption has to win either way.
+			if c.ctx.Err() != nil {
+				c.forwardInterrupt(send)
+			}
 			return
 
 		case <-c.ctx.Done():
-			// When idev is interrupted, stop the process in the container too.
-			// Left alone, a package installation keeps running and collides
-			// with the next run.
-			_ = send(signalMessage(syscall.SIGTERM))
+			c.forwardInterrupt(send)
 			return
 
 		case _, ok := <-c.resized:

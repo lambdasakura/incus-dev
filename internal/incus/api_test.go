@@ -513,6 +513,35 @@ func TestAPIStopFallsBackToForce(t *testing.T) {
 }
 
 // A stopped instance is not asked to stop.
+// Interrupting a graceful stop must not escalate to killing the instance.
+//
+// The user pressing Ctrl-C during `idev up --restart` is asking for the
+// restart to stop, not for whatever is running inside to be killed
+// (spec 05-incus.md 5.4.5).
+func TestAPIStopDoesNotForceAfterCancellation(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	a, _ := newAPI(f)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	calls := 0
+	f.beforeState = func() {
+		calls++
+		cancel()
+	}
+	f.opErr["UpdateInstanceState"] = context.Canceled
+
+	err := a.StopInstance(ctx, "dev-x")
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want the cancellation reported", err)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want no forced stop after a cancelled graceful one", calls)
+	}
+}
+
 func TestAPIStopAlreadyStopped(t *testing.T) {
 	f := newFakeServer()
 	f.addInstance("dev-x", api.InstancePut{}).Status = "Stopped"

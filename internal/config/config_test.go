@@ -640,6 +640,21 @@ func TestParseRejectsNonMappingDocument(t *testing.T) {
 	}
 }
 
+// A key written twice is an error, not a silent overwrite.
+//
+// YAML lets the last one win, so a duplicated section would discard the first
+// without a word: the steps in the first provision: block would simply never
+// run (spec 03-configuration.md).
+func TestParseRejectsDuplicateKeys(t *testing.T) {
+	body := minimal + "instance:\n  image: images:alpine/3.21\n"
+
+	err := parseErr(t, body)
+
+	if !strings.Contains(err.Error(), "instance") {
+		t.Errorf("error = %q, want the duplicated key named", err.Error())
+	}
+}
+
 func TestParseRejectsNonNumericSchema(t *testing.T) {
 	err := parseErr(t, "schema: \"1\"\nproject:\n  name: p\ninstance:\n  image: i\n")
 	if !strings.Contains(err.Error(), "integer") {

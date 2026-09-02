@@ -78,6 +78,70 @@ func TestPlanActionsForExistingInstance(t *testing.T) {
 	}
 }
 
+// The plan shows what up would remove, not only what it would set.
+//
+// Removing config and devices is the one destructive thing up does to an
+// existing instance, so a preflight that hides it is worse than none
+// (spec 04-cli.md 4.8).
+func TestPlanActionsShowsRemovals(t *testing.T) {
+	cfg := mustParse(t, planBase)
+	plan := idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1000}
+
+	current := &incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey:  "example-project",
+			managedKeysKey:     "limits.memory,security.nesting",
+			managedDevicesKey:  "extdata,workspace",
+			"limits.memory":    "8GiB", // idev applied it; the declaration dropped it
+			"security.nesting": "true", // the same
+		},
+		Devices: map[string]incus.Device{
+			"workspace": {"type": "disk", "path": "/workspace", "source": "/home/u/src/example"},
+			"extdata":   {"type": "disk", "path": "/data", "source": "/srv/data"},
+		},
+	}
+
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan), "\n")
+
+	for _, want := range []string{
+		"Unset config limits.memory",
+		"Unset config security.nesting",
+		"Remove device extdata",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plan =\n%s\nwant it to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Remove device workspace") {
+		t.Errorf("plan =\n%s\nwant the declared device kept", got)
+	}
+}
+
+// What the user set by hand is not idev's to remove, so the plan must not
+// claim it will be.
+func TestPlanActionsLeavesUnrecordedConfigAlone(t *testing.T) {
+	cfg := mustParse(t, planBase)
+	plan := idmapPlan{Mode: config.IDMapShift, Managed: true}
+
+	current := &incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedKeysKey:    "limits.cpu",
+			idmapConfigKey:    "uid 1000 0", // set by hand, not recorded
+		},
+	}
+
+	got := strings.Join(planActions(cfg, "dev-example-project", current, plan), "\n")
+
+	if strings.Contains(got, "Unset config "+idmapConfigKey) {
+		t.Errorf("plan =\n%s\nwant a key idev did not set left alone", got)
+	}
+}
+
 func TestPlanActionsStartsStoppedInstance(t *testing.T) {
 	cfg := mustParse(t, planBase)
 	current := &incus.Instance{Name: "dev-example-project", Status: "Stopped"}

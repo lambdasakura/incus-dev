@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 const (
@@ -27,12 +28,27 @@ type Project struct {
 	ConfigPath string
 }
 
+// isAbsent reports whether the path simply is not there.
+//
+// A file where .incus-dev/ would be gives ENOTDIR rather than ENOENT, and that
+// is not a project either, so the search carries on upwards.
+func isAbsent(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
+}
+
 // Discover looks for .incus-dev/dev.yml from startDir upwards and returns
 // the nearest project root.
 func Discover(startDir string) (*Project, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve start directory %q: %w", startDir, err)
+	}
+	// Without this the search would simply start above a directory that is not
+	// there, and a mistyped -C would operate on an ancestor's project.
+	if info, err := os.Stat(dir); err != nil {
+		return nil, fmt.Errorf("start directory %q: %w", startDir, err)
+	} else if !info.IsDir() {
+		return nil, fmt.Errorf("start directory %q: not a directory", startDir)
 	}
 	// Normalise, in case the path contains a symlink (t.TempDir() often does).
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
@@ -47,8 +63,9 @@ func Discover(startDir string) (*Project, error) {
 		switch info, err := os.Stat(configPath); {
 		case err == nil && !info.IsDir():
 			return &Project{Root: dir, ConfigPath: configPath}, nil
-		case err != nil && !errors.Is(err, os.ErrNotExist):
-			return nil, fmt.Errorf("stat %s: %w", configPath, err)
+		case err != nil && !isAbsent(err):
+			// The error already names the path and the operation.
+			return nil, fmt.Errorf("look for the project root: %w", err)
 		}
 
 		if configDirWithoutFile == "" {

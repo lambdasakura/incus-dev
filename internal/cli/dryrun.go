@@ -70,12 +70,16 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 			out = append(out, "Apply no profiles")
 		}
 		out = append(out, configActions(nil, desiredCfg, nil)...)
-		out = append(out, deviceActions(nil, desiredDev)...)
+		out = append(out, deviceActions(nil, desiredDev, nil)...)
 		out = append(out, "Start instance")
 	} else {
 		out = append(out, fmt.Sprintf("Use existing instance %s (%s)", name, current.Status))
-		out = append(out, configActions(current.Config, desiredCfg, staleIDMapKeys(current.Config, idmap))...)
-		out = append(out, deviceActions(current.Devices, desiredDev)...)
+		// The same functions the applying path uses, so the plan cannot
+		// under-report what up would remove.
+		out = append(out, configActions(current.Config, desiredCfg,
+			staleConfigKeys(current.Config, desiredCfg, idmap))...)
+		out = append(out, deviceActions(current.Devices, desiredDev,
+			staleDevices(current, desiredDev))...)
 
 		if !current.IsRunning() {
 			out = append(out, "Start instance")
@@ -113,8 +117,12 @@ func configActions(current, desired map[string]string, stale []string) []string 
 }
 
 // deviceActions lists the changes to the devices.
-func deviceActions(current, desired map[string]incus.Device) []string {
+func deviceActions(current, desired map[string]incus.Device, stale []string) []string {
 	var out []string
+
+	for _, name := range stale {
+		out = append(out, "Remove device "+name)
+	}
 
 	for _, name := range slices.Sorted(maps.Keys(desired)) {
 		want := desired[name]

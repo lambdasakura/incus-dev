@@ -45,6 +45,33 @@ func TestInstanceNameLength(t *testing.T) {
 	}
 }
 
+// A long project name must not swallow the suffix that tells checkouts apart.
+//
+// project.scope exists so that several checkouts of one project get their own
+// instance (spec 05-incus.md 5.1). Truncating the whole name to what Incus
+// accepts used to cut the suffix off the end, collapsing them into one.
+func TestInstanceNameWithSuffixKeepsTheSuffix(t *testing.T) {
+	long := strings.Repeat("abcdefghij", 10)
+
+	a := incus.InstanceNameWithSuffix(long, incus.ShortHash("/home/u/a"))
+	b := incus.InstanceNameWithSuffix(long, incus.ShortHash("/home/u/b"))
+
+	if a == b {
+		t.Fatalf("both checkouts became %q, want one instance each", a)
+	}
+	for _, got := range []string{a, b} {
+		if len(got) > 63 {
+			t.Errorf("len(%q) = %d, want <= 63", got, len(got))
+		}
+		if !strings.HasPrefix(got, "dev-") {
+			t.Errorf("InstanceNameWithSuffix() = %q, want it to start with dev-", got)
+		}
+	}
+	if !strings.HasSuffix(a, incus.ShortHash("/home/u/a")) {
+		t.Errorf("InstanceNameWithSuffix() = %q, want it to end with the suffix", a)
+	}
+}
+
 // The generated name always satisfies what Incus accepts.
 func TestInstanceNameDistinguishesNonAlphanumericNames(t *testing.T) {
 	// Names with no letters or digits must not collapse into one instance name.

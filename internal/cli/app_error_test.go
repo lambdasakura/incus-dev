@@ -499,7 +499,9 @@ provision:
 	client := incustest.New()
 	managed(client, "Running")
 
-	cmdRunner := &runnertest.Fake{Err: map[string]error{"ansible-playbook": errBoom}}
+	// The playbook run itself, not the prerequisite check, which runs
+	// ansible-playbook --version.
+	cmdRunner := &runnertest.Fake{Err: map[string]error{"ansible-playbook -i": errBoom}}
 	app := NewApp(AppOptions{
 		Config: cfg, Client: client, Runner: cmdRunner,
 		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
@@ -514,6 +516,108 @@ provision:
 			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 		}
 	}
+}
+
+// What an ansible step needs on the host is checked before the instance is
+// touched (spec 06-provisioning.md 6.5.1).
+//
+// Otherwise up creates the instance, starts it, waits for the network and runs
+// the default bootstrap — a minute of apt — only to stop because Ansible is not
+// installed on the host.
+func TestUpChecksAnsiblePrerequisitesBeforeCreating(t *testing.T) {
+	root := t.TempDir()
+	playbook := filepath.Join(root, ".incus-dev", "ansible", "site.yml")
+	if err := os.MkdirAll(filepath.Dir(playbook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playbook, []byte("---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Parse([]byte(rootYAML+`
+provision:
+  - name: playbook step
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+`), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = root
+
+	client := incustest.New()
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client,
+		Runner: &runnertest.Fake{Err: map[string]error{"ansible-playbook": errBoom}},
+		Out:    &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err == nil {
+		t.Fatal("Up() = nil error, want it to stop on the missing prerequisite")
+	}
+	for _, call := range client.Calls {
+		if strings.HasPrefix(call, "create ") {
+			t.Errorf("calls = %v, want no instance created", client.Calls)
+			break
+		}
+	}
+}
+
+// provision checks the same prerequisites, and only for the steps selected.
+func TestProvisionChecksPrerequisitesOfSelectedSteps(t *testing.T) {
+	root := t.TempDir()
+	playbook := filepath.Join(root, ".incus-dev", "ansible", "site.yml")
+	if err := os.MkdirAll(filepath.Dir(playbook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playbook, []byte("---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Parse([]byte(rootYAML+`
+provision:
+  - name: tools
+    run: "true"
+  - name: playbook step
+    ansible:
+      playbook: .incus-dev/ansible/site.yml
+`), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = root
+
+	newApp := func(client *incustest.Fake) *App {
+		return NewApp(AppOptions{
+			Config: cfg, Client: client,
+			Runner: &runnertest.Fake{Err: map[string]error{"ansible-playbook --version": errBoom}},
+			Out:    &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+		})
+	}
+
+	t.Run("the ansible step is selected", func(t *testing.T) {
+		client := incustest.New()
+		managed(client, "Running")
+
+		if err := newApp(client).Provision(context.Background(), provision.Selection{}); err == nil {
+			t.Fatal("Provision() = nil error, want it to stop on the missing prerequisite")
+		}
+		for _, call := range client.Calls {
+			if strings.HasPrefix(call, "exec ") {
+				t.Errorf("calls = %v, want nothing run in the instance", client.Calls)
+				break
+			}
+		}
+	})
+
+	t.Run("only a run step is selected", func(t *testing.T) {
+		client := incustest.New()
+		managed(client, "Running")
+
+		if err := newApp(client).Provision(context.Background(), provision.Selection{Only: []string{"tools"}}); err != nil {
+			t.Errorf("Provision() error = %v, want ansible not to be required", err)
+		}
+	})
 }
 
 // When unsetting fails while switching idmap strategies, the reason reaches the
@@ -1063,7 +1167,7 @@ func TestShellWithNamedUser(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
-	want := []string{"su", "-s", "/bin/bash", "developer", "-c", "make test"}
+	want := []string{"su", "-s", "/bin/bash", "developer", "-c", `'make' 'test'`}
 	if diff := cmp.Diff(want, client.Execs[0]); diff != "" {
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)
 	}
@@ -1603,5 +1707,37 @@ func TestPlanChecksSecrets(t *testing.T) {
 
 	if err := app.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "API_TOKEN") {
 		t.Errorf("error = %v", err)
+	}
+}
+
+// A command reaches the container unchanged when it runs as a named user.
+//
+// su -c takes one string, so the argv has to be quoted for the shell rather
+// than joined: without that, an argument holding a space or a shell
+// metacharacter is re-split inside the container.
+func TestAsUserKeepsArgumentBoundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{"a space in an argument", []string{"cat", "my file"}, `'cat' 'my file'`},
+		{"shell metacharacters", []string{"bash", "-lc", "cd sub && make"}, `'bash' '-lc' 'cd sub && make'`},
+		{"a single quote", []string{"echo", "it's"}, `'echo' 'it'\''s'`},
+		{"nothing to quote", []string{"make", "test"}, `'make' 'test'`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, user := asUser(tt.argv, config.Shell{User: "developer", Command: "/bin/sh"})
+
+			if user != "" {
+				t.Errorf("user = %q, want it switched inside the container", user)
+			}
+			want := []string{"su", "-s", "/bin/sh", "developer", "-c", tt.want}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("asUser() mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

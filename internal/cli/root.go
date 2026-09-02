@@ -67,7 +67,7 @@ func newRootCommand(version string, factory, offline appFactory) *cobra.Command 
 
 	root.AddCommand(
 		newUpCommand(g, factory),
-		newProvisionCommand(g, factory),
+		newProvisionCommand(g, factory, offline),
 		newShellCommand(g, factory),
 		newExecCommand(g, factory),
 		newStatusCommand(g, factory),
@@ -198,7 +198,11 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 	return c
 }
 
-func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
+// newProvisionCommand builds the provision command.
+//
+// --list only reads dev.yml, so it is built without connecting: it is meant to
+// be usable where no Incus is reachable (spec 04-cli.md 4.2).
+func newProvisionCommand(g *globalFlags, newApp, offline appFactory) *cobra.Command {
 	var (
 		only     []string
 		from     string
@@ -210,7 +214,11 @@ func newProvisionCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Re-run provisioning without recreating the instance",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+			build := newApp
+			if listOnly {
+				build = offline
+			}
+			app, err := build(g)
 			if err != nil {
 				return err
 			}

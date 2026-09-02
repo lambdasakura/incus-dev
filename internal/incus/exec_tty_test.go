@@ -203,6 +203,52 @@ func TestControlForwardsCancellation(t *testing.T) {
 	}
 }
 
+// An interruption still reaches the container when the exec has finished at
+// the same moment.
+//
+// Exec closes done as it returns, so on Ctrl-C both done and ctx.Done() are
+// ready at the same select and Go picks between them at random. The
+// cancellation has to win whichever one is chosen, or the process inside the
+// container is left running (spec 05-incus.md 5.7.3).
+//
+// The loop is what makes a regression visible: taking the wrong branch is a
+// coin flip, so one round would report it only half the time.
+func TestControlForwardsCancellationWhenAlsoDone(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		done := make(chan struct{})
+		close(done)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		var sent []any
+		control{ctx: ctx, done: done, sent: make(chan struct{})}.handle(func(v any) error {
+			sent = append(sent, v)
+			return nil
+		})
+
+		want := []any{api.InstanceExecControl{Command: "signal", Signal: int(syscall.SIGTERM)}}
+		if diff := cmp.Diff(want, sent); diff != "" {
+			t.Fatalf("round %d: sent mismatch (-want +got):\n%s", i, diff)
+		}
+	}
+}
+
+// Forwarding the interruption is reported, so the run does not exit before the
+// signal is on the wire.
+func TestControlReportsTheSignalWasSent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sent := make(chan struct{})
+	control{ctx: ctx, done: make(chan struct{}), sent: sent}.handle(func(any) error { return nil })
+
+	select {
+	case <-sent:
+	default:
+		t.Error("the handler did not report that it forwarded the interruption")
+	}
+}
+
 // The handler ends when the run does.
 func TestControlStopsWhenExecFinishes(t *testing.T) {
 	done := make(chan struct{})

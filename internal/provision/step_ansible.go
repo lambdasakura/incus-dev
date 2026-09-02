@@ -25,6 +25,21 @@ const (
 	ConnectionPlugin = "community.general.incus"
 )
 
+// CheckPrerequisites verifies what the given steps need on the host, before
+// anything is done to the instance.
+//
+// Left to the step itself, the check happens after the instance has been
+// created, started and bootstrapped, so the user waits through all of that to
+// be told Ansible is not installed (spec 06-provisioning.md 6.5.1).
+func (e *Executor) CheckPrerequisites(ctx context.Context, steps []config.Step) error {
+	for _, step := range steps {
+		if step.Ansible != nil || step.Galaxy != nil {
+			return e.checkPrerequisites(ctx)
+		}
+	}
+	return nil
+}
+
 // checkPrerequisites verifies, once, that the prerequisites for ansible steps
 // are in place.
 //

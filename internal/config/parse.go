@@ -44,7 +44,9 @@ func Load(configPath string) (*Config, error) {
 
 // Parse interprets and validates the contents of dev.yml.
 func Parse(data []byte, opt Options) (*Config, error) {
-	jsonData, err := yaml.YAMLToJSON(data)
+	// Strict, so a key written twice is an error. YAML would let the last one
+	// win, and a duplicated section would then be discarded without a word.
+	jsonData, err := yaml.YAMLToJSONStrict(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}

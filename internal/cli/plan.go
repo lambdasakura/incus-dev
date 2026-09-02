@@ -229,3 +229,12 @@ func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.Instanc
 func isManagedBy(instanceConfig map[string]string, projectName string) bool {
 	return instanceConfig[managedProjectKey] == projectName
 }
+
+// stepsAt returns the steps at the given positions.
+func stepsAt(steps []config.Step, indices []int) []config.Step {
+	out := make([]config.Step, 0, len(indices))
+	for _, i := range indices {
+		out = append(out, steps[i])
+	}
+	return out
+}

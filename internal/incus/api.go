@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	incusclient "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
@@ -197,8 +198,14 @@ func (a *API) StopInstance(ctx context.Context, name string) error {
 		return nil
 	}
 
-	if err := a.changeState(ctx, name, "stop", false); err == nil {
+	err = a.changeState(ctx, name, "stop", false)
+	if err == nil {
 		return nil
+	}
+	if ctx.Err() != nil {
+		// Interrupted, not unresponsive. Forcing here would kill what the user
+		// was running, which is what the graceful attempt exists to avoid.
+		return err
 	}
 	return a.forceStop(ctx, name)
 }
@@ -212,6 +219,12 @@ func (a *API) forceStop(ctx context.Context, name string) error {
 }
 
 func (a *API) changeState(ctx context.Context, name, action string, force bool) error {
+	// UpdateInstanceState is a plain synchronous call, so nothing else stops
+	// an already-cancelled run from changing the instance.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s instance %s: %w", action, name, err)
+	}
+
 	a.log(action+" instance", "name", name, "force", force)
 
 	state := api.InstanceStatePut{Action: action, Force: force, Timeout: -1}
@@ -482,7 +495,16 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	// process in the container.
 	done := make(chan struct{})
 	defer close(done)
-	ctrl := control{ctx: ctx, done: done}
+	sent := make(chan struct{})
+	ctrl := control{ctx: ctx, done: done, sent: sent}
+
+	// On an interruption the process exits almost at once, which would leave
+	// the signal unsent on the wire.
+	defer func() {
+		if ctx.Err() != nil {
+			awaitSignalSent(sent)
+		}
+	}()
 
 	if opt.TTY {
 		// With a terminal allocated, put the host terminal into raw mode so
@@ -531,6 +553,21 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	}
 
 	return exitCodeOf(op.Get()), nil
+}
+
+// signalGrace bounds the wait for an interruption to reach the container.
+//
+// The control websocket is not always open — the exec can fail before it is
+// established — so the wait cannot be unbounded.
+const signalGrace = 2 * time.Second
+
+// awaitSignalSent waits until the interruption has been forwarded, or until
+// waiting is no longer worth it.
+func awaitSignalSent(sent <-chan struct{}) {
+	select {
+	case <-sent:
+	case <-time.After(signalGrace):
+	}
 }
 
 // newExecRequest builds the exec request to send to Incus. It runs nothing.

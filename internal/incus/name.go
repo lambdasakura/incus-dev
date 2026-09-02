@@ -24,12 +24,18 @@ func InstanceName(projectName string) string {
 
 // InstanceNameWithSuffix derives an instance name with a suffix.
 //
-// It tells several checkouts on one machine apart (spec 05-incus.md 5.1).
+// It tells several checkouts on one machine apart (spec 05-incus.md 5.1), so
+// the suffix is what must survive: a long project name is shortened to make
+// room for it rather than the other way round.
 func InstanceNameWithSuffix(projectName, suffix string) string {
-	if suffix != "" {
-		projectName += "-" + suffix
+	if suffix == "" {
+		return instanceName(projectName)
 	}
-	return instanceName(projectName)
+
+	tail := "-" + normalize(suffix)
+	head := truncate(InstanceNamePrefix+normalize(projectName), maxInstanceNameLength-len(tail))
+
+	return strings.TrimRight(head, "-") + tail
 }
 
 // ShortHash returns a short hexadecimal string that distinguishes a name.
@@ -38,9 +44,21 @@ func ShortHash(s string) string {
 }
 
 func instanceName(projectName string) string {
+	name := InstanceNamePrefix + normalize(projectName)
+	if normalize(projectName) == "" {
+		// Names with no letters or digits would all normalise to the same
+		// thing, so distinguish them with a short hash of the original.
+		name = InstanceNamePrefix + shortHash(projectName)
+	}
+	return strings.TrimRight(truncate(name, maxInstanceNameLength), "-")
+}
+
+// normalize reduces a name to what Incus accepts: lowercase letters, digits
+// and hyphens, with no run of hyphens and none at either end.
+func normalize(name string) string {
 	var sb strings.Builder
 	prevDash := false
-	for _, r := range strings.ToLower(projectName) {
+	for _, r := range strings.ToLower(name) {
 		switch {
 		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
 			sb.WriteRune(r)
@@ -52,18 +70,15 @@ func instanceName(projectName string) string {
 			}
 		}
 	}
-	normalized := strings.Trim(sb.String(), "-")
-	if normalized == "" {
-		// Names with no letters or digits would all normalise to the same
-		// thing, so distinguish them with a short hash of the original.
-		normalized = shortHash(projectName)
-	}
+	return strings.Trim(sb.String(), "-")
+}
 
-	name := InstanceNamePrefix + normalized
-	if len(name) > maxInstanceNameLength {
-		name = name[:maxInstanceNameLength]
+// truncate shortens a name to at most n bytes.
+func truncate(name string, n int) string {
+	if len(name) > n {
+		return name[:n]
 	}
-	return strings.TrimRight(name, "-")
+	return name
 }
 
 // shortHash returns a short hexadecimal string that distinguishes a name.

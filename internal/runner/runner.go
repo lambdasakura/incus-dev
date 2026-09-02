@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 )
@@ -43,15 +44,12 @@ type Command struct {
 }
 
 // redacted returns an argument with its value hidden, for display.
-// KEY=VALUE becomes KEY=***; anything else is hidden whole.
+//
+// A marked argument is hidden whole. Showing the part before an "=" would
+// have leaked any secret that contains one: a base64 value ending in "=" was
+// printed in full, and so was the first line of a PEM key.
 func (c Command) redacted(i int, arg string) string {
-	for _, r := range c.Redact {
-		if r != i {
-			continue
-		}
-		if key, _, ok := strings.Cut(arg, "="); ok {
-			return key + "=***"
-		}
+	if slices.Contains(c.Redact, i) {
 		return "***"
 	}
 	return arg

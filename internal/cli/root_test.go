@@ -27,6 +27,9 @@ instance:
   image: images:ubuntu/24.04
 `
 
+// errNoIncus stands in for the failure of building an App that connects.
+var errNoIncus = errors.New("connect to the local incus")
+
 // stub is an appFactory handing out an App the test prepared.
 func stub(app *App) appFactory {
 	return func(*globalFlags) (*App, error) { return app, nil }
@@ -521,7 +524,9 @@ provision:
 		Out: out, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	cmd := newRootCommand("test", stub(app), stub(app))
+	// The connecting factory must not be reached: --list needs no Incus, and
+	// on a machine with no daemon building that App fails (spec 04-cli.md 4.2).
+	cmd := newRootCommand("test", failing(errNoIncus), stub(app))
 	cmd.SetArgs([]string{"provision", "--list"})
 	cmd.SetOut(out)
 

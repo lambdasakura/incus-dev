@@ -39,7 +39,7 @@ func TestFakeRecordsCommands(t *testing.T) {
 	if len(f.Calls) != 2 {
 		t.Fatalf("Calls = %d, want 2", len(f.Calls))
 	}
-	if got := f.LastCommand(); !strings.Contains(got, "TOKEN=***") {
+	if got := f.LastCommand(); strings.Contains(got, "s3cret") || !strings.Contains(got, "***") {
 		t.Errorf("LastCommand() = %q, want the masked rendering", got)
 	}
 	if got := f.LastArgv(); !strings.Contains(got, "TOKEN=s3cret") {
