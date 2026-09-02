@@ -137,9 +137,11 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 | ホスト（ansibleステップを使う場合） | `ansible-playbook`、`community.general` collection |
 | コンテナ | なし（SSH Serverは不要） |
 
-ホスト側の追加設定は不要。既定（`workspace.idmap: auto`）では、
+多くのホストではホスト側の追加設定は不要。既定（`workspace.idmap: auto`）では、
 利用可能ならホストの実行ユーザーをコンテナのrootへ対応付け（`raw.idmap`）、
 利用できなければidmapped mount（`shift`）へ退避する。
+WSLには退避先が無い（カーネルがidmapped mountsを持たない）ため、
+下の設定がworkspaceを書き込み可能にする唯一の方法になる。
 
 コンテナ内で作られたファイルをホスト側でも自分の所有にしたい場合は、
 `/etc/subuid`・`/etc/subgid` へ以下を追加する（incusの再起動は不要）。
@@ -234,7 +236,7 @@ remoteのIncusと仮想マシンは恒久的に対象外である。どちらも
 | --- | --- |
 | remoteのIncus | 常にローカルのIncusを操作する。`incus remote switch` の既定にも従わない |
 | 仮想マシン | instanceは常にコンテナであり、`instance.type` という設定は無い |
-| macOS / Windows | ローカルのIncusを操作するのが `idev` であり、client libraryはLinux以外でローカル接続を拒否する。リリースするのはLinuxバイナリのみ |
+| macOS、およびWSL以外のWindows | ローカルのIncusを操作するのが `idev` であり、client libraryはLinux以外でローカル接続を拒否する。リリースするのはLinuxバイナリのみ。**WSL2はLinuxなので動く**。違いは1つ、カーネルが `idmap: shift` を持たないため `raw` を使う（[トラブルシューティング](docs/troubleshooting.ja.md)） |
 
 ## ライセンス
 

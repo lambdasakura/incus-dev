@@ -71,7 +71,15 @@ names, and `idev --version` reporting it.
 
 **idev is for Linux.** It operates the Incus on the machine it runs on, and the
 Incus client refuses a local connection on any other platform, so nothing that
-reaches Incus works on macOS or Windows. No binaries are released for them.
+reaches Incus works on macOS, or on Windows outside WSL. No binaries are
+released for those.
+
+**WSL2 counts as Linux.** Install Incus inside the WSL distribution and use the
+Linux binary; idev talks to that Incus like any other. One thing differs: the
+WSL kernel cannot shift ids on a mount, so `workspace.idmap: shift` is not
+available there. Use `raw`, which needs the `/etc/subuid` and `/etc/subgid`
+entries in 1.5 and no kernel feature. idev says so if you ask for `shift`
+anyway.
 
 ### From source
 
@@ -134,8 +142,12 @@ grep '^root:' /etc/subuid /etc/subgid
 No Incus restart is needed afterwards — the file is read when the container
 starts.
 
-`idev` works without this. It then falls back to an idmapped mount, and files
-the container creates are owned by root on the host.
+`idev` works without this on most hosts. It then falls back to an idmapped
+mount, and files the container creates are owned by root on the host.
+
+**On WSL there is no fallback**, because that kernel cannot do idmapped mounts:
+the entries above are what makes the workspace writable at all. `idev up` says
+so rather than failing at the mount.
 
 For details see `workspace.idmap` in [04-dev-yml.md](04-dev-yml.md) and
 [troubleshooting](../troubleshooting.md#2-workspace-is-owned-by-the-wrong-user--not-writable).

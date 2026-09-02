@@ -312,8 +312,13 @@ project root検出にGitを利用してもよい。
 
 `idev` が操作するのは常にローカルのIncusである（[05-incus.md](05-incus.md) 5.6）が、
 Incusのclient libraryは非Linuxで `local` remoteへの接続を無条件に拒否する
-（`cliconfig` の `ErrNotLinux`）。したがって macOS / Windows では
+（`cliconfig` の `ErrNotLinux`）。したがって macOS と、WSL以外のWindows では
 Incusへ触れるコマンドが1つも動かない。
+
+WSL2はLinuxであり、対象に含まれる。WSL内のIncusを、他のLinuxと同じように操作する。
+ただしWSLのカーネルはidmapped mountsを持たないため `idmap: shift` は使えない
+（[03-configuration.md](03-configuration.md) 3.7.3）。
+`raw` はカーネル機能を要求しないので使える。
 
 `idev validate` だけはIncusを必要としない（[04-cli.md](04-cli.md) 4.7）が、
 そのために他プラットフォーム向けのバイナリを配ると、

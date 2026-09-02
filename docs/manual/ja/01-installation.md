@@ -69,8 +69,15 @@ idev --version        # edge-<commit>。ビルド元のコミット
 
 **idev はLinux専用である。** 動作しているマシンのIncusを操作するものであり、
 Incusのclient libraryはLinux以外でローカル接続を拒否する。
-そのため macOS / Windows ではIncusに触れるコマンドが1つも動かない。
+そのため macOS と、WSL以外のWindows ではIncusに触れるコマンドが1つも動かない。
 これらのプラットフォーム向けのバイナリは配布しない。
+
+**WSL2はLinuxとして動く。** WSLのディストリビューション内にIncusを導入し、
+Linux向けバイナリを使う。idevはそのIncusを他と同じように操作する。
+違いは1点だけで、WSLのカーネルはマウント時のid付け替えができないため、
+`workspace.idmap: shift` は使えない。カーネル機能を要求しない `raw` を使う
+（1.5 の `/etc/subuid` / `/etc/subgid` の追加が要る）。
+`shift` を指定した場合、idevがその旨を述べて止まる。
 
 ### ソースから導入する
 
@@ -132,8 +139,12 @@ grep '^root:' /etc/subuid /etc/subgid
 
 追加後、Incusの再起動は不要（コンテナ起動時に読まれる）。
 
-未設定でも `idev` は動作する。その場合はidmapped mountへ自動的に退避し、
-コンテナが作ったファイルはホスト側でrootの所有になる。
+多くのホストでは未設定でも `idev` は動作する。その場合はidmapped mountへ
+自動的に退避し、コンテナが作ったファイルはホスト側でrootの所有になる。
+
+**WSLには退避先が無い。** カーネルがidmapped mountsを持たないため、
+workspaceへ書き込めるようにするのは上の設定だけである。
+`idev up` はmountで失敗するのではなく、その旨を述べて止まる。
 
 詳細は [04-dev-yml.md](04-dev-yml.md) の `workspace.idmap` と
 [トラブルシューティング](../../troubleshooting.ja.md#2-workspaceの所有者がおかしい--書き込めない) を参照。

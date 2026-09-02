@@ -17,7 +17,8 @@ builds:
     env:
       - CGO_ENABLED=0
     # Linux only: idev talks to a local Incus, and the client refuses a local
-    # connection anywhere else (spec 07-implementation.md 7.7).
+    # connection anywhere else (spec 07-implementation.md 7.7). WSL2 runs this
+    # same binary -- it is Linux -- so no Windows build is needed for it.
     goos:
       - linux
     goarch:

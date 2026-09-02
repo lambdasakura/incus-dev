@@ -141,10 +141,12 @@ See the **[manual](docs/manual/README.md)** for details, and
 | Host, for `ansible` steps | `ansible-playbook` and the `community.general` collection |
 | Container | Nothing — no SSH server required |
 
-No extra host configuration is needed. By default (`workspace.idmap: auto`),
-`idev` maps the host user running it onto root in the container (`raw.idmap`)
-when that is available, and falls back to an idmapped mount (`shift`) when it
-is not.
+No extra host configuration is needed on most hosts. By default
+(`workspace.idmap: auto`), `idev` maps the host user running it onto root in
+the container (`raw.idmap`) when that is available, and falls back to an
+idmapped mount (`shift`) when it is not. On WSL there is no fallback -- that
+kernel has no idmapped mounts -- so the entries below are what makes the
+workspace writable.
 
 To also own container-created files as yourself on the host, add the following
 to `/etc/subuid` and `/etc/subgid` (no Incus restart needed). This is needed in
@@ -246,7 +248,7 @@ this tool is for: a per-project environment on the machine in front of you.
 | --- | --- |
 | A remote Incus | `idev` always talks to the local one, and does not follow `incus remote switch` |
 | Virtual machines | An instance is always a container; there is no `instance.type` |
-| macOS and Windows | Talking to the local Incus is what `idev` does, and the client refuses a local connection anywhere but Linux. Only Linux binaries are released |
+| macOS, and Windows outside WSL | Talking to the local Incus is what `idev` does, and the client refuses a local connection anywhere but Linux. Only Linux binaries are released. **WSL2 is Linux and works**, with one difference: its kernel cannot do `idmap: shift`, so use `raw` ([troubleshooting](docs/troubleshooting.md)) |
 
 ## License
 
