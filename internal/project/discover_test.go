@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/lambdasakura/incus-dev/internal/project"
@@ -219,5 +220,68 @@ func TestDiscoverReportsUnreadableDirectory(t *testing.T) {
 	}
 	if errors.Is(err, project.ErrNotFound) {
 		t.Errorf("error = %v, want a permission problem not to be reported as ErrNotFound", err)
+	}
+}
+
+// A dev.yml that exists but is not a file is not a missing dev.yml. Telling
+// the user to create what is already there sends them in a circle.
+func TestDiscoverReportsAConfigOfTheWrongKind(t *testing.T) {
+	tests := []struct {
+		name string
+		make func(t *testing.T, path string)
+	}{
+		{"a directory", func(t *testing.T, path string) {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		// The one that matters most: opening a fifo blocks until a writer
+		// arrives, and nothing downstream can interrupt that.
+		{"a named pipe", func(t *testing.T, path string) {
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Skipf("cannot create a fifo: %v", err)
+			}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".incus-dev"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			tt.make(t, filepath.Join(root, ".incus-dev", "dev.yml"))
+
+			_, err := project.Discover(root)
+			if err == nil {
+				t.Fatal("Discover() = nil error, want the wrong kind reported")
+			}
+			if strings.Contains(err.Error(), "is missing") {
+				t.Errorf("error = %q, want it not to call this missing", err.Error())
+			}
+			if !strings.Contains(err.Error(), "not a regular file") {
+				t.Errorf("error = %q, want it to say what is wrong", err.Error())
+			}
+		})
+	}
+}
+
+// A dev.yml of the wrong kind in a subdirectory does not hide the real
+// project above it. The search is upward for a reason.
+func TestDiscoverKeepsLookingPastAConfigOfTheWrongKind(t *testing.T) {
+	root := t.TempDir()
+	mkProject(t, root)
+
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(filepath.Join(sub, ".incus-dev", "dev.yml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := project.Discover(sub)
+	if err != nil {
+		t.Fatalf("Discover() error = %v, want the project above found", err)
+	}
+	if got.Root != root {
+		t.Errorf("Root = %q, want %q", got.Root, root)
 	}
 }

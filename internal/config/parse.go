@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"sigs.k8s.io/yaml"
@@ -30,6 +31,19 @@ type Options struct {
 // Load reads dev.yml and validates it. configPath is expected to be
 // <root>/.incus-dev/dev.yml.
 func Load(configPath string) (*Config, error) {
+	// Before opening it. Opening a named pipe blocks until a writer arrives,
+	// and that open is not context-aware -- by then signal.NotifyContext has
+	// taken the default handler off SIGINT, so the run cannot be interrupted
+	// at all. A directory would otherwise be reported as unreadable rather
+	// than as the wrong kind of thing.
+	info, err := os.Stat(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", configPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("read %s: not a regular file", configPath)
+	}
+
 	data, err := os.ReadFile(configPath) //nolint:gosec // reading the configuration file the user named is the point
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", configPath, err)
@@ -170,21 +184,33 @@ func validateSchema(doc any, ps *problems) {
 	// Intermediate nodes carry only a summary such as "validation failed", so
 	// collect the leaves alone.
 	found := make([]Problem, 0, 8)
-	collectLeafProblems(verr, message.NewPrinter(language.English), &found)
+	collectLeafProblems(verr, message.NewPrinter(language.English), &found, false)
 	sort.SliceStable(found, func(i, j int) bool { return found[i].Path < found[j].Path })
 	*ps = append(*ps, found...)
 }
 
-func collectLeafProblems(e *jsonschema.ValidationError, p *message.Printer, out *[]Problem) {
+// collectLeafProblems gathers the leaves, naming each by where it is in the
+// document.
+//
+// aboutAKey says an ancestor was a propertyNames failure. Those validate the
+// key rather than a place in the document, and the location the library
+// reports for them belongs to something else entirely, so the leaf would be
+// filed at the root -- indistinguishable from a problem with the whole file.
+// The key itself is already quoted in the message.
+func collectLeafProblems(e *jsonschema.ValidationError, p *message.Printer, out *[]Problem, aboutAKey bool) {
+	if _, ok := e.ErrorKind.(*kind.PropertyNames); ok {
+		aboutAKey = true
+	}
 	if len(e.Causes) == 0 {
-		*out = append(*out, Problem{
-			Path:    pointerToPath("/" + strings.Join(e.InstanceLocation, "/")),
-			Message: e.ErrorKind.LocalizedString(p),
-		})
+		path := pointerToPath("/" + strings.Join(e.InstanceLocation, "/"))
+		if aboutAKey {
+			path = "(a key name)"
+		}
+		*out = append(*out, Problem{Path: path, Message: e.ErrorKind.LocalizedString(p)})
 		return
 	}
 	for _, cause := range e.Causes {
-		collectLeafProblems(cause, p, out)
+		collectLeafProblems(cause, p, out, aboutAKey)
 	}
 }
 

@@ -121,6 +121,11 @@ func (a *App) existingVolumes(ctx context.Context) (map[string]bool, error) {
 		pool, name := vol.PoolOrDefault(), volumeName(a.instance, key)
 
 		exists, err := a.client.VolumeExists(ctx, pool, name)
+		if errors.Is(err, incus.ErrPoolNotFound) {
+			// up would fail on this, and says so itself; the preview reports
+			// the volume as one that would be created rather than stopping.
+			exists, err = false, nil
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -259,6 +259,12 @@ idev snapshot delete <name>     # 同上
 - 復元してもホスト側のworkspaceには影響しない
   （bind mountであり、instanceの状態ではないため）
 
+`create` は名前を検査する。Incus自身の制約（`/` と空白を含まない）に加え、
+`.` と `..` を拒否する。ストレージドライバによっては、これらの名前で作った
+snapshotが残り、**instanceごと削除できなくなる**ため。
+
+`restore` / `delete` は検査しない。idev以外が作ったsnapshotへ到達できなくなる。
+
 ---
 
 ## 4.7 `idev validate`

@@ -214,6 +214,10 @@ parsed that gets converted, not what you typed: `0660` is octal and becomes
 `"432"`, and `no` is a boolean and becomes `"false"`. Write `"0660"` and `"no"`
 to pass them through as they are.
 
+A whole number too large for 64 bits goes the same way: it is read as a
+floating-point value, so `99999999999999999999999999999999999` reaches Incus
+as `1e+35`. Quote it.
+
 `limits.cpu` and `limits.memory` do take effect in containers, and are
 reflected in what the container sees as its CPU count (`nproc`) and memory
 (`/proc/meminfo`). That lets `make -j$(nproc)` and friends size themselves to

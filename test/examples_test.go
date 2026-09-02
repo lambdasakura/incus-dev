@@ -134,10 +134,26 @@ var removedAnsibleSettings = map[string]string{
 	"stdout_callback = yaml": "result_format = yaml",
 }
 
-func TestExamplesAvoidRemovedAnsibleSettings(t *testing.T) {
-	roots := []string{"../examples", "../docs/manual", "../docs/spec"}
+// iniBlock matches a fenced ini block, which is how the manual shows a config
+// the reader is meant to copy.
+var iniBlock = regexp.MustCompile("(?s)```ini\\n(.*?)```")
 
-	for _, root := range roots {
+func TestExamplesAvoidRemovedAnsibleSettings(t *testing.T) {
+	// Only what a reader copies: an ansible.cfg, and the fenced ini blocks in
+	// the documentation. Prose has to be able to name a broken setting in
+	// order to warn about it -- show a counter-example in a ```text block.
+	check := func(t *testing.T, path, body string) {
+		t.Helper()
+
+		for removed, replacement := range removedAnsibleSettings {
+			if strings.Contains(body, removed) {
+				t.Errorf("%s uses %q, which current Ansible rejects; use %q",
+					path, removed, replacement)
+			}
+		}
+	}
+
+	for _, root := range []string{"../examples", "../docs/manual", "../docs/spec"} {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -146,10 +162,13 @@ func TestExamplesAvoidRemovedAnsibleSettings(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			for removed, replacement := range removedAnsibleSettings {
-				if strings.Contains(string(body), removed) {
-					t.Errorf("%s uses %q, which current Ansible rejects; use %q",
-						path, removed, replacement)
+
+			switch {
+			case d.Name() == "ansible.cfg":
+				check(t, path, string(body))
+			case strings.HasSuffix(path, ".md"):
+				for _, m := range iniBlock.FindAllStringSubmatch(string(body), -1) {
+					check(t, path, m[1])
 				}
 			}
 			return nil

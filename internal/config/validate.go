@@ -98,25 +98,30 @@ func runtimeCompatible(required, current string) (bool, error) {
 func parseVersion(v string) (major, minor int, err error) {
 	parts := strings.Split(v, ".")
 	if len(parts) > 3 {
-		return 0, 0, fmt.Errorf("expected MAJOR[.MINOR[.PATCH]]")
+		return 0, 0, errVersionFormat
 	}
-	major, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("expected MAJOR[.MINOR[.PATCH]]")
-	}
-	if len(parts) > 1 {
-		minor, err = strconv.Atoi(parts[1])
-		if err != nil {
-			return 0, 0, fmt.Errorf("expected MAJOR[.MINOR[.PATCH]]")
+
+	// Atoi accepts a sign, so "-1" and "+1" would both parse and be reported
+	// as a runtime this idev is too old for, rather than as something that is
+	// not a version at all.
+	nums := make([]int, len(parts))
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 || strings.HasPrefix(part, "+") {
+			return 0, 0, errVersionFormat
 		}
+		nums[i] = n
 	}
-	if len(parts) > 2 {
-		if _, err := strconv.Atoi(parts[2]); err != nil {
-			return 0, 0, fmt.Errorf("expected MAJOR[.MINOR[.PATCH]]")
-		}
+
+	major = nums[0]
+	if len(nums) > 1 {
+		minor = nums[1]
 	}
 	return major, minor, nil
 }
+
+// errVersionFormat is what every malformed runtime.version reports.
+var errVersionFormat = fmt.Errorf("expected MAJOR[.MINOR[.PATCH]]")
 
 // validateVolumes checks the persistent volume declarations.
 func validateVolumes(c *Config, ps *problems) {

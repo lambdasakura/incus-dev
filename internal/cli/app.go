@@ -388,6 +388,9 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 	// attached to one.
 	a.log.Info("Deleting instance " + a.instance)
 	if err := a.client.DeleteInstance(ctx, a.instance); err != nil {
+		if opt.Volumes {
+			return volumesUntouched(err, volumes)
+		}
 		return err
 	}
 
@@ -471,7 +474,14 @@ func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
 		}
 
 		exists, err := a.client.VolumeExists(ctx, pool, name)
-		if err != nil {
+		switch {
+		case errors.Is(err, incus.ErrPoolNotFound):
+			// No volume can be on a pool that is not there. Failing here
+			// cannot be retried: the instance, and the record naming the
+			// rest, are already gone.
+			a.log.Debug("skipping " + ref + ": " + err.Error())
+			continue
+		case err != nil:
 			return remainingVolumes(err, refs[i:])
 		}
 		if !exists {
@@ -486,16 +496,51 @@ func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
 	return nil
 }
 
-// remainingVolumes names what is left on the pool when the cleanup stops
-// partway.
+// namedVolumes keeps the record entries that name a volume.
 //
-// The instance is deleted before its volumes, and the instance carried the
-// only record naming them. Once it is gone, an error that does not list them
-// leaves storage no idev command can name again.
+// The record can hold an entry that does not -- it is hand-editable -- and
+// sending the user after one wastes their time.
+func namedVolumes(refs []string) []string {
+	var out []string
+	for _, ref := range refs {
+		if _, _, ok := splitVolume(ref); ok {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
+// remainingVolumes names what a failed cleanup left behind, for the caller
+// that knows the instance is already deleted.
+//
+// The instance carried the only record naming them, so an error that does not
+// list them leaves storage no idev command can name again.
 func remainingVolumes(err error, refs []string) error {
-	return fmt.Errorf("%w\nthese volume(s) are still on the pool, and the instance "+
-		"that recorded them is gone: %s\nremove them with 'incus storage volume delete <pool> <volume>'",
-		err, strings.Join(refs, ", "))
+	named := namedVolumes(refs)
+	if len(named) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w\nthe instance is gone, and with it the record naming "+
+		"these volume(s), which were not deleted: %s\nremove them with %s",
+		err, strings.Join(named, ", "), volumeDeleteHint(named))
+}
+
+// volumesUntouched names the volumes when deleting the instance failed, so it
+// is not known whether the instance is still there.
+//
+// Only the wait for the operation is ambiguous: a lookup, a force-stop or a
+// rejected request all leave the instance -- and its volumes, still attached
+// to it -- exactly where they were. Deleting a volume by hand is what Incus
+// refuses in that case, so the first thing to try is the same command again.
+func volumesUntouched(err error, refs []string) error {
+	named := namedVolumes(refs)
+	if len(named) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w\nno volume was deleted: %s\n"+
+		"run 'idev destroy --volumes' again; if the instance is already gone, "+
+		"remove them with %s",
+		err, strings.Join(named, ", "), volumeDeleteHint(named))
 }
 
 // Rebuild destroys the instance and creates it again.
@@ -1015,8 +1060,15 @@ func (a *App) pruneVolumeRecord(ctx context.Context, inst *incus.Instance) {
 			continue
 		}
 		exists, err := a.client.VolumeExists(ctx, pool, name)
-		if err != nil {
-			// The pool may be gone or unreachable. Nothing declared needs this
+		switch {
+		case errors.Is(err, incus.ErrPoolNotFound):
+			// The pool has no row, so nothing it names can exist. Keeping the
+			// record would warn about the volume on every run, for good, and
+			// point at a pool Incus says is not there.
+			a.log.Debug("dropping " + ref + ": " + err.Error())
+			continue
+		case err != nil:
+			// Unreachable rather than gone. Nothing declared needs this
 			// volume, so refusing to run would block up over a record that is
 			// only there to be tidied.
 			a.log.Debug("could not check " + ref + ": " + err.Error())

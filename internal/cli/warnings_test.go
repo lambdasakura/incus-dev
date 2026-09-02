@@ -3,11 +3,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/lambdasakura/incus-dev/internal/incus"
 	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
@@ -503,10 +507,17 @@ func TestDestroyNamesTheVolumesItCouldNotDelete(t *testing.T) {
 func TestManagedDevicesRecordsVolumeDevices(t *testing.T) {
 	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
 
-	desired := desiredConfig(cfg, idmapPlan{}, nil, "dev-example-project")
+	plan := idmapPlan{}
+	desired := desiredConfig(cfg, plan, nil, "dev-example-project")
 
-	if got := desired[managedDevicesKey]; !strings.Contains(got, "cache") {
-		t.Errorf("%s = %q, want the volume device recorded", managedDevicesKey, got)
+	// The device keys themselves: staleDevices matches the record against
+	// them, so recording the volume's name instead would look right in a
+	// substring check and remove nothing.
+	want := slices.Sorted(maps.Keys(desiredDevices(cfg, plan, "dev-example-project")))
+	got := splitList(desired[managedDevicesKey])
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("%s mismatch (-want +got):\n%s", managedDevicesKey, diff)
 	}
 }
 
@@ -612,13 +623,341 @@ func TestPlanDoesNotWarnAboutAVolumeAlreadyGone(t *testing.T) {
 		managedVolumesKey: "default/dev-example-project-cache",
 	})
 	// The pool no longer has it, so the record is stale, not a dropped volume.
-	app.out = &bytes.Buffer{}
-	_ = client
+	if len(client.Volumes) != 0 {
+		t.Fatalf("Volumes = %v, want the pool empty", client.Volumes)
+	}
 
 	if err := app.Plan(context.Background()); err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
 	if strings.Contains(errOut.String(), "no longer declared") {
 		t.Errorf("warning = %q, want no complaint about a volume that is gone", errOut.String())
+	}
+}
+
+// The names in a failed cleanup are the ones that were not deleted -- not a
+// claim about what is on the pool, which idev cannot know once the client
+// has failed. A record entry that names no volume is left out: it is what
+// splitVolume exists to discard.
+func TestFailedVolumeCleanupNamesOnlyRealReferences(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.Volumes["default/dev-example-project-a"] = true
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-a,junk-entry,default/dev-example-project-b",
+		},
+	})
+	client.FailOn = map[string]error{"volume delete default dev-example-project-a": errBoom}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{Volumes: true})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the failure reported")
+	}
+	if strings.Contains(err.Error(), "junk-entry") {
+		t.Errorf("error = %q, want the malformed record entry left out", err.Error())
+	}
+	for _, want := range []string{"dev-example-project-a", "dev-example-project-b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q", err.Error(), want)
+		}
+	}
+}
+
+// A cancellation that lands while the instance is being deleted takes the
+// record with it, so the names have to come out of that failure too.
+func TestDestroyNamesTheVolumesWhenTheInstanceDeleteFails(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.Volumes["default/dev-example-project-a"] = true
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-a",
+		},
+	})
+	client.FailOn = map[string]error{"delete dev-example-project": errBoom}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{Volumes: true})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the failure reported")
+	}
+	if !strings.Contains(err.Error(), "dev-example-project-a") {
+		t.Errorf("error = %q, want it to name the volume left behind", err.Error())
+	}
+}
+
+// When the instance is still there, its volumes are still attached: telling
+// the user to delete them by hand hands them a command Incus refuses. The
+// action that works is running destroy again.
+func TestDestroySaysToRetryWhenTheInstanceSurvived(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.Volumes["default/dev-example-project-cache"] = true
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.FailOn = map[string]error{"delete dev-example-project": errBoom}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{Volumes: true})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the failure reported")
+	}
+	if !strings.Contains(err.Error(), "idev destroy --volumes") {
+		t.Errorf("error = %q, want it to say to run destroy again", err.Error())
+	}
+	if strings.Contains(err.Error(), "if the instance is gone") {
+		t.Errorf("error = %q, want no hedging about a fact the caller knows", err.Error())
+	}
+}
+
+// Once the instance is deleted, idev knows the record went with it. The
+// message says so rather than hedging.
+func TestFailedVolumeCleanupIsCertainTheInstanceIsGone(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.Volumes["default/dev-example-project-cache"] = true
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.FailOn = map[string]error{"volume delete": errBoom}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{Volumes: true})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the failure reported")
+	}
+	if strings.Contains(err.Error(), "if the instance is gone") {
+		t.Errorf("error = %q, want it stated, not hedged", err.Error())
+	}
+	if !strings.Contains(err.Error(), "incus storage volume delete default dev-example-project-cache") {
+		t.Errorf("error = %q, want the command to remove them", err.Error())
+	}
+}
+
+// A snapshot name goes straight to Incus, and a bad one can leave the
+// instance unusable and undeletable -- the pool keeps a snapshot idev can
+// name but nothing can remove. Every other identifier idev forwards is
+// checked; this one was not.
+func TestSnapshotNameIsChecked(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	// Rejected: the ones that wedge the instance or that Incus itself refuses.
+	for _, name := range []string{".", "..", "a/b", "a b", "with\nnewline", "\x01ctl"} {
+		t.Run(name, func(t *testing.T) {
+			client.Calls = nil
+
+			if err := app.CreateSnapshot(context.Background(), name); err == nil {
+				t.Fatalf("CreateSnapshot(%q) = nil error, want it refused", name)
+			}
+			if slices.ContainsFunc(client.Calls, func(c string) bool {
+				return strings.HasPrefix(c, "snapshot create")
+			}) {
+				t.Errorf("calls = %v, want nothing sent to Incus", client.Calls)
+			}
+		})
+	}
+
+	// Accepted: everything Incus accepts. A rule stricter than the daemon's
+	// would refuse names projects may already be using.
+	for _, name := range []string{"_baseline", "feature+1", "v1@rc", "before:upgrade",
+		"-wip", "a~1", "20260901-125226"} {
+		t.Run(name, func(t *testing.T) {
+			client.Calls = nil
+
+			if err := app.CreateSnapshot(context.Background(), name); err != nil {
+				t.Errorf("CreateSnapshot(%q) error = %v, want it accepted", name, err)
+			}
+		})
+	}
+
+	// The documented "no name given" case still works: the timestamp it
+	// generates has to pass the same check.
+	t.Run("no name", func(t *testing.T) {
+		client.Calls = nil
+
+		if err := app.CreateSnapshot(context.Background(), ""); err != nil {
+			t.Fatalf("CreateSnapshot(\"\") error = %v, want the timestamp used", err)
+		}
+		if !slices.ContainsFunc(client.Calls, func(c string) bool {
+			return strings.HasPrefix(c, "snapshot create")
+		}) {
+			t.Errorf("calls = %v, want the snapshot created", client.Calls)
+		}
+	})
+}
+
+// A pool that no longer exists holds no volumes, so there is nothing for
+// destroy to delete and nothing for the record to name.
+//
+// Failing here is worse than useless: the instance is already gone, so the
+// run cannot be retried, and the command it suggests names a pool Incus says
+// does not exist.
+func TestDestroyVolumesToleratesAMissingPool(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "oldpool/dev-example-project-data",
+		},
+	})
+	client.FailOn = map[string]error{
+		"volume exists oldpool": fmt.Errorf("storage pool oldpool: %w", incus.ErrPoolNotFound),
+	}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Destroy(context.Background(), DestroyOptions{Volumes: true}); err != nil {
+		t.Errorf("Destroy() error = %v, want a pool that is gone to be nothing to do", err)
+	}
+}
+
+// The record names a pool with no row, so no volume it names can exist. That
+// is a record to drop, not one to keep warning about on every run.
+func TestUpDropsARecordOnAMissingPool(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "oldpool/dev-example-project-data",
+		},
+	})
+	client.FailOn = map[string]error{
+		"volume exists oldpool": fmt.Errorf("storage pool oldpool: %w", incus.ErrPoolNotFound),
+	}
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "no longer declared") {
+		t.Errorf("output = %q, want no warning about a pool that is gone", errOut.String())
+	}
+	if got := client.Instances["dev-example-project"].Config[managedVolumesKey]; got != "" {
+		t.Errorf("%s = %q, want the record dropped", managedVolumesKey, got)
+	}
+}
+
+// The preview shows a volume on a pool that is gone as one that would be
+// created; up is what reports the pool, and says so plainly.
+func TestPlanToleratesAMissingPool(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n    pool: oldpool\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+	client.FailOn = map[string]error{
+		"volume exists oldpool": fmt.Errorf("storage pool oldpool: %w", incus.ErrPoolNotFound),
+	}
+
+	out := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Create volume") {
+		t.Errorf("plan =\n%s\nwant the volume shown as one to create", out.String())
+	}
+}
+
+// Any other failure to check a volume still stops the cleanup, naming what is
+// left.
+func TestDestroyVolumesStopsOnAnUncheckableVolume(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-a",
+		},
+	})
+	client.FailOn = map[string]error{"volume exists default": errBoom}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{Volumes: true})
+	if err == nil || !strings.Contains(err.Error(), "dev-example-project-a") {
+		t.Errorf("error = %v, want the volume named", err)
 	}
 }

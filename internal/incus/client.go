@@ -14,6 +14,16 @@ import (
 // ErrInstanceNotFound reports that the instance does not exist.
 var ErrInstanceNotFound = errors.New("instance not found")
 
+// ErrInstanceExists reports that the instance was created by someone else
+// while idev was creating it.
+var ErrInstanceExists = errors.New("instance already exists")
+
+// ErrPoolNotFound reports that the storage pool itself is not there.
+//
+// It is not the same as a missing volume: no volume can exist on a pool that
+// has no row, so there is nothing to create, delete or keep a record of.
+var ErrPoolNotFound = errors.New("storage pool not found")
+
 // ErrNetworkNotReady reports that no network address was assigned to the
 // instance.
 //

@@ -1336,3 +1336,81 @@ func TestProgram(t *testing.T) {
 		t.Errorf("program() = %q", got)
 	}
 }
+
+// Incus answers 404 for a missing project or storage pool as well as for a
+// missing instance or volume. Treating those alike turns a typo in
+// incus.project into "run 'idev up' first", and makes a pool that is
+// temporarily gone look like a volume that no longer exists.
+func TestNotFoundDistinguishesTheScope(t *testing.T) {
+	t.Run("a missing project is not a missing instance", func(t *testing.T) {
+		f := newFakeServer()
+		f.err = map[string]error{"GetInstanceFull": api.StatusErrorf(404, "Project not found")}
+		a, _ := newAPI(f)
+
+		_, err := a.Instance(context.Background(), "dev-x")
+		if errors.Is(err, ErrInstanceNotFound) {
+			t.Errorf("error = %v, want the missing project reported instead", err)
+		}
+		if err == nil || !strings.Contains(err.Error(), "Project not found") {
+			t.Errorf("error = %v, want it to name the project", err)
+		}
+	})
+
+	t.Run("a missing pool is not a missing volume", func(t *testing.T) {
+		f := newFakeServer()
+		f.err = map[string]error{
+			"GetStoragePoolVolume": api.StatusErrorf(404, "Storage pool not found"),
+		}
+		a, _ := newAPI(f)
+
+		exists, err := a.VolumeExists(context.Background(), "ghostpool", "v")
+		if err == nil {
+			t.Errorf("VolumeExists() = %v, nil; want the missing pool reported", exists)
+		}
+		if exists {
+			t.Error("VolumeExists() = true, want false")
+		}
+	})
+
+	t.Run("a missing instance still is one", func(t *testing.T) {
+		f := newFakeServer()
+		a, _ := newAPI(f)
+
+		if _, err := a.Instance(context.Background(), "dev-x"); !errors.Is(err, ErrInstanceNotFound) {
+			t.Errorf("error = %v, want ErrInstanceNotFound", err)
+		}
+	})
+
+	t.Run("a missing volume still is one", func(t *testing.T) {
+		f := newFakeServer()
+		a, _ := newAPI(f)
+
+		exists, err := a.VolumeExists(context.Background(), "default", "v")
+		if err != nil || exists {
+			t.Errorf("VolumeExists() = %v, %v; want false, nil", exists, err)
+		}
+	})
+}
+
+// Two idev runs can race to create the same instance. The loser gets an
+// Incus database error, which says nothing a user can act on.
+func TestCreateInstanceReportsALostRace(t *testing.T) {
+	f := newFakeServer()
+	f.err = map[string]error{
+		"CreateInstanceFromImage": errors.New(
+			"Failed instance creation: Failed creating instance record: " +
+				`Add instance info to the database: This "instances" entry already exists`),
+	}
+	a, _ := newAPI(f)
+
+	err := a.CreateInstance(context.Background(), InstanceSpec{Name: "dev-x", Image: "images:x"})
+	if err == nil {
+		t.Fatal("CreateInstance() = nil error, want the race reported")
+	}
+	if !errors.Is(err, ErrInstanceExists) {
+		t.Errorf("error = %v, want ErrInstanceExists", err)
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, want it to say the instance is already there", err.Error())
+	}
+}

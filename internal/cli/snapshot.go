@@ -3,11 +3,40 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // snapshotTimeFormat names a snapshot when no name was given.
 const snapshotTimeFormat = "20060102-150405"
+
+// checkSnapshotName rejects a name Incus should never be asked to create.
+//
+// The name reaches the storage driver, and one it cannot handle -- "." is
+// enough on btrfs -- leaves a snapshot behind that the instance cannot be
+// deleted around: idev can name it, nothing can remove it. Every other
+// identifier idev forwards is checked, so this one is too.
+//
+// The rule is Incus's own (no "/", no whitespace) plus the path elements the
+// storage drivers mishandle. Anything stricter would refuse names Incus
+// accepts and projects may already be using.
+func checkSnapshotName(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("a snapshot name is required")
+	case name == "." || name == "..":
+		return fmt.Errorf("invalid snapshot name %q: it names a directory, "+
+			"which leaves a snapshot the instance cannot be deleted around", name)
+	case strings.Contains(name, "/"):
+		return fmt.Errorf("invalid snapshot name %q: it must not contain %q", name, "/")
+	case strings.ContainsFunc(name, unicode.IsSpace):
+		return fmt.Errorf("invalid snapshot name %q: it must not contain whitespace", name)
+	case strings.ContainsFunc(name, unicode.IsControl):
+		return fmt.Errorf("invalid snapshot name %q: it must not contain control characters", name)
+	}
+	return nil
+}
 
 // CreateSnapshot takes a snapshot of the instance, naming it after the current
 // time when no name was given.
@@ -17,6 +46,9 @@ func (a *App) CreateSnapshot(ctx context.Context, name string) error {
 	}
 	if name == "" {
 		name = time.Now().Format(snapshotTimeFormat)
+	}
+	if err := checkSnapshotName(name); err != nil {
+		return err
 	}
 
 	if err := a.client.CreateSnapshot(ctx, a.instance, name); err != nil {

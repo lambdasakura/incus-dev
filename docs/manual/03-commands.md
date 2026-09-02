@@ -254,9 +254,11 @@ idev status --json
 }
 ```
 
-`profiles`, `config` and `devices` are omitted when the instance does not
-exist. `config` lists the `limits.*` keys only -- the rest of an instance's
-config is Incus's to report, and `incus config show` shows all of it. `image` and `workspace_source` are what the instance actually has;
+`profiles`, `config` and `devices` are omitted whenever they would be empty,
+which includes the instance not existing. `config` lists the `limits.*` keys
+only, so it is absent from an instance that sets none -- the rest of an
+instance's config is Incus's to report, and `incus config show` shows all of
+it. `image` and `workspace_source` are what the instance actually has;
 `image_declared` and `workspace_source_declared` appear beside them only when
 dev.yml asks for something else. `runtime` is what `runtime.version` in dev.yml
 declares, and is omitted when it declares none.
@@ -320,6 +322,11 @@ idev snapshot delete before-upgrade
 
 Without a name, the current date and time are used (`20260831-142530`).
 `restore` and `delete` ask for confirmation (`--force` skips it).
+
+`create` rejects a name containing `/` or whitespace, which Incus refuses
+anyway, and `.` or `..`, which on some storage drivers leave a snapshot the
+instance cannot be deleted around. `restore` and `delete` accept any name, so
+a snapshot made elsewhere is still reachable.
 
 **The workspace on the host is unaffected**: it is a bind mount, not part of
 the instance's state.

@@ -73,12 +73,31 @@ func (a *API) console() Console {
 
 var _ Client = (*API)(nil)
 
+// missingScope reports whether a 404 is about the project or the storage pool
+// the object was asked for in, rather than the object itself.
+//
+// Incus answers 404 for all four. Mapping every 404 to "it is not there" turns
+// a typo in incus.project into "run 'idev up' first", and makes a pool that is
+// merely unreachable look like a volume that has been deleted -- enough for up
+// to drop it from the record that names it (spec 03-configuration.md 3.13).
+// Only the message tells them apart.
+func missingScope(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "Project not found") || missingPool(err)
+}
+
+// missingPool reports whether a 404 is about the storage pool rather than the
+// volume asked for on it.
+func missingPool(err error) bool {
+	return strings.Contains(err.Error(), "Storage pool not found")
+}
+
 // Instance fetches an instance's state, returning ErrInstanceNotFound when it
 // does not exist.
 func (a *API) Instance(_ context.Context, name string) (*Instance, error) {
 	full, _, err := a.Server.GetInstanceFull(name)
 	if err != nil {
-		if api.StatusErrorCheck(err, 404) {
+		if api.StatusErrorCheck(err, 404) && !missingScope(err) {
 			return nil, fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
 		}
 		return nil, fmt.Errorf("get instance %s: %w", name, err)
@@ -131,6 +150,20 @@ func toAPIDevices(devices map[string]Device) map[string]map[string]string {
 	return out
 }
 
+// createError reports a failed creation, recognising the one failure a user
+// can act on: another idev run got there first.
+//
+// Incus reports it from the database layer, and the raw text ("Add instance
+// info to the database: This \"instances\" entry already exists") says nothing
+// about what happened or what to do.
+func createError(name string, err error) error {
+	if strings.Contains(err.Error(), `This "instances" entry already exists`) {
+		return fmt.Errorf("create instance %s: %w; another 'idev up' is creating it, "+
+			"or it was created since this run started", name, ErrInstanceExists)
+	}
+	return fmt.Errorf("create instance %s: %w", name, err)
+}
+
 // CreateInstance creates an instance without starting it.
 func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	source, image, err := a.Images.Resolve(ctx, spec.Image)
@@ -155,12 +188,12 @@ func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 
 	op, err := a.Server.CreateInstanceFromImage(source, *image, req)
 	if err != nil {
-		return fmt.Errorf("create instance %s: %w", spec.Name, err)
+		return createError(spec.Name, err)
 	}
 	// RemoteOperation takes no context, and fetching an image can take
 	// minutes, so wait for it ourselves and stay interruptible.
 	if err := waitOp(ctx, op); err != nil {
-		return fmt.Errorf("create instance %s: %w", spec.Name, err)
+		return createError(spec.Name, err)
 	}
 	return nil
 }
@@ -221,11 +254,14 @@ func (a *API) forceStop(ctx context.Context, name string) error {
 
 // changeState starts or stops the instance.
 //
-// It is the one mutation that refuses to run once the context is cancelled.
-// The others must not: destroy deletes the instance before its volumes, and
-// the instance carries the only record naming them, so a cleanup that stops
-// halfway leaves storage nothing can name again. Starting or stopping has no
-// such second half.
+// It refuses to run once the context is cancelled, and it is the only
+// mutation that does. The rest go ahead: they are the second half of work
+// that has already changed something, and stopping between the halves loses
+// more than it saves -- destroy deletes the instance before its volumes, and
+// the instance carries the only record naming them.
+//
+// DeleteInstance inherits the refusal indirectly, since it force-stops a
+// running instance first. That is harmless: nothing has been deleted yet.
 func (a *API) changeState(ctx context.Context, name, action string, force bool) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%s instance %s: %w", action, name, err)
@@ -344,7 +380,7 @@ func (a *API) RemoveDevices(ctx context.Context, name string, devices []string) 
 func (a *API) updateInstance(ctx context.Context, name string, change func(*api.InstancePut)) error {
 	full, etag, err := a.Server.GetInstanceFull(name)
 	if err != nil {
-		if api.StatusErrorCheck(err, 404) {
+		if api.StatusErrorCheck(err, 404) && !missingScope(err) {
 			return fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
 		}
 		return fmt.Errorf("get instance %s: %w", name, err)
@@ -391,7 +427,12 @@ func (a *API) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	switch {
 	case err == nil:
 		return true, nil
-	case api.StatusErrorCheck(err, 404):
+	case api.StatusErrorCheck(err, 404) && missingPool(err):
+		// Distinguished from a missing volume so callers can decide: nothing
+		// can exist on a pool with no row, but that is a reason to delete a
+		// record and a reason to refuse to create.
+		return false, fmt.Errorf("storage pool %s: %w", pool, ErrPoolNotFound)
+	case api.StatusErrorCheck(err, 404) && !missingScope(err):
 		return false, nil
 	default:
 		return false, fmt.Errorf("get storage volume %s on %s: %w", name, pool, err)

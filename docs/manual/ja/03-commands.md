@@ -243,8 +243,10 @@ idev status --json
 }
 ```
 
-`profiles` / `config` / `devices` は、instanceが存在しない場合は出力されない。
-`config` に出るのは `limits.*` のキーのみである。それ以外はIncusが報告すべきもので、
+`profiles` / `config` / `devices` は、空になる場合は出力されない。
+instanceが存在しない場合もこれに含まれる。
+`config` に出るのは `limits.*` のキーのみであり、それを1つも設定していない
+instanceでは項目ごと現れない。それ以外はIncusが報告すべきもので、
 `incus config show` が全て表示する。
 `image` と `workspace_source` はinstanceが実際に持っている値である。
 dev.yml が別のものを求めている場合に限り、`image_declared` と
@@ -309,6 +311,11 @@ idev snapshot delete before-upgrade
 
 名前を省略すると日時（`20260831-142530`）が付く。
 `restore` と `delete` は確認を求める（`--force` で省略）。
+
+`create` は `/` と空白を含む名前を拒否する（Incus自身が拒否するため）。
+`.` と `..` も拒否する。ストレージドライバによっては、これらの名前で作った
+snapshotが残り、instanceごと削除できなくなるため。
+`restore` と `delete` は名前を検査しないので、idev以外が作ったsnapshotにも到達できる。
 
 **ホスト側のworkspaceには影響しない。** bind mount であり、
 instanceの状態ではないためである。

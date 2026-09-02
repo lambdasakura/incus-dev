@@ -11,6 +11,11 @@ import (
 const dryRunYAML = planBase + `
   config:
     limits.cpu: "8"
+  devices:
+    extdata:
+      type: disk
+      source: /srv/data
+      path: /data
 provision:
   - name: prepare
     run: "true"
@@ -56,6 +61,8 @@ func TestPlanActionsForExistingInstance(t *testing.T) {
 		},
 		Devices: map[string]incus.Device{
 			"workspace": {"type": "disk", "path": "/workspace", "source": "/old"},
+			// Declared and already correct, so it must not be reported.
+			"extdata": {"type": "disk", "path": "/data", "source": "/srv/data", "shift": "true"},
 		},
 	}
 

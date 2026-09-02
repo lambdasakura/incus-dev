@@ -59,13 +59,23 @@ func Discover(startDir string) (*Project, error) {
 
 	// A directory with .incus-dev/ but no dev.yml, which is likely a mistake.
 	var configDirWithoutFile string
+	var wrongKind string
 
 	for {
 		configPath := filepath.Join(dir, ConfigDir, ConfigFile)
 		switch info, err := os.Stat(configPath); {
-		case err == nil && !info.IsDir():
+		case err == nil && info.Mode().IsRegular():
 			return &Project{Root: dir, ConfigPath: configPath}, nil
-		case err != nil && !isAbsent(err):
+		case err == nil:
+			// It is there; it is the wrong kind of thing. Keep looking -- a
+			// real project above must not be hidden by it -- but remember it,
+			// so that if nothing is found the answer is what is wrong rather
+			// than "dev.yml is missing", which would send the user to create
+			// what they are looking at.
+			if wrongKind == "" {
+				wrongKind = configPath
+			}
+		case !isAbsent(err):
 			// The error already names the path and the operation.
 			return nil, fmt.Errorf("look for the project root: %w", err)
 		}
@@ -83,6 +93,9 @@ func Discover(startDir string) (*Project, error) {
 		dir = parent
 	}
 
+	if wrongKind != "" {
+		return nil, fmt.Errorf("%w: %s is not a regular file", ErrNotFound, wrongKind)
+	}
 	if configDirWithoutFile != "" {
 		return nil, fmt.Errorf("%w: %s exists but %s is missing",
 			ErrNotFound,

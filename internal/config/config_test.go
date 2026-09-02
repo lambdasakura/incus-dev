@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -1102,5 +1104,127 @@ func TestSecretErrors(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.want)
 			}
 		})
+	}
+}
+
+// dev.yml has to be a regular file.
+//
+// Opening a named pipe blocks until a writer arrives, and that open is not
+// context-aware: signal.NotifyContext has already taken the default handler
+// off SIGINT and SIGTERM, so the run cannot be interrupted at all. A
+// directory reads as a different error than the one a user needs.
+func TestLoadRequiresARegularFile(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("a directory", func(t *testing.T) {
+		path := filepath.Join(dir, "as-dir")
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := config.Load(path)
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("error = %v, want it to say the path is not a regular file", err)
+		}
+	})
+
+	t.Run("a named pipe", func(t *testing.T) {
+		path := filepath.Join(dir, "as-fifo")
+		if err := syscall.Mkfifo(path, 0o600); err != nil {
+			t.Skipf("cannot create a fifo: %v", err)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := config.Load(path)
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+				t.Errorf("error = %v, want it to say the path is not a regular file", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Load() blocked on a named pipe; nothing can interrupt that open")
+		}
+	})
+}
+
+// A signed number is not a version. Atoi accepts one, so it reached the
+// compatibility check and was reported as "requires runtime -1", which reads
+// as a version idev is too old for.
+func TestRuntimeVersionRejectsSignedNumbers(t *testing.T) {
+	for _, v := range []string{"-1", "1.-2", "1.0.-3", "+1", "1.+0", "1.0.+0"} {
+		_, err := config.Parse([]byte(
+			"schema: 1\nruntime:\n  version: \""+v+"\"\nproject:\n  name: p\ninstance:\n  image: i\n"),
+			config.Options{})
+		if err == nil {
+			t.Fatalf("Parse(%q) = nil error, want it rejected", v)
+		}
+		if !strings.Contains(err.Error(), "expected MAJOR") {
+			t.Errorf("Parse(%q) error = %q, want the format reported", v, err.Error())
+		}
+	}
+}
+
+// A dev.yml that exists and is a regular file can still be unreadable.
+func TestLoadReportsAnUnreadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads it regardless of the mode")
+	}
+
+	path := filepath.Join(t.TempDir(), "dev.yml")
+	if err := os.WriteFile(path, []byte("schema: 1\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := config.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "read "+path) {
+		t.Errorf("error = %v, want the read failure reported", err)
+	}
+}
+
+// A bad key is reported as a bad key, not as a problem with the whole file.
+//
+// propertyNames validates the key rather than a place in the document, and
+// the location the schema library reports for it belongs to something else,
+// so the path cannot name the section. Saying "(root)" made three bad keys in
+// three sections all look like one problem with the document.
+func TestBadKeysAreReportedAsKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"an empty config key", "instance:\n  image: i\n  config:\n    '': x\n", "minLength"},
+		{"a secret named with a hyphen", "instance:\n  image: i\nsecrets:\n  'MY-TOKEN':\n    env: A\n", "MY-TOKEN"},
+		{"a volume with spaces", "instance:\n  image: i\nvolumes:\n  'bad name':\n    path: /x\n", "bad name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte("schema: 1\nproject:\n  name: p\n"+tt.yaml), config.Options{})
+			if err == nil {
+				t.Fatal("Parse() = nil error, want the key rejected")
+			}
+			if !strings.Contains(err.Error(), "(a key name)") {
+				t.Errorf("error = %q, want it filed against the key", err.Error())
+			}
+			if strings.Contains(err.Error(), "(root)") {
+				t.Errorf("error = %q, want it not blamed on the whole file", err.Error())
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to quote %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+// A problem that does have a location keeps it.
+func TestLocatedProblemsKeepTheirPath(t *testing.T) {
+	_, err := config.Parse([]byte("schema: 1\nproject:\n  name: p\ninstance:\n  image: 1\n"), config.Options{})
+	if err == nil || !strings.Contains(err.Error(), "instance.image") {
+		t.Errorf("error = %v, want it filed at instance.image", err)
 	}
 }
