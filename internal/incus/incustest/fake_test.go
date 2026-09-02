@@ -457,3 +457,69 @@ func TestEveryChangeMovesTheETag(t *testing.T) {
 		t.Error("a recreated instance kept the old etag")
 	}
 }
+
+// The listing carries what API.ListInstances builds and no more.
+//
+// The contract cannot ask this: API.ListInstances constructs
+// Instance{Name, Status, Config} literally, so it can never carry a device
+// whatever the daemon sends, and an assertion there passes for a reason that
+// has nothing to do with the fake. It is a correspondence between this fake
+// and that function, so it is checked here -- and it matters because nearly
+// every unit test in the repository reads the fake, not the daemon.
+func TestListInstancesCarriesWhatTheAPIBuilds(t *testing.T) {
+	ctx := context.Background()
+
+	f := incustest.New()
+	if err := f.CreateInstance(ctx, incus.InstanceSpec{
+		Name:     "dev-x",
+		Image:    "img",
+		Profiles: []string{"default"},
+		Config:   map[string]string{"user.incus-dev.project": "x"},
+		Devices:  map[string]incus.Device{"ws": {"type": "disk", "path": "/ws"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.StartInstance(ctx, "dev-x"); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := f.ListInstances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ListInstances() returned %d instances, want 1", len(listed))
+	}
+	got := listed[0]
+
+	if got.Name != "dev-x" || got.Status == "" || got.Config["user.incus-dev.project"] != "x" {
+		t.Errorf("ListInstances() = %+v, want the name, the status and the config", got)
+	}
+	// Everything the API's own literal leaves out.
+	for _, absent := range []struct {
+		field string
+		empty bool
+	}{
+		{"Devices", len(got.Devices) == 0},
+		{"ExpandedDevices", len(got.ExpandedDevices) == 0},
+		{"Profiles", len(got.Profiles) == 0},
+		{"State", got.State == nil},
+		{"LastUsedAt", got.LastUsedAt.IsZero()},
+		{"ETag", got.ETag == ""},
+	} {
+		if !absent.empty {
+			t.Errorf("ListInstances() filled in %s, which API.ListInstances never does; "+
+				"a test reading it would read a field that is empty in production", absent.field)
+		}
+	}
+
+	// And what it does carry is not the fake's own map.
+	got.Config["user.incus-dev.listing-probe"] = "1"
+	inst, err := f.Instance(ctx, "dev-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := inst.Config["user.incus-dev.listing-probe"]; leaked {
+		t.Error("a write to a listed instance reached the fake's own state")
+	}
+}

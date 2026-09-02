@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -3616,19 +3618,39 @@ func TestTheLostRecordAdviceMatchesWhatTheInstanceRecords(t *testing.T) {
 	for _, world := range []struct {
 		name    string
 		arrange func(*incustest.Fake)
+		// leastCalls and mustReach are per world, because the two are not the
+		// same size and one floor for both leaves the larger free to collapse
+		// into the smaller. Raise them deliberately.
+		leastCalls int
+		mustReach  string
 	}{
-		{"up creates the instance", func(*incustest.Fake) {}},
-		{"something else creates it first", recreateAfterDelete},
+		{
+			name:       "up creates the instance",
+			arrange:    func(*incustest.Fake) {},
+			leastCalls: 13,
+			mustReach:  "create dev-example-project",
+		},
+		{
+			name:    "something else creates it first",
+			arrange: recreateAfterDelete,
+			// The VolumeExists on the carried volume, inside
+			// pruneVolumeRecord: it exists only on up's existing-instance
+			// branch, which is where every window so far has been.
+			leastCalls: 15,
+			mustReach:  "volume exists default dev-example-project-old",
+		},
 	} {
 		t.Run(world.name, func(t *testing.T) {
-			runLostRecordInvariant(t, world.arrange, carried)
+			runLostRecordInvariant(t, world.arrange, carried, world.leastCalls, world.mustReach)
 		})
 	}
 }
 
 // runLostRecordInvariant fails rebuild at each call in turn and checks the
 // invariant after each.
-func runLostRecordInvariant(t *testing.T, arrange func(*incustest.Fake), carried string) {
+func runLostRecordInvariant(t *testing.T, arrange func(*incustest.Fake), carried string,
+	leastCalls int, mustReach string,
+) {
 	t.Helper()
 
 	var calls []string
@@ -3638,8 +3660,13 @@ func runLostRecordInvariant(t *testing.T, arrange func(*incustest.Fake), carried
 		_ = app(t, cfg, client).Rebuild(context.Background())
 		calls = append(calls, client.Calls...)
 	}
-	if len(calls) < 5 {
-		t.Fatalf("rebuild made only %d calls; the fixture is not exercising it", len(calls))
+	if len(calls) < leastCalls {
+		t.Fatalf("rebuild made %d calls, want at least %d; the fixture has stopped "+
+			"exercising it:\n%v", len(calls), leastCalls, calls)
+	}
+	if !slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, mustReach) }) {
+		t.Fatalf("rebuild never reached %q; the fixture is exercising a different path:\n%v",
+			mustReach, calls)
 	}
 
 	checked, swallowed := 0, 0
@@ -3685,7 +3712,6 @@ func runLostRecordInvariant(t *testing.T, arrange func(*incustest.Fake), carried
 			}
 
 			checked++
-			_ = err
 
 			switch {
 			case said && recorded:
@@ -3697,17 +3723,24 @@ func runLostRecordInvariant(t *testing.T, arrange func(*incustest.Fake), carried
 		})
 	}
 
-	// An absolute floor, not a ratio. len(calls) comes from the same run, so a
-	// ratio rises back to 1.0 as the fixture shrinks and reports nothing --
-	// which is the direction that matters, because rebuild's second half is
-	// where the carried record lives. Raise this deliberately if the number
-	// of calls goes up.
-	const leastCalls = 12
 	t.Logf("%d of %d calls reached the invariant, %d of them with the failure swallowed",
 		checked, len(calls), swallowed)
-	if checked < leastCalls {
-		t.Errorf("only %d calls reached the invariant, want at least %d; the fixture is not "+
-			"exercising rebuild the way this test says it does", checked, leastCalls)
+
+	// Narrowing to one subtest with -run leaves the rest unrun, so the counts
+	// below would fail on top of whatever was being looked at.
+	if filteredToSubtests() {
+		return
+	}
+	if checked != len(calls) {
+		t.Errorf("%d of %d calls reached the invariant", checked, len(calls))
+	}
+	// checked rises with len(calls) by construction, so it cannot show that
+	// the injected failure still does anything. A run where every call is
+	// swallowed is a run where nothing was injected at all -- which is one
+	// refactor of the hook away, and would leave all of this green.
+	if swallowed*2 >= checked {
+		t.Errorf("%d of %d calls swallowed the injected failure; it is no longer reaching "+
+			"anything", swallowed, checked)
 	}
 }
 
@@ -3869,4 +3902,17 @@ func TestExecOutputGoesToStdout(t *testing.T) {
 			}
 		})
 	}
+}
+
+// filteredToSubtests reports whether -run names a subtest, in which case a
+// count over all of them says nothing: the rest were never run.
+//
+// internal/incus/contract asks the same question for the same reason.
+func filteredToSubtests() bool {
+	f := flag.Lookup("test.run")
+	if f == nil {
+		return false
+	}
+	_, subtest, ok := strings.Cut(f.Value.String(), "/")
+	return ok && strings.TrimSpace(subtest) != ""
 }
