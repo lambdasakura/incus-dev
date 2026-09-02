@@ -670,7 +670,7 @@ func TestAPIApplyConfig(t *testing.T) {
 	f.addInstance("dev-x", api.InstancePut{Config: map[string]string{"keep": "yes"}})
 	a, _ := newAPI(f)
 
-	if err := a.ApplyConfig(context.Background(), "dev-x", map[string]string{"limits.cpu": "8"}); err != nil {
+	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: map[string]string{"limits.cpu": "8"}, UnsetConfig: nil}, ""); err != nil {
 		t.Fatalf("ApplyConfig() error = %v", err)
 	}
 
@@ -681,7 +681,7 @@ func TestAPIApplyConfig(t *testing.T) {
 
 	// Nothing to apply means no call.
 	before := len(f.calls)
-	if err := a.ApplyConfig(context.Background(), "dev-x", nil); err != nil {
+	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: nil, UnsetConfig: nil}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.calls) != before {
@@ -694,7 +694,7 @@ func TestAPIUnsetConfig(t *testing.T) {
 	f.addInstance("dev-x", api.InstancePut{Config: map[string]string{"a": "1", "b": "2"}})
 	a, _ := newAPI(f)
 
-	if err := a.UnsetConfig(context.Background(), "dev-x", []string{"a"}); err != nil {
+	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: nil, UnsetConfig: []string{"a"}}, ""); err != nil {
 		t.Fatalf("UnsetConfig() error = %v", err)
 	}
 	got := f.lastUpdate.Config
@@ -719,9 +719,9 @@ func TestAPIApplyDevicesDropsUndeclaredKeys(t *testing.T) {
 	a, _ := newAPI(f)
 
 	// The same device, now a host-path mount: no pool any more.
-	err := a.ApplyDevices(context.Background(), "dev-x", map[string]Device{
+	err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetDevices: map[string]Device{
 		"data": {"type": "disk", "source": "/srv/data", "path": "/data"},
-	})
+	}}, "")
 	if err != nil {
 		t.Fatalf("ApplyDevices() error = %v", err)
 	}
@@ -743,11 +743,11 @@ func TestAPIApplyDevices(t *testing.T) {
 	}})
 	a, _ := newAPI(f)
 
-	err := a.ApplyDevices(context.Background(), "dev-x", map[string]Device{
+	err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetDevices: map[string]Device{
 		"workspace": {"type": "disk", "path": "/workspace2"},
 		"data":      {"type": "proxy", "listen": "tcp:1"}, // the type changes
 		"new":       {"type": "nic"},
-	})
+	}}, "")
 	if err != nil {
 		t.Fatalf("ApplyDevices() error = %v", err)
 	}
@@ -777,7 +777,7 @@ func TestAPIRemoveDevices(t *testing.T) {
 	}})
 	a, _ := newAPI(f)
 
-	if err := a.RemoveDevices(context.Background(), "dev-x", []string{"gone"}); err != nil {
+	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{RemoveDevices: []string{"gone"}}, ""); err != nil {
 		t.Fatalf("RemoveDevices() error = %v", err)
 	}
 	got := f.lastUpdate.Devices
@@ -968,7 +968,9 @@ func TestAPIOperationsHonorCancellation(t *testing.T) {
 	ops := map[string]func(*API) error{
 		"start":  func(a *API) error { return a.StartInstance(ctx, "dev-x") },
 		"delete": func(a *API) error { return a.DeleteInstance(ctx, "dev-x") },
-		"config": func(a *API) error { return a.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}) },
+		"config": func(a *API) error {
+			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
+		},
 		"snapshot": func(a *API) error {
 			return a.CreateSnapshot(ctx, "dev-x", "s1")
 		},
@@ -1051,13 +1053,19 @@ func TestAPIPropagatesErrors(t *testing.T) {
 		call string
 		fn   func(*API) error
 	}{
-		"instance":   {"GetInstanceFull", func(a *API) error { _, err := a.Instance(ctx, "dev-x"); return err }},
-		"create":     {"CreateInstance", func(a *API) error { return a.CreateInstance(ctx, InstanceSpec{Name: "dev-x"}) }},
-		"start":      {"UpdateInstanceState", func(a *API) error { return a.StartInstance(ctx, "dev-x") }},
-		"delete":     {"DeleteInstance", func(a *API) error { return a.DeleteInstance(ctx, "dev-x") }},
-		"get":        {"GetInstanceFull", func(a *API) error { return a.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}) }},
-		"config":     {"UpdateInstance", func(a *API) error { return a.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}) }},
-		"devices":    {"UpdateInstance", func(a *API) error { return a.ApplyDevices(ctx, "dev-x", map[string]Device{"d": {"type": "disk"}}) }},
+		"instance": {"GetInstanceFull", func(a *API) error { _, err := a.Instance(ctx, "dev-x"); return err }},
+		"create":   {"CreateInstance", func(a *API) error { return a.CreateInstance(ctx, InstanceSpec{Name: "dev-x"}) }},
+		"start":    {"UpdateInstanceState", func(a *API) error { return a.StartInstance(ctx, "dev-x") }},
+		"delete":   {"DeleteInstance", func(a *API) error { return a.DeleteInstance(ctx, "dev-x") }},
+		"get": {"GetInstanceFull", func(a *API) error {
+			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
+		}},
+		"config": {"UpdateInstance", func(a *API) error {
+			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
+		}},
+		"devices": {"UpdateInstance", func(a *API) error {
+			return a.UpdateInstance(ctx, "dev-x", InstanceChange{SetDevices: map[string]Device{"d": {"type": "disk"}}}, "")
+		}},
 		"profiles":   {"GetProfileNames", func(a *API) error { _, err := a.ProfileExists(ctx, "p"); return err }},
 		"volumes":    {"GetStoragePoolVolume", func(a *API) error { _, err := a.VolumeExists(ctx, "p", "v"); return err }},
 		"volcreate":  {"CreateStoragePoolVolume", func(a *API) error { return a.CreateVolume(ctx, "p", "v", nil) }},
@@ -1142,9 +1150,15 @@ func TestAPIInstanceDistinguishesFailureFromAbsence(t *testing.T) {
 // With nothing to change, Incus is not called.
 func TestAPIUpdateSkipsEmptyChanges(t *testing.T) {
 	tests := map[string]func(*API) error{
-		"UnsetConfig":   func(a *API) error { return a.UnsetConfig(context.Background(), "dev-x", nil) },
-		"ApplyDevices":  func(a *API) error { return a.ApplyDevices(context.Background(), "dev-x", nil) },
-		"RemoveDevices": func(a *API) error { return a.RemoveDevices(context.Background(), "dev-x", nil) },
+		"UnsetConfig": func(a *API) error {
+			return a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: nil, UnsetConfig: nil}, "")
+		},
+		"ApplyDevices": func(a *API) error {
+			return a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetDevices: nil}, "")
+		},
+		"RemoveDevices": func(a *API) error {
+			return a.UpdateInstance(context.Background(), "dev-x", InstanceChange{RemoveDevices: nil}, "")
+		},
 	}
 
 	for name, fn := range tests {
@@ -1166,7 +1180,7 @@ func TestAPIUpdateSkipsEmptyChanges(t *testing.T) {
 func TestAPIUpdateMissingInstance(t *testing.T) {
 	a, _ := newAPI(newFakeServer())
 
-	err := a.ApplyConfig(context.Background(), "dev-missing", map[string]string{"a": "1"})
+	err := a.UpdateInstance(context.Background(), "dev-missing", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
 	if !errors.Is(err, ErrInstanceNotFound) {
 		t.Errorf("error = %v, want ErrInstanceNotFound", err)
 	}
@@ -1201,9 +1215,11 @@ func TestAPIPropagatesAsyncErrors(t *testing.T) {
 		call string
 		fn   func(*API) error
 	}{
-		"create":     {"CreateInstance", func(a *API) error { return a.CreateInstance(context.Background(), InstanceSpec{Name: "dev-x"}) }},
-		"delete":     {"DeleteInstance", func(a *API) error { return a.DeleteInstance(context.Background(), "dev-x") }},
-		"update":     {"UpdateInstance", func(a *API) error { return a.ApplyConfig(context.Background(), "dev-x", map[string]string{"a": "1"}) }},
+		"create": {"CreateInstance", func(a *API) error { return a.CreateInstance(context.Background(), InstanceSpec{Name: "dev-x"}) }},
+		"delete": {"DeleteInstance", func(a *API) error { return a.DeleteInstance(context.Background(), "dev-x") }},
+		"update": {"UpdateInstance", func(a *API) error {
+			return a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
+		}},
 		"snapcreate": {"CreateInstanceSnapshot", func(a *API) error { return a.CreateSnapshot(context.Background(), "dev-x", "s") }},
 		"snapdelete": {"DeleteInstanceSnapshot", func(a *API) error { return a.DeleteSnapshot(context.Background(), "dev-x", "s") }},
 		"exec": {"ExecInstance", func(a *API) error {
@@ -1256,12 +1272,12 @@ func TestAPILogsOperationsWithoutValues(t *testing.T) {
 	a.Logger = slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	ctx := context.Background()
-	if err := a.ApplyConfig(ctx, "dev-x", map[string]string{"limits.cpu": "8"}); err != nil {
+	if err := a.UpdateInstance(ctx, "dev-x", InstanceChange{SetConfig: map[string]string{"limits.cpu": "8"}, UnsetConfig: nil}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ApplyDevices(ctx, "dev-x", map[string]Device{
+	if err := a.UpdateInstance(ctx, "dev-x", InstanceChange{SetDevices: map[string]Device{
 		"secret-mount": {"type": "disk", "source": "/home/u/.ssh"},
-	}); err != nil {
+	}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Exec(ctx, "dev-x", []string{"/bin/sh", "-c", "deploy --token s3cret"}, ExecOptions{
@@ -1290,7 +1306,7 @@ func TestAPIWithoutLogger(t *testing.T) {
 	f.addInstance("dev-x", api.InstancePut{})
 	a, _ := newAPI(f)
 
-	if err := a.ApplyConfig(context.Background(), "dev-x", map[string]string{"a": "1"}); err != nil {
+	if err := a.UpdateInstance(context.Background(), "dev-x", InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, ""); err != nil {
 		t.Errorf("ApplyConfig() error = %v", err)
 	}
 }
@@ -1632,4 +1648,59 @@ func TestVolumeExistsDistinguishesTheScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+// waitDelete has to tell "the daemon refused" from "we stopped waiting",
+// because only the second leaves the outcome in doubt.
+//
+// op.WaitContext cannot: it returns the operation's error before it consults
+// the context, so a refusal that coincides with a Ctrl-C would be reported as
+// unknown -- and the caller would tell the user to go and delete volumes that
+// are still attached to a live instance.
+func TestWaitDeleteSeparatesRefusalFromInterruption(t *testing.T) {
+	refused := errors.New("the daemon said no")
+
+	t.Run("a refusal is definitive", func(t *testing.T) {
+		err := waitDelete(context.Background(), &fakeOp{err: refused})
+		if !errors.Is(err, refused) {
+			t.Errorf("waitDelete() = %v, want the operation's own error", err)
+		}
+		if errors.Is(err, ErrOutcomeUnknown) {
+			t.Error("waitDelete() called a refusal unknown; nothing was deleted")
+		}
+	})
+
+	t.Run("a success is definitive", func(t *testing.T) {
+		if err := waitDelete(context.Background(), &fakeOp{}); err != nil {
+			t.Errorf("waitDelete() = %v, want nil: the operation finished", err)
+		}
+	})
+
+	// A cancellation arriving with the answer is still reported as unknown,
+	// so the advice that follows must be safe to act on either way.
+	t.Run("an answer that arrives with the cancellation is not required", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitDelete(ctx, &fakeOp{err: refused})
+		if err == nil {
+			t.Error("waitDelete() = nil, want a failure of some kind")
+		}
+	})
+
+	t.Run("an abandoned wait is unknown", func(t *testing.T) {
+		block := make(chan struct{})
+		defer close(block)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitDelete(ctx, &fakeOp{block: block})
+		if !errors.Is(err, ErrOutcomeUnknown) {
+			t.Errorf("waitDelete() = %v, want ErrOutcomeUnknown", err)
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("waitDelete() = %v, want it to carry the cancellation", err)
+		}
+	})
 }

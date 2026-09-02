@@ -195,8 +195,6 @@ func validateShell(c *Config, ps *problems) {
 	}
 }
 
-// validateStepValues rejects values that would be taken for options when the
-// command runs inside the container.
 // checkAnsibleTags refuses a tag ansible-playbook would not read as a tag.
 //
 // Each list is joined with a comma and passed as one argv word, so a tag that
@@ -224,6 +222,8 @@ func checkAnsibleTags(path string, step *AnsibleStep, ps *problems) {
 	}
 }
 
+// validateStepValues rejects values that would be taken for options when the
+// command runs inside the container.
 func validateStepValues(c *Config, ps *problems) {
 	check := func(steps []Step, kind string) {
 		for i, s := range steps {

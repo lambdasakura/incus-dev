@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -117,14 +118,18 @@ func missingPool(err error) bool {
 // Instance fetches an instance's state, returning ErrInstanceNotFound when it
 // does not exist.
 func (a *API) Instance(_ context.Context, name string) (*Instance, error) {
-	full, _, err := a.Server.GetInstanceFull(name)
+	full, etag, err := a.Server.GetInstanceFull(name)
 	if err != nil {
 		if api.StatusErrorCheck(err, 404) && !missingScope(err) {
 			return nil, fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
 		}
 		return nil, fmt.Errorf("get instance %s: %w", name, err)
 	}
-	return convertInstance(full), nil
+	// The etag belongs to this reading, and travels with it: what the caller
+	// decides from these bytes is written back against them.
+	inst := convertInstance(full)
+	inst.ETag = etag
+	return inst, nil
 }
 
 // convertInstance turns the API's representation into idev's.
@@ -250,6 +255,33 @@ func waitOp(ctx context.Context, op incusclient.RemoteOperation) error {
 	}
 }
 
+// waitDelete waits for a delete, telling apart the outcomes its caller has to
+// tell apart.
+//
+// The operation's own answer is definitive: an error means the daemon did not
+// delete the instance, and nil means it did. Only abandoning the wait is
+// ambiguous, because the daemon does not stop when idev does -- so only that
+// is marked ErrOutcomeUnknown.
+//
+// op.WaitContext cannot make the distinction: it returns the operation's error
+// before it consults the context, so a delete the daemon refused would be
+// stamped unknown if the user interrupted in that window.
+//
+// A cancellation that arrives in the same instant as the operation's answer is
+// still reported as unknown, which is why the caller tells the user to look
+// before deleting anything: "unknown" has to be safe to act on.
+func waitDelete(ctx context.Context, op incusclient.Operation) error {
+	done := make(chan error, 1)
+	go func() { done <- op.Wait() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("%w: %w", ctx.Err(), ErrOutcomeUnknown)
+	}
+}
+
 // StartInstance starts an instance.
 func (a *API) StartInstance(ctx context.Context, name string) error {
 	return a.changeState(ctx, name, "start", false)
@@ -341,87 +373,63 @@ func (a *API) DeleteInstance(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("delete instance %s: %w", name, err)
 	}
-	if err := op.WaitContext(ctx); err != nil {
-		if ctx.Err() != nil {
-			// The wait was cut short, and the daemon goes on deleting. This
-			// is the only step here whose outcome is unknown: everything
-			// above leaves the instance exactly where it was.
-			return fmt.Errorf("delete instance %s: %w: %w", name, err, ErrOutcomeUnknown)
-		}
+	if err := waitDelete(ctx, op); err != nil {
 		return fmt.Errorf("delete instance %s: %w", name, err)
 	}
 	return nil
 }
 
-// ApplyConfig sets the given config keys, leaving keys that were not declared
-// alone (spec 05-incus.md 5.4.4).
-func (a *API) ApplyConfig(ctx context.Context, name string, config map[string]string) error {
-	if len(config) == 0 {
-		return nil
-	}
-	a.log("set config", "name", name, "keys", sortedKeys(config))
-
-	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
-		maps.Copy(put.Config, config)
-	})
-}
-
-// UnsetConfig removes the given config keys.
-func (a *API) UnsetConfig(ctx context.Context, name string, keys []string) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	a.log("unset config", "name", name, "keys", keys)
-
-	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
-		for _, k := range keys {
-			delete(put.Config, k)
-		}
-	})
-}
-
-// ApplyDevices sets the declared devices.
+// UpdateInstance applies a whole set of changes in one write.
 //
-// A declared device is replaced rather than merged into: every device idev
-// passes here is one it owns entirely — the workspace, a volume, or an
-// instance.devices entry — so the declaration is the whole truth about it. A
-// merge would leave a key that has left the declaration on the instance
-// forever, and Incus rejects some of the combinations that produces, such as a
-// disk naming both a pool and a host path (spec 05-incus.md 5.4.4).
-func (a *API) ApplyDevices(ctx context.Context, name string, devices map[string]Device) error {
-	if len(devices) == 0 {
+// etag, when not empty, is from the reading the caller decided on: the write
+// is refused with ErrChanged if the instance has changed since. That is what
+// stops a second idev, whose snapshot was taken earlier and written later,
+// from erasing a volume out of this one's record.
+//
+// One write for all of it, because it is one decision taken from one reading.
+// Two writes would leave the second judged against an etag the first had
+// spent, and a failure between them would leave the record describing devices
+// the instance does not have -- which nothing would ever put right, because
+// what idev removes is what the record says it has.
+func (a *API) UpdateInstance(ctx context.Context, name string, change InstanceChange, etag string) error {
+	if change.Empty() {
 		return nil
 	}
-	a.log("set devices", "name", name, "devices", sortedKeys(devices))
+	if len(change.UnsetConfig) > 0 {
+		a.log("unset config", "name", name, "keys", change.UnsetConfig)
+	}
+	if len(change.SetConfig) > 0 {
+		a.log("set config", "name", name, "keys", sortedKeys(change.SetConfig))
+	}
+	if len(change.RemoveDevices) > 0 {
+		a.log("remove devices", "name", name, "devices", change.RemoveDevices)
+	}
+	if len(change.SetDevices) > 0 {
+		a.log("set devices", "name", name, "devices", sortedKeys(change.SetDevices))
+	}
 
-	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
+	return a.updateInstance(ctx, name, etag, func(put *api.InstancePut) {
+		for _, key := range change.UnsetConfig {
+			delete(put.Config, key)
+		}
+		maps.Copy(put.Config, change.SetConfig)
+
 		if put.Devices == nil {
 			put.Devices = map[string]map[string]string{}
 		}
-		for devName, want := range devices {
-			put.Devices[devName] = maps.Clone(want)
+		for _, device := range change.RemoveDevices {
+			delete(put.Devices, device)
 		}
-	})
-}
-
-// RemoveDevices removes the given devices.
-func (a *API) RemoveDevices(ctx context.Context, name string, devices []string) error {
-	if len(devices) == 0 {
-		return nil
-	}
-	a.log("remove devices", "name", name, "devices", devices)
-
-	return a.updateInstance(ctx, name, func(put *api.InstancePut) {
-		for _, dev := range devices {
-			delete(put.Devices, dev)
+		for name, device := range change.SetDevices {
+			put.Devices[name] = map[string]string(device)
 		}
 	})
 }
 
 // updateInstance fetches the current state, applies a change and writes it
 // back.
-func (a *API) updateInstance(ctx context.Context, name string, change func(*api.InstancePut)) error {
-	full, etag, err := a.Server.GetInstanceFull(name)
+func (a *API) updateInstance(ctx context.Context, name, etag string, change func(*api.InstancePut)) error {
+	full, fresh, err := a.Server.GetInstanceFull(name)
 	if err != nil {
 		if api.StatusErrorCheck(err, 404) && !missingScope(err) {
 			return fmt.Errorf("%w: %s", ErrInstanceNotFound, name)
@@ -435,8 +443,18 @@ func (a *API) updateInstance(ctx context.Context, name string, change func(*api.
 	}
 	change(&put)
 
+	// The caller's etag when it gave one, so the write is judged against the
+	// reading the caller decided from rather than the one taken just now --
+	// which is the whole window another idev writes into.
+	if etag == "" {
+		etag = fresh
+	}
+
 	op, err := a.Server.UpdateInstance(name, put, etag)
 	if err != nil {
+		if api.StatusErrorCheck(err, http.StatusPreconditionFailed) {
+			return fmt.Errorf("update instance %s: %w", name, ErrChanged)
+		}
 		return fmt.Errorf("update instance %s: %w", name, err)
 	}
 	if err := op.WaitContext(ctx); err != nil {

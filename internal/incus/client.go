@@ -22,6 +22,36 @@ var ErrInstanceExists = errors.New("instance already exists")
 // name.
 var ErrSnapshotExists = errors.New("snapshot already exists")
 
+// InstanceChange is what one write does to an instance.
+//
+// An empty change writes nothing. SetDevices replaces a device rather than
+// merging into it: every device idev names here is one it owns entirely, so
+// the declaration is the whole truth about it (spec 05-incus.md 5.4.4).
+type InstanceChange struct {
+	SetConfig     map[string]string
+	UnsetConfig   []string
+	SetDevices    map[string]Device
+	RemoveDevices []string
+}
+
+// Empty reports whether the change would write nothing.
+func (c InstanceChange) Empty() bool {
+	return len(c.SetConfig) == 0 && len(c.UnsetConfig) == 0 &&
+		len(c.SetDevices) == 0 && len(c.RemoveDevices) == 0
+}
+
+// ErrChanged reports that the instance was changed by something else between
+// the read the caller is working from and the write it asked for.
+//
+// idev computes what to record -- which volumes are its own, which devices,
+// whether a restart is owed -- from a reading of the instance, several calls
+// before it writes the answer back. Another idev in another terminal reads and
+// writes in the same window, and the later write silently erases what the
+// earlier one recorded: a volume drops out of the record and no command names
+// it again. Refusing the write is what turns that into something the user can
+// see and act on.
+var ErrChanged = errors.New("the instance changed while idev was working on it")
+
 // ErrOutcomeUnknown reports that a request reached the daemon and idev stopped
 // waiting before it finished, so whether it took effect is not known.
 //
@@ -64,6 +94,12 @@ type Instance struct {
 	// ExpandedDevices are the effective devices, including those from profiles.
 	ExpandedDevices map[string]Device `json:"expanded_devices"`
 	State           *InstanceState    `json:"state"`
+	// ETag identifies this reading of the instance. Handing it back to
+	// UpdateConfig refuses the write if anything has changed the instance
+	// since, which is how a second idev is stopped from overwriting what this
+	// one recorded. It is not part of the instance's own state, so it is not
+	// serialised.
+	ETag string `json:"-"`
 }
 
 // InstanceState is an instance's run-time state.
@@ -209,10 +245,17 @@ type Client interface {
 	StopInstance(ctx context.Context, name string) error
 	DeleteInstance(ctx context.Context, name string) error
 
-	ApplyConfig(ctx context.Context, name string, config map[string]string) error
-	UnsetConfig(ctx context.Context, name string, keys []string) error
-	ApplyDevices(ctx context.Context, name string, devices map[string]Device) error
-	RemoveDevices(ctx context.Context, name string, devices []string) error
+	// UpdateInstance applies a whole set of changes in one write.
+	//
+	// etag, when not empty, is the one Instance returned: the write is refused
+	// with ErrChanged if the instance has changed since.
+	//
+	// Config and devices go together because they are one decision taken from
+	// one reading of the instance. Split into separate writes, the second
+	// would be judged against an etag the first had already spent -- and a
+	// failure between them leaves a record describing devices the instance
+	// does not have, or devices nothing records.
+	UpdateInstance(ctx context.Context, name string, change InstanceChange, etag string) error
 
 	ProfileExists(ctx context.Context, name string) (bool, error)
 

@@ -57,8 +57,8 @@ func TestIncusMeetsTheClientContract(t *testing.T) {
 	// never exercises is one where the two can disagree unnoticed.
 	for _, want := range []string{
 		"Instance", "ListInstances", "CreateInstance", "StartInstance",
-		"StopInstance", "DeleteInstance", "ApplyConfig", "UnsetConfig",
-		"ApplyDevices", "RemoveDevices", "ProfileExists", "CheckImage",
+		"StopInstance", "DeleteInstance", "UpdateInstance",
+		"ProfileExists", "CheckImage",
 		"VolumeExists", "CreateVolume", "DeleteVolume",
 		"CreateSnapshot", "Snapshots", "RestoreSnapshot", "DeleteSnapshot",
 		"Exec", "WaitReady",
@@ -115,14 +115,9 @@ func (c *recordingClient) CreateSnapshot(ctx context.Context, instance, snapshot
 	return c.client.CreateSnapshot(ctx, instance, snapshot)
 }
 
-func (c *recordingClient) ApplyConfig(ctx context.Context, name string, config map[string]string) error {
-	c.note("ApplyConfig")
-	return c.client.ApplyConfig(ctx, name, config)
-}
-
-func (c *recordingClient) ApplyDevices(ctx context.Context, name string, devices map[string]incus.Device) error {
-	c.note("ApplyDevices")
-	return c.client.ApplyDevices(ctx, name, devices)
+func (c *recordingClient) UpdateInstance(ctx context.Context, name string, change incus.InstanceChange, etag string) error {
+	c.note("UpdateInstance")
+	return c.client.UpdateInstance(ctx, name, change, etag)
 }
 
 func (c *recordingClient) Exec(ctx context.Context, name string, argv []string, opt incus.ExecOptions) (int, error) {
@@ -143,16 +138,6 @@ func (c *recordingClient) ListInstances(ctx context.Context) ([]incus.Instance, 
 func (c *recordingClient) StopInstance(ctx context.Context, name string) error {
 	c.note("StopInstance")
 	return c.client.StopInstance(ctx, name)
-}
-
-func (c *recordingClient) UnsetConfig(ctx context.Context, name string, keys []string) error {
-	c.note("UnsetConfig")
-	return c.client.UnsetConfig(ctx, name, keys)
-}
-
-func (c *recordingClient) RemoveDevices(ctx context.Context, name string, devices []string) error {
-	c.note("RemoveDevices")
-	return c.client.RemoveDevices(ctx, name, devices)
 }
 
 func (c *recordingClient) ProfileExists(ctx context.Context, name string) (bool, error) {

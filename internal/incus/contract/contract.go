@@ -153,7 +153,7 @@ func Run(t *testing.T, env Env) []string {
 //
 // A check deleted and replaced in the same edit keeps the count, which no
 // cheap guard catches -- but that is a deliberate act, not an oversight.
-const Checks = 26
+const Checks = 31
 
 // Critical are the checks that exist because the fake once disagreed with
 // Incus and a defect reached a user through the gap.
@@ -163,6 +163,8 @@ var Critical = []string{
 	"ApplyDevices replaces a device rather than merging",
 	"snapshots round-trip and a duplicate name is refused",
 	"a delete cut short reports that the outcome is unknown",
+	"Instance returns a detached copy",
+	"a write against a stale reading is refused",
 	"Exec refuses an instance that is not there",
 	"RestoreSnapshot puts back what the snapshot held",
 }
@@ -284,9 +286,9 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		t.Errorf("ListInstances() = %d instances, none of them %q", len(all), env.Instance)
 	})
 
-	check("ApplyConfig and UnsetConfig round-trip", func(t *testing.T) {
-		if err := env.Client.ApplyConfig(ctx, env.Instance, map[string]string{"limits.cpu": "1"}); err != nil {
-			t.Fatalf("ApplyConfig() error = %v", err)
+	check("UpdateInstance sets and unsets, and both round-trip", func(t *testing.T) {
+		if err := env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{SetConfig: map[string]string{"limits.cpu": "1"}, UnsetConfig: nil}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 		inst, err := env.Client.Instance(ctx, env.Instance)
 		if err != nil {
@@ -296,8 +298,8 @@ func runInstanceContract(t *testing.T, env Env) []string {
 			t.Errorf("limits.cpu = %q, want 1", inst.Config["limits.cpu"])
 		}
 
-		if err := env.Client.UnsetConfig(ctx, env.Instance, []string{"limits.cpu"}); err != nil {
-			t.Fatalf("UnsetConfig() error = %v", err)
+		if err := env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"limits.cpu"}}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 		inst, err = env.Client.Instance(ctx, env.Instance)
 		if err != nil {
@@ -315,15 +317,15 @@ func runInstanceContract(t *testing.T, env Env) []string {
 		first := map[string]incus.Device{
 			"extra": {"type": "disk", "source": "/tmp", "path": "/one", "readonly": "true"},
 		}
-		if err := env.Client.ApplyDevices(ctx, env.Instance, first); err != nil {
-			t.Fatalf("ApplyDevices() error = %v", err)
+		if err := env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{SetDevices: first}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 
 		second := map[string]incus.Device{
 			"extra": {"type": "disk", "source": "/tmp", "path": "/two"},
 		}
-		if err := env.Client.ApplyDevices(ctx, env.Instance, second); err != nil {
-			t.Fatalf("ApplyDevices() error = %v", err)
+		if err := env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{SetDevices: second}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 
 		inst, err := env.Client.Instance(ctx, env.Instance)
@@ -340,8 +342,8 @@ func runInstanceContract(t *testing.T, env Env) []string {
 	})
 
 	check("RemoveDevices removes it", func(t *testing.T) {
-		if err := env.Client.RemoveDevices(ctx, env.Instance, []string{"extra"}); err != nil {
-			t.Fatalf("RemoveDevices() error = %v", err)
+		if err := env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{RemoveDevices: []string{"extra"}}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 		inst, err := env.Client.Instance(ctx, env.Instance)
 		if err != nil {
@@ -397,18 +399,18 @@ func runInstanceContract(t *testing.T, env Env) []string {
 	check("RestoreSnapshot puts back what the snapshot held", func(t *testing.T) {
 		const name = "contract-restore"
 
-		if err := env.Client.ApplyConfig(ctx, env.Instance,
-			map[string]string{"user.contract": "before"}); err != nil {
-			t.Fatalf("ApplyConfig() error = %v", err)
+		if err := env.Client.UpdateInstance(ctx, env.Instance,
+			incus.InstanceChange{SetConfig: map[string]string{"user.contract": "before"}}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 		if err := env.Client.CreateSnapshot(ctx, env.Instance, name); err != nil {
 			t.Fatalf("CreateSnapshot() error = %v", err)
 		}
 		t.Cleanup(func() { _ = env.Client.DeleteSnapshot(ctx, env.Instance, name) })
 
-		if err := env.Client.ApplyConfig(ctx, env.Instance,
-			map[string]string{"user.contract": "after"}); err != nil {
-			t.Fatalf("ApplyConfig() error = %v", err)
+		if err := env.Client.UpdateInstance(ctx, env.Instance,
+			incus.InstanceChange{SetConfig: map[string]string{"user.contract": "after"}}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 		if err := env.Client.RestoreSnapshot(ctx, env.Instance, name); err != nil {
 			t.Fatalf("RestoreSnapshot() error = %v", err)
@@ -500,11 +502,108 @@ func runInstanceContract(t *testing.T, env Env) []string {
 	check("changing an instance that is not there is an error", func(t *testing.T) {
 		absent := env.Instance + "-nope"
 
-		if err := env.Client.RemoveDevices(ctx, absent, []string{"extra"}); err == nil {
-			t.Error("RemoveDevices() = nil error for an instance that does not exist")
+		if err := env.Client.UpdateInstance(ctx, absent, incus.InstanceChange{RemoveDevices: []string{"extra"}}, ""); err == nil {
+			t.Error("UpdateInstance() = nil error for an instance that does not exist")
 		}
-		if err := env.Client.ApplyConfig(ctx, absent, map[string]string{"limits.cpu": "1"}); err == nil {
-			t.Error("ApplyConfig() = nil error for an instance that does not exist")
+		if err := env.Client.UpdateInstance(ctx, absent, incus.InstanceChange{SetConfig: map[string]string{"limits.cpu": "1"}, UnsetConfig: nil}, ""); err == nil {
+			t.Error("UpdateInstance() = nil error for an instance that does not exist")
+		}
+	})
+
+	check("a write against a stale reading is refused", func(t *testing.T) {
+		// What two idevs in two terminals do to each other. Both read, both
+		// decide what to record from what they read, and the later write
+		// erases the earlier one's answer unless the etag stops it.
+		first, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if first.ETag == "" {
+			t.Fatal("Instance() returned no ETag, so nothing can be written against it")
+		}
+
+		// Someone else writes in between.
+		if err := env.Client.UpdateInstance(ctx, env.Instance,
+			incus.InstanceChange{SetConfig: map[string]string{"user.contract-other": "1"}}, ""); err != nil {
+			t.Fatalf("UpdateInstance() error = %v", err)
+		}
+		t.Cleanup(func() {
+			_ = env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"user.contract-other"}}, "")
+		})
+
+		err = env.Client.UpdateInstance(ctx, env.Instance,
+			incus.InstanceChange{SetConfig: map[string]string{"user.contract-stale": "1"}}, first.ETag)
+		if !errors.Is(err, incus.ErrChanged) {
+			t.Errorf("UpdateInstance() with a stale etag = %v, want ErrChanged", err)
+		}
+
+		// Refused, not partly applied.
+		after, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if _, written := after.Config["user.contract-stale"]; written {
+			t.Error("the refused write was applied anyway")
+		}
+		if _, kept := after.Config["user.contract-other"]; !kept {
+			t.Error("the other write was lost")
+		}
+	})
+
+	check("a write with no etag is not judged against one", func(t *testing.T) {
+		// restart-pending is decided from a reading of its own and written
+		// straight back; it must not be refused because something else moved
+		// the instance on.
+		if err := env.Client.UpdateInstance(ctx, env.Instance,
+			incus.InstanceChange{SetConfig: map[string]string{"user.contract-free": "1"}}, ""); err != nil {
+			t.Errorf("UpdateInstance() with no etag = %v, want it applied", err)
+		}
+		t.Cleanup(func() {
+			_ = env.Client.UpdateInstance(ctx, env.Instance, incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"user.contract-free"}}, "")
+		})
+	})
+
+	check("starting and stopping moves the etag on", func(t *testing.T) {
+		// The daemon's etag covers the volatile keys a start writes, so a
+		// reading taken before one is stale afterwards. A client that says
+		// otherwise lets a test hold an etag across a restart and prove
+		// nothing.
+		before, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if err := env.Client.StartInstance(ctx, env.Instance); err != nil {
+			t.Fatalf("StartInstance() error = %v", err)
+		}
+		t.Cleanup(func() { _ = env.Client.StopInstance(ctx, env.Instance) })
+
+		after, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if before.ETag == after.ETag {
+			t.Error("the etag did not move across a start")
+		}
+	})
+
+	check("Instance returns a detached copy", func(t *testing.T) {
+		// Callers hold the result across other calls and compare it with what
+		// they are about to write. A client that hands back its own live state
+		// makes that comparison always agree with itself, so a stale snapshot
+		// -- which is what a second idev produces -- cannot be expressed at
+		// all, in a test or in the code being tested.
+		first, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		first.Config["user.incus-dev.probe"] = "written on the copy"
+
+		second, err := env.Client.Instance(ctx, env.Instance)
+		if err != nil {
+			t.Fatalf("Instance() error = %v", err)
+		}
+		if _, leaked := second.Config["user.incus-dev.probe"]; leaked {
+			t.Error("a write to one result reached the next: Instance shares state with the client")
 		}
 	})
 
@@ -537,6 +636,33 @@ func runInstanceContract(t *testing.T, env Env) []string {
 
 		if err := env.Client.DeleteInstance(done, cut.Name); !errors.Is(err, incus.ErrOutcomeUnknown) {
 			t.Errorf("DeleteInstance() with a done context = %v, want ErrOutcomeUnknown", err)
+		}
+	})
+
+	check("a running instance refuses before the delete is sent", func(t *testing.T) {
+		// The force stop comes first and will not start once the context is
+		// done, so nothing is sent and the outcome is not in doubt. Saying it
+		// is would offer the user advice about volumes nothing has touched.
+		running := spec
+		running.Name = env.Instance + "-running"
+		if err := env.Client.CreateInstance(ctx, running); err != nil {
+			t.Fatalf("CreateInstance() error = %v", err)
+		}
+		t.Cleanup(func() { _ = env.Client.DeleteInstance(ctx, running.Name) })
+		if err := env.Client.StartInstance(ctx, running.Name); err != nil {
+			t.Fatalf("StartInstance() error = %v", err)
+		}
+
+		done, cancel := context.WithCancel(ctx)
+		cancel()
+
+		err := env.Client.DeleteInstance(done, running.Name)
+		if err == nil {
+			t.Fatal("DeleteInstance() = nil error with a done context")
+		}
+		if errors.Is(err, incus.ErrOutcomeUnknown) {
+			t.Errorf("DeleteInstance() = %v, want no claim of an unknown outcome: "+
+				"the stop refuses before anything is sent", err)
 		}
 	})
 

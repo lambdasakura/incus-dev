@@ -45,6 +45,10 @@ type Fake struct {
 	// call".
 	Hook func(call string) error
 
+	// versions is the fake's etag: one counter per instance, moved on by every
+	// write, so a reading taken before someone else's write is refused.
+	versions map[string]int
+
 	// Calls records the calls in order, such as "create dev-x", "start dev-x".
 	Calls []string
 	// Execs records the argv of each execution.
@@ -111,7 +115,26 @@ func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
-	return inst, nil
+	out := detach(inst)
+	out.ETag = f.etagOf(name)
+	return out, nil
+}
+
+// detach copies an instance, because the real client builds a fresh value out
+// of the API response and callers hold the result across other calls.
+//
+// Handing back the live one made every snapshot agree with the state it was
+// taken from, so no test could express a stale one -- which is exactly what a
+// second idev running at the same time produces.
+func detach(inst *incus.Instance) *incus.Instance {
+	out := *inst
+	out.Config = maps.Clone(inst.Config)
+	out.Profiles = slices.Clone(inst.Profiles)
+	out.Devices = make(map[string]incus.Device, len(inst.Devices))
+	for name, device := range inst.Devices {
+		out.Devices[name] = maps.Clone(device)
+	}
+	return &out
 }
 
 // ListInstances lists the registered instances.
@@ -155,6 +178,7 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 		Config:   config,
 		Devices:  devices,
 	}
+	f.bumpETag(spec.Name)
 	return nil
 }
 
@@ -168,6 +192,7 @@ func (f *Fake) StartInstance(_ context.Context, name string) error {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
 	inst.Status = "Running"
+	f.bumpETag(name)
 	return nil
 }
 
@@ -181,6 +206,7 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
 	inst.Status = "Stopped"
+	f.bumpETag(name)
 	return nil
 }
 
@@ -189,90 +215,105 @@ func (f *Fake) DeleteInstance(ctx context.Context, name string) error {
 	if err := f.record("delete %s", name); err != nil {
 		return err
 	}
-	if _, ok := f.Instances[name]; !ok {
+	inst, ok := f.Instances[name]
+	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
 	if err := ctx.Err(); err != nil {
-		// The request has reached the daemon by the time the wait can be cut
-		// short, and the daemon does not stop because idev did. Whether the
-		// instance survives is genuinely unknown, so this leaves it and says
-		// so (see incus.ErrOutcomeUnknown).
+		// The real client force-stops an instance that is running, and that
+		// refuses outright once the context is done -- so a running instance
+		// never reaches the delete and its outcome is never in doubt.
+		if !inst.IsStopped() {
+			return fmt.Errorf("stop instance %s: %w", name, err)
+		}
+		// Stopped: the request has reached the daemon by the time the wait
+		// can be cut short, and the daemon does not stop because idev did.
+		// Whether the instance survives is genuinely unknown, so this leaves
+		// it and says so (see incus.ErrOutcomeUnknown).
 		return fmt.Errorf("delete instance %s: %w: %w", name, err, incus.ErrOutcomeUnknown)
 	}
 	delete(f.Instances, name)
 	return nil
 }
 
-// ApplyConfig applies the given config keys.
-func (f *Fake) ApplyConfig(_ context.Context, name string, config map[string]string) error {
-	if len(config) == 0 {
-		return nil
+// Touch records that something outside this Fake changed the instance, which
+// is what another idev in another terminal amounts to. Readings taken before
+// it are stale, and a write judged against one is refused.
+func (f *Fake) Touch(name string) { f.bumpETag(name) }
+
+// etagOf returns the current version of an instance, as an opaque string.
+func (f *Fake) etagOf(name string) string {
+	if f.versions == nil {
+		return "v0"
 	}
-	if err := f.record("config %s %v", name, sortedPairs(config)); err != nil {
-		return err
-	}
-	inst, ok := f.Instances[name]
-	if !ok {
-		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
-	}
-	for k, v := range config {
-		inst.Config[k] = v
-	}
-	return nil
+	return fmt.Sprintf("v%d", f.versions[name])
 }
 
-// UnsetConfig removes the given config keys.
-func (f *Fake) UnsetConfig(_ context.Context, name string, keys []string) error {
-	if len(keys) == 0 {
-		return nil
+// bumpETag moves an instance on a version, invalidating readings taken before.
+func (f *Fake) bumpETag(name string) {
+	if f.versions == nil {
+		f.versions = map[string]int{}
 	}
-	if err := f.record("unset %s %v", name, keys); err != nil {
-		return err
-	}
-	inst, ok := f.Instances[name]
-	if !ok {
-		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
-	}
-	for _, k := range keys {
-		delete(inst.Config, k)
-	}
-	return nil
+	f.versions[name]++
 }
 
-// ApplyDevices applies the given devices.
-func (f *Fake) ApplyDevices(_ context.Context, name string, devices map[string]incus.Device) error {
-	if len(devices) == 0 {
+// UpdateInstance applies a whole set of changes in one write.
+//
+// The version counter is the fake's etag: every write moves it on, so a caller
+// writing against a reading taken before someone else's write is refused --
+// which is what the real daemon does with an If-Match that no longer holds.
+// Refused means nothing is applied, config and devices alike.
+func (f *Fake) UpdateInstance(_ context.Context, name string, change incus.InstanceChange, etag string) error {
+	if change.Empty() {
 		return nil
 	}
-	if err := f.record("devices %s %v", name, sortedDeviceNames(devices)); err != nil {
-		return err
+	// One call, several log lines: the calls a test asserts on are the
+	// operations, and they did not stop being separate operations.
+	if len(change.UnsetConfig) > 0 {
+		if err := f.record("unset %s %v", name, change.UnsetConfig); err != nil {
+			return err
+		}
 	}
-	inst, ok := f.Instances[name]
-	if !ok {
-		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
+	if len(change.SetConfig) > 0 {
+		if err := f.record("config %s %v", name, sortedPairs(change.SetConfig)); err != nil {
+			return err
+		}
 	}
-	// A declared device is replaced, not merged into, as the real one does.
-	for devName, dev := range devices {
-		inst.Devices[devName] = maps.Clone(dev)
+	if len(change.RemoveDevices) > 0 {
+		if err := f.record("removedevices %s %v", name, change.RemoveDevices); err != nil {
+			return err
+		}
 	}
-	return nil
-}
+	if len(change.SetDevices) > 0 {
+		if err := f.record("devices %s %v", name, sortedDeviceNames(change.SetDevices)); err != nil {
+			return err
+		}
+	}
 
-// RemoveDevices removes the given devices.
-func (f *Fake) RemoveDevices(_ context.Context, name string, devices []string) error {
-	if len(devices) == 0 {
-		return nil
-	}
-	if err := f.record("removedevices %s %v", name, devices); err != nil {
-		return err
-	}
 	inst, ok := f.Instances[name]
 	if !ok {
 		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
-	for _, dev := range devices {
-		delete(inst.Devices, dev)
+	if etag != "" && etag != f.etagOf(name) {
+		return fmt.Errorf("update instance %s: %w", name, incus.ErrChanged)
 	}
+
+	for _, key := range change.UnsetConfig {
+		delete(inst.Config, key)
+	}
+	for key, value := range change.SetConfig {
+		inst.Config[key] = value
+	}
+	if inst.Devices == nil {
+		inst.Devices = map[string]incus.Device{}
+	}
+	for _, device := range change.RemoveDevices {
+		delete(inst.Devices, device)
+	}
+	for deviceName, device := range change.SetDevices {
+		inst.Devices[deviceName] = device
+	}
+	f.bumpETag(name)
 	return nil
 }
 
@@ -403,6 +444,7 @@ func (f *Fake) RestoreSnapshot(_ context.Context, instance, snapshot string) err
 			inst.Config = maps.Clone(config)
 		}
 	}
+	f.bumpETag(instance)
 	return nil
 }
 

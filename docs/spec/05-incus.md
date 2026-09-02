@@ -297,10 +297,7 @@ type Client interface {
     StopInstance(ctx context.Context, name string) error
     DeleteInstance(ctx context.Context, name string) error
 
-    ApplyConfig(ctx context.Context, name string, cfg map[string]string) error
-    UnsetConfig(ctx context.Context, name string, keys []string) error
-    ApplyDevices(ctx context.Context, name string, dev map[string]Device) error
-    RemoveDevices(ctx context.Context, name string, devices []string) error
+    UpdateInstance(ctx context.Context, name string, change InstanceChange, etag string) error
 
     ProfileExists(ctx context.Context, name string) (bool, error)
 
@@ -337,15 +334,6 @@ type ExecOptions struct {
     Stderr io.Writer
 }
 ```
-
-interfaceとして定義することで、以下を可能にする。
-
-- 単体テストでのfake実装（Incus daemon不要）
-- 将来的な実装差し替え
-
-interfaceには **実際に使う操作だけ** を並べる。
-instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で行う。
-差し替え時の負担がそのまま増えるため、使わない操作を含めない。
 
 ### 5.7.1 実装方針
 
@@ -397,4 +385,31 @@ image aliasは instance種別ごとに別のimageを指すため、解決の際�
 同様に、imageの取得（instance作成）と出力の中継待ちも中断できるようにする。
 どちらも数分かかることがあり、待っている間に応答しなくなると
 利用者は強制終了するしかなくなる。
+
+---
+
+### 5.7.4 楽観的並行制御
+
+`Instance` が返す `ETag` は、その読み取りを識別する。`UpdateInstance` へ渡すと、
+読み取り以降にinstanceが変更されていた場合に書き込みを拒否し `ErrChanged` を返す。
+
+idevは「どのvolumeが自分のものか」「どのdeviceを設定したか」「再起動が要るか」を
+instanceの読み取りから決め、数回のAPI呼び出しを挟んでから書き戻す。
+別の端末で動くもう一つのidevが同じ窓の中で読み書きすると、
+後から書いた側が先に書いた側の記録を黙って消す。
+記録から落ちたvolumeは、以後どのコマンドからも名前を得られない。
+
+configとdeviceを1回の書き込みにまとめる理由は2つある。
+
+1つは、これらが1つの読み取りから下した1つの判断だからである。
+分けると、2回目は1回目が使い切ったETagに対して書くことになる。
+
+もう1つは、記録がdeviceを説明しているからである。
+別々に書くと、記録がdeviceを落としたあとで削除に失敗した場合、
+deviceは接続されたまま記録から外れる。
+idevが外すのは記録が「ある」と言っているものだけなので、以後どの実行もそれを外さない。
+1回の書き込みなら、全部適用されるか何も適用されないかのどちらかになる。
+
+`etag` が空文字列の場合は検査しない。
+自分で読み直して1つのキーだけを決める書き込み（restart-pending）はこれを使う。
 

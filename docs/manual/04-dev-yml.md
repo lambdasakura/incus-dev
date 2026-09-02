@@ -423,8 +423,9 @@ secrets:
 
 - `run` steps receive them as environment variables
 - `ansible` steps receive them as `--extra-vars` (through a mode 0600 temporary
-  file), tagged `!unsafe` so a value containing `{{ ... }}` is delivered as
-  written rather than evaluated as a template
+  file), marked so Ansible neither evaluates a value containing `{{ ... }}` as
+  a template nor re-reads its type: `0123456` stays that string rather than
+  becoming a number
 - If any of them cannot be resolved, idev stops **before touching the
   instance** and tells you which are missing
 - Values are masked in logs and error messages

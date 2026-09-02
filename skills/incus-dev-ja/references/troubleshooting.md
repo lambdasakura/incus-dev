@@ -21,7 +21,7 @@
 
 ### `... nothing names these again: <pool>/<volume>`
 
-`destroy` / `rebuild` が失敗し、かつinstanceは削除されていた場合に出る。
+`destroy` / `rebuild` の待機を中断し、daemon側は削除を続けていた場合に出る。
 多くはCtrl-Cで、待機を中断してもdaemon側の削除は止まらないため起きる。
 どのvolumeがidevのものかという記録はinstance上にあるので、
 `dev.yml` から外れていたvolumeを指すものが何も残らない。
@@ -51,6 +51,16 @@ provisionステップで失敗した `rebuild` は記録を保持しており、
 
 同名のinstanceが手動で作られている。idevは印（`user.incus-dev.project`）の
 無いinstanceを破壊しない。既存を消すか、`project.name` を変えて名前をずらす。
+
+### `the instance changed while idev was working on it`
+
+実行中に別の `idev` が同じ環境へ書き込んだ。多くは端末を2つ開いている場合である。
+idevは「どのvolumeが自分のものか」「どのdeviceを設定したか」を
+instanceの読み取りから決めるため、読み取り以降に変更されていた場合は書き戻しを拒否する。
+そのまま書くと相手が記録した内容を消してしまい、
+どのidevコマンドからも名前を得られないvolumeがpool上に残るためである。
+
+何も適用されていない。もう一方の実行が終わってから `idev up` をやり直す。
 
 ### `instance <name> already belongs to project "<other>"`
 

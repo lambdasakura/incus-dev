@@ -2824,7 +2824,7 @@ func TestDestroyNamesTheUnnameableVolumesWhenItFails(t *testing.T) {
 	client := incustest.New()
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
-		Status: "Running",
+		Status: "Stopped",
 		Config: map[string]string{
 			managedProjectKey: "example-project",
 			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
@@ -3075,13 +3075,16 @@ func TestUnmanagedErrorForAnInstanceIdevDidNotMake(t *testing.T) {
 // The instance is still present when the wait is cut short -- the daemon has
 // not finished -- so a check that looks would answer "still there" in exactly
 // the case the advice exists for. The failure itself is what says so.
+// Stopped, because that is the only way the delete is ever sent: the real
+// client force-stops first and that refuses outright once the context is done,
+// so a running instance never reaches the step whose outcome is in doubt.
 func TestDestroyAdvisesWhileTheInstanceIsStillPresent(t *testing.T) {
 	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
 
 	client := incustest.New()
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
-		Status: "Running",
+		Status: "Stopped",
 		Config: map[string]string{
 			managedProjectKey: "example-project",
 			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
@@ -3140,5 +3143,289 @@ func TestValidateAcceptsTheLongestVolumeNameThatFits(t *testing.T) {
 
 	if err := app.Validate(); err != nil {
 		t.Errorf("Validate() error = %v, want a 64-character volume name accepted", err)
+	}
+}
+
+// rebuild stashes the volume record in memory because the instance holding it
+// is about to be deleted. If anything creates the instance in that gap -- a
+// second idev, most plausibly -- up takes the existing-instance branch, which
+// neither applied the carried record nor reported it lost, and then succeeded.
+// The user is told the volume is kept for the next up to adopt, and it is not.
+func TestRebuildKeepsTheCarriedRecordWhenSomethingElseCreatedTheInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+	client.Volumes["default/dev-example-project-old"] = true
+
+	// The gap: something puts the instance back between the delete and the
+	// lookup up makes next, with a record of its own that knows nothing of
+	// the old volume. The hook runs before each call, so this arms on the
+	// delete and fires on the lookup after it.
+	deleted := false
+	client.Hook = func(call string) error {
+		switch {
+		case strings.HasPrefix(call, "delete dev-example-project"):
+			deleted = true
+		case deleted && strings.HasPrefix(call, "instance dev-example-project"):
+			client.Hook = nil
+			client.AddInstance(&incus.Instance{
+				Name:     "dev-example-project",
+				Status:   "Running",
+				Profiles: []string{"default"},
+				Config: map[string]string{
+					managedProjectKey: "example-project",
+					managedVolumesKey: "default/dev-example-project-cache",
+				},
+			})
+		}
+		return nil
+	}
+
+	if err := app(t, cfg, client).Rebuild(context.Background()); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	got := client.Instances["dev-example-project"].Config[managedVolumesKey]
+	if !strings.Contains(got, "dev-example-project-old") {
+		t.Errorf("record = %q, want the carried volume folded back in", got)
+	}
+}
+
+// And once it is folded in, it is no longer carried: a later failure must not
+// call it lost and offer to delete a volume the record names.
+func TestAdoptingTheCarriedRecordStopsCarryingIt(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n"+
+		"provision:\n  - run: \"false\"\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) { return 1, nil }
+
+	// Through Rebuild, because recordLostWith is what would say it, and
+	// only Rebuild reaches it.
+	client.Instances["dev-example-project"].Config[managedVolumesKey] =
+		"default/dev-example-project-cache,default/dev-example-project-old"
+	client.Volumes["default/dev-example-project-old"] = true
+
+	deleted := false
+	client.Hook = func(call string) error {
+		switch {
+		case strings.HasPrefix(call, "delete dev-example-project"):
+			deleted = true
+		case deleted && strings.HasPrefix(call, "instance dev-example-project"):
+			client.Hook = nil
+			client.AddInstance(&incus.Instance{
+				Name:     "dev-example-project",
+				Status:   "Running",
+				Profiles: []string{"default"},
+				Config: map[string]string{
+					managedProjectKey: "example-project",
+					managedVolumesKey: "default/dev-example-project-cache",
+				},
+			})
+		}
+		return nil
+	}
+
+	err := app(t, cfg, client).Rebuild(context.Background())
+	if err == nil {
+		t.Fatal("Rebuild() = nil error, want the failing step reported")
+	}
+	if strings.Contains(err.Error(), "storage volume delete") {
+		t.Errorf("Rebuild() error = %q, want no advice to delete a volume the record now names", err)
+	}
+}
+
+// app builds an App around a config and a client, for the tests that need
+// nothing else.
+func app(t *testing.T, cfg *config.Config, client *incustest.Fake) *App {
+	t.Helper()
+	return NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+}
+
+// validate, up and up --dry-run have to agree about a volume name Incus will
+// refuse. It was checked in validate alone, so validate refused a dev.yml that
+// the preflight then called fine and up created a volume for -- the weaker,
+// offline check refusing more than the host-side one (spec 04-cli.md 4.7).
+func TestEveryPathRefusesAVolumeNameIncusCannotHold(t *testing.T) {
+	// dev-example-project is 19 characters, so 45 makes a 65-character name.
+	cfg := mustParse(t, rootYAML+"volumes:\n  "+strings.Repeat("a", 45)+":\n    path: /cache\n")
+
+	for _, tt := range []struct {
+		name string
+		run  func(*App) error
+	}{
+		{"validate", func(a *App) error { return a.Validate() }},
+		{"up --dry-run", func(a *App) error { return a.Plan(context.Background()) }},
+		{"up", func(a *App) error { return a.Up(context.Background(), UpOptions{}) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client := incustest.New()
+
+			err := tt.run(app(t, cfg, client))
+			if err == nil {
+				t.Fatal("= nil error, want the derived volume name refused")
+			}
+			if !strings.Contains(err.Error(), "64") {
+				t.Errorf("error = %q, want it to name the limit", err)
+			}
+			if client.Called("volume create") {
+				t.Errorf("calls = %v, want nothing created", client.Calls)
+			}
+		})
+	}
+}
+
+// Two idevs, one project, one instance.
+//
+// idev decides what to record -- which volumes are its own above all -- from a
+// reading of the instance, several calls before it writes the answer back.
+// Another run reads and writes inside that window, and the later write erased
+// what the earlier one had recorded: the volume dropped out of the record, and
+// then destroy --volumes deleted what the record listed and silently left the
+// rest on the pool, unnameable by any idev command.
+//
+// The write is refused now, and the user is told to run up again.
+func TestUpRefusesToOverwriteAnotherRunsRecord(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+
+	// The other run: it lands after this one has read and before it writes,
+	// recording a volume of its own.
+	client.Hook = func(call string) error {
+		if strings.HasPrefix(call, "volume exists") {
+			client.Hook = nil
+			other := client.Instances["dev-example-project"]
+			other.Config[managedVolumesKey] += ",default/dev-example-project-other"
+			client.Touch("dev-example-project")
+		}
+		return nil
+	}
+
+	err := app(t, cfg, client).Up(context.Background(), UpOptions{})
+	if !errors.Is(err, incus.ErrChanged) {
+		t.Fatalf("Up() error = %v, want ErrChanged", err)
+	}
+	if !strings.Contains(err.Error(), "idev up") {
+		t.Errorf("Up() error = %q, want it to say what to do next", err)
+	}
+
+	// And nothing was lost: the other run's volume is still recorded.
+	got := client.Instances["dev-example-project"].Config[managedVolumesKey]
+	if !strings.Contains(got, "dev-example-project-other") {
+		t.Errorf("record = %q, want the other run's volume still there", got)
+	}
+}
+
+// A failed write leaves the record and the devices agreeing.
+//
+// idev removes the devices its own record says it has, so a record written
+// ahead of the removal is a device nothing will ever take off again: the next
+// up computes no stale devices, and warnUnrecorded stays quiet because the
+// record exists. The volume behind it cannot be deleted either -- Incus
+// refuses while it is attached.
+func TestAFailedReapplyLeavesTheRecordMatchingTheDevices(t *testing.T) {
+	cfg := mustParse(t, rootYAML) // no volumes: "extra" has left the declaration
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedDevicesKey: "extra,workspace",
+		},
+		Devices: map[string]incus.Device{
+			"extra":     {"type": "disk", "source": "/srv", "path": "/extra"},
+			"workspace": {"type": "disk", "source": "/old", "path": "/workspace"},
+		},
+	})
+	client.FailOn = map[string]error{"removedevices": errBoom}
+
+	if err := app(t, cfg, client).Up(context.Background(), UpOptions{}); err == nil {
+		t.Fatal("Up() = nil error, want the failed removal reported")
+	}
+
+	inst := client.Instances["dev-example-project"]
+	_, attached := inst.Devices["extra"]
+	recorded := strings.Contains(inst.Config[managedDevicesKey], "extra")
+	if attached != recorded {
+		t.Errorf("device attached = %v but recorded = %v; the next up removes what the record lists, "+
+			"so these disagreeing leaves it attached for good", attached, recorded)
+	}
+}
+
+// Every write can meet a 412, so every write's failure has to say what to do.
+//
+// Only reapplyInstance passed its etag, but updateInstance falls back to a
+// fresh read for the others, and a write can still lose to something landing
+// between that read and the write. The user would have got the bare sentence
+// with nothing to act on.
+func TestEveryWriteExplainsAChangedInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"  config:\n    security.nesting: \"true\"\n")
+
+	// The two writes record the same prefix, so they are told apart by the
+	// key each carries.
+	for _, tt := range []struct{ name, carries string }{
+		{"the main reapply", managedKeysKey},
+		{"the restart record", managedRestartKey},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name:     "dev-example-project",
+				Status:   "Running",
+				Profiles: []string{"default"},
+				Config:   map[string]string{managedProjectKey: "example-project"},
+			})
+			client.Hook = func(call string) error {
+				if strings.HasPrefix(call, "config ") && strings.Contains(call, tt.carries) {
+					return fmt.Errorf("update instance: %w", incus.ErrChanged)
+				}
+				return nil
+			}
+
+			err := app(t, cfg, client).Up(context.Background(), UpOptions{})
+			if err == nil {
+				t.Fatal("Up() = nil error, want the refused write reported")
+			}
+			if !errors.Is(err, incus.ErrChanged) {
+				t.Fatalf("Up() error = %v, want ErrChanged", err)
+			}
+			if !strings.Contains(err.Error(), "idev up") {
+				t.Errorf("Up() error = %q, want it to say what to do next", err)
+			}
+		})
 	}
 }

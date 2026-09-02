@@ -234,8 +234,6 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provision.Env) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
-	created := false
-
 	inst, err := a.client.Instance(ctx, a.instance)
 	switch {
 	case err == nil:
@@ -243,6 +241,11 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
+		// rebuild stashed the record because it was deleting the instance
+		// that held it, and something has put one back in the meantime.
+		// Dropping it here would lose the volumes rebuild promised to keep,
+		// and up would go on to report success.
+		a.adoptCarried(inst)
 		// Only once the instance is known to be idev's: allocating storage
 		// for one it does not manage would leave a volume behind that idev
 		// then refuses to touch.
@@ -255,6 +258,10 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
 			return err
 		}
+		// Only now is the carried record on the instance. Clearing it any
+		// earlier -- before the volumes are made, before the write -- would
+		// lose it to any failure in between, with nothing left to name it.
+		a.carried = nil
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.warnStrandedInstances(ctx)
 		a.log.Info("Creating instance " + a.instance)
@@ -269,19 +276,15 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 		// again. Holding it after this would have rebuild report it lost when
 		// a later step fails, and offer to delete volumes it still names.
 		a.carried = nil
-		// The devices were set at creation time, so there is nothing to re-apply.
-		created = true
 	default:
 		return err
 	}
 
 	ws := a.cfg.WorkspaceOrDefault()
+	// reapplyInstance wrote the devices for an instance that already existed,
+	// and CreateInstance carried them for one that did not, so by here the
+	// mount is in place either way.
 	a.log.Info(fmt.Sprintf("Mounting workspace %s -> %s", a.cfg.WorkspaceSourcePath(), ws.Target))
-	if !created {
-		if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, plan, a.instance)); err != nil {
-			return err
-		}
-	}
 
 	if err := a.ensureRunning(ctx); err != nil {
 		return err
@@ -409,7 +412,7 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 		if !errors.Is(err, incus.ErrOutcomeUnknown) {
 			return err
 		}
-		return volumesLeftUnnameable(err, undeclaredVolumes(a.cfg, a.instance, volumes))
+		return volumesLeftUnnameable(err, a.instance, undeclaredVolumes(a.cfg, a.instance, volumes))
 	}
 
 	if opt.Volumes {
@@ -562,20 +565,22 @@ func volumesUntouched(err error, refs []string) error {
 }
 
 // volumesLeftUnnameable names the volumes that only the instance's own record
-// knew about, for a destroy whose wait failed while the daemon went on and
-// deleted the instance.
+// knew about, for a destroy whose wait was abandoned while the daemon went on
+// deleting.
 //
-// The caller has looked: this is said only when the instance is provably
-// gone, never on the failures that leave it, its record and its volumes where
-// they were.
-func volumesLeftUnnameable(err error, refs []string) error {
+// Said only for that one failure -- the others leave the instance, its record
+// and its volumes where they were. It does not claim the instance is gone,
+// because nothing here knows: that is the whole content of
+// incus.ErrOutcomeUnknown. So it gives the user the step that settles it
+// before the one that deletes anything.
+func volumesLeftUnnameable(err error, instance string, refs []string) error {
 	named := namedVolumes(refs)
 	if len(named) == 0 {
 		return err
 	}
-	return fmt.Errorf("%w\nthe instance was deleted anyway, so nothing names these again: %s\n"+
-		"remove them with %s",
-		err, strings.Join(named, ", "), volumeDeleteHint(named))
+	return fmt.Errorf("%w\nif the instance did go, nothing names these again: %s\n"+
+		"check with 'incus list %s', then remove them with %s",
+		err, strings.Join(named, ", "), instance, volumeDeleteHint(named))
 }
 
 // Rebuild destroys the instance and creates it again.
@@ -619,6 +624,28 @@ func (a *App) Rebuild(ctx context.Context) error {
 		return a.recordLostWith(err)
 	}
 	return nil
+}
+
+// adoptCarried folds a record rebuild is carrying into the instance it found.
+//
+// Rebuild holds the record in memory while the instance that held it is gone.
+// Reaching an instance that exists gives it somewhere to live again -- but it
+// is still only in memory until the write lands, so the caller stops carrying
+// it after that and not before.
+func (a *App) adoptCarried(inst *incus.Instance) {
+	if len(a.carried) == 0 {
+		return
+	}
+	// Config is never nil here: the caller reached this by finding idev's own
+	// project marker in it.
+	merged := knownVolumes(inst.Config, a.cfg, a.instance)
+	for _, ref := range a.carried {
+		if !slices.Contains(merged, ref) {
+			merged = append(merged, ref)
+		}
+	}
+	slices.Sort(merged)
+	inst.Config[managedVolumesKey] = strings.Join(merged, ",")
 }
 
 // recordLostWith names the carried volumes when the create half of a rebuild
@@ -869,25 +896,54 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 	// Keep the state from before applying; afterwards the difference is gone.
 	before := maps.Clone(inst.Config)
 
-	// Undo the idev-applied keys and devices that the declaration dropped.
+	// One write, judged against the reading all of this was decided from.
+	//
+	// desired carries the records -- which volumes are idev's, which devices,
+	// which keys -- computed from inst several calls ago; another idev that
+	// read before this one and wrote after would otherwise erase what it had
+	// recorded in between, and no command would name those volumes again.
+	//
+	// Config and devices go in together because the records describe the
+	// devices. Written apart, a removal that failed after the record had
+	// already dropped the device would leave it attached and unrecorded, and
+	// nothing would remove it: what idev removes is what the record says it
+	// has.
+	devices := desiredDevices(a.cfg, plan, a.instance)
 	stale := staleConfigKeys(inst.Config, desired, plan)
+	staleDev := staleDevices(inst, devices)
 	if len(stale) > 0 {
 		a.log.Info("Removing config no longer declared: " + strings.Join(stale, ", "))
-		if err := a.client.UnsetConfig(ctx, a.instance, stale); err != nil {
-			return err
-		}
 	}
-	if devices := staleDevices(inst, desiredDevices(a.cfg, plan, a.instance)); len(devices) > 0 {
-		a.log.Info("Removing devices no longer declared: " + strings.Join(devices, ", "))
-		if err := a.client.RemoveDevices(ctx, a.instance, devices); err != nil {
-			return err
-		}
+	if len(staleDev) > 0 {
+		a.log.Info("Removing devices no longer declared: " + strings.Join(staleDev, ", "))
 	}
 
-	if err := a.client.ApplyConfig(ctx, a.instance, desired); err != nil {
-		return err
+	change := incus.InstanceChange{
+		SetConfig:     desired,
+		UnsetConfig:   stale,
+		SetDevices:    devices,
+		RemoveDevices: staleDev,
+	}
+	if err := a.client.UpdateInstance(ctx, a.instance, change, inst.ETag); err != nil {
+		return a.changedUnderfoot(err)
 	}
 	return a.settleRestart(ctx, inst.IsRunning(), inst.LastUsedAt, before, desired, stale, opt)
+}
+
+// changedUnderfoot explains a write refused because the instance moved on.
+//
+// It says the instance was not changed, not that the run changed nothing:
+// ensureVolumes runs before this, so a declared volume may already have been
+// created. The next up adopts a declared volume by name, so running again is
+// still the whole of the answer.
+func (a *App) changedUnderfoot(err error) error {
+	if err == nil || !errors.Is(err, incus.ErrChanged) {
+		return err
+	}
+	return fmt.Errorf("%w\nsomething else changed %s while this run was working on it, "+
+		"most likely another idev; the instance was left as it was, "+
+		"so run 'idev up' again",
+		err, a.instance)
 }
 
 // settleRestart deals with changes that need a restart (spec 05-incus.md
@@ -917,8 +973,8 @@ func (a *App) settleRestart(ctx context.Context, running bool, lastStart time.Ti
 		if before[managedRestartKey] == record {
 			return nil
 		}
-		return a.client.ApplyConfig(ctx, a.instance,
-			map[string]string{managedRestartKey: record})
+		return a.changedUnderfoot(a.client.UpdateInstance(ctx, a.instance,
+			incus.InstanceChange{SetConfig: map[string]string{managedRestartKey: record}}, ""))
 	}
 
 	a.log.Info("Restarting instance to apply " + strings.Join(changed, ", "))
@@ -1094,7 +1150,8 @@ func (a *App) clearRestartPending(ctx context.Context, before map[string]string)
 	if _, ok := before[managedRestartKey]; !ok {
 		return nil
 	}
-	return a.client.UnsetConfig(ctx, a.instance, []string{managedRestartKey})
+	return a.changedUnderfoot(a.client.UpdateInstance(ctx, a.instance,
+		incus.InstanceChange{UnsetConfig: []string{managedRestartKey}}, ""))
 }
 
 // restartRequiredKeys are the config keys whose changes need a restart.
@@ -1391,6 +1448,13 @@ func (a *App) warnProfilesChanged(inst *incus.Instance) {
 // does not leave a half-built instance — and so rebuild does not destroy one
 // over a condition it could have found first.
 func (a *App) preflight(ctx context.Context) (idmapPlan, provision.Env, error) {
+	// Before anything is created: the name is derivable offline, and up would
+	// otherwise reach CreateVolume and fail in Incus's words rather than in
+	// the one that says which key to shorten.
+	if err := checkVolumeNames(a.cfg, a.instance); err != nil {
+		return idmapPlan{}, provision.Env{}, err
+	}
+
 	plan, err := a.idmapPlan()
 	if err != nil {
 		return idmapPlan{}, provision.Env{}, err

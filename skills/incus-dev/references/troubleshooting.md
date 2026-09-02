@@ -22,7 +22,7 @@ does not say: persistent volumes outlive the instance, so if you passed
 
 ### `... nothing names these again: <pool>/<volume>`
 
-A `destroy` or a `rebuild` that failed while the instance was deleted anyway --
+A `destroy` or a `rebuild` whose wait was abandoned while the daemon went on --
 usually Ctrl-C, since interrupting the wait does not stop the daemon finishing
 the delete. The record of which volumes are idev's lives on the instance, so a
 volume that had left `dev.yml` has nothing left to name it. This message is the
@@ -54,6 +54,17 @@ prompt, or give the answer on stdin (`printf y | idev destroy`).
 An instance of the same name was created by hand. idev does not destroy an
 instance without its mark (`user.incus-dev.project`). Either delete the
 existing one, or change `project.name` so the names no longer collide.
+
+### `the instance changed while idev was working on it`
+
+Another `idev` touched the same environment while this one was running --
+usually a second terminal. idev works out what to record (which volumes are
+its own, which devices it set) from a reading of the instance, and refuses to
+write that back if the instance has moved on since: the alternative is to erase
+what the other run recorded, which would leave volumes on the pool that no idev
+command can name again.
+
+Nothing was applied. Run `idev up` again once the other one has finished.
 
 ### `instance <name> already belongs to project "<other>"`
 

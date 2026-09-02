@@ -12,8 +12,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	yamlv2 "go.yaml.in/yaml/v2"
-
 	"github.com/lambdasakura/incus-dev/internal/config"
 	"github.com/lambdasakura/incus-dev/internal/incus"
 	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
@@ -1241,25 +1239,22 @@ func TestSecretsArePassedToAnsible(t *testing.T) {
 			return runner.Result{}, nil
 		}
 		for _, a := range c.Args {
-			if strings.HasSuffix(a, "secrets.yml") {
+			if strings.HasSuffix(a, "secrets.json") {
 				secretsFile = strings.TrimPrefix(a, "--extra-vars=@")
 				data, err := os.ReadFile(secretsFile)
 				if err != nil {
 					t.Errorf("read secrets: %v", err)
 					continue
 				}
-				var got map[string]string
-				if err := yamlv2.Unmarshal(data, &got); err != nil {
+				// The shape Ansible reads as "this string is data"; what it
+				// makes of it is pinned by TestSecretsSurviveRealAnsible,
+				// which asks ansible-playbook rather than a Go parser.
+				var got map[string]map[string]string
+				if err := json.Unmarshal(data, &got); err != nil {
 					t.Errorf("parse secrets: %v", err)
 				}
-				if got["API_TOKEN"] != "s3cret" {
+				if got["API_TOKEN"]["__ansible_unsafe"] != "s3cret" {
 					t.Errorf("secrets = %v", got)
-				}
-				// JSON is valid YAML, so parsing it back proves nothing about
-				// templating. The tag is what stops Ansible evaluating the
-				// value, and only the file itself shows it.
-				if !strings.Contains(string(data), "!unsafe") {
-					t.Errorf("secrets file is templatable:\n%s", data)
 				}
 
 				info, err := os.Stat(secretsFile)
@@ -1361,5 +1356,42 @@ func TestEveryAnsibleCommandSeesTheProjectConfig(t *testing.T) {
 		if !slices.Contains(c.Env, want) {
 			t.Errorf("%s ran with Env %v, want it to include %q", c.Name, c.Env, want)
 		}
+	}
+}
+
+// The up-front preflight has to read the project's ansible.cfg too.
+//
+// That is the whole reason CheckPrerequisites was given a root: a project that
+// installs the connection plugin into its own collections_path must not be
+// refused before anything is built. The test that covered the probes drove
+// them through a step, which reaches them by another route, so the parameter
+// itself was guarded by nothing.
+func TestCheckPrerequisitesReadsTheProjectConfig(t *testing.T) {
+	root, cfg := ansibleProject(t)
+	cfgPath := filepath.Join(root, ".incus-dev", "ansible", "ansible.cfg")
+	if err := os.WriteFile(cfgPath, []byte("[defaults]\nroles_path = roles\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &runnertest.Fake{}
+	installedPlugin(f)
+
+	if err := newExecutor(f).CheckPrerequisites(context.Background(), root, cfg.Provision); err != nil {
+		t.Fatalf("CheckPrerequisites() error = %v", err)
+	}
+
+	want := "ANSIBLE_CONFIG=" + cfgPath
+	probes := 0
+	for _, c := range f.Calls {
+		if !strings.HasPrefix(c.Name, "ansible") {
+			continue
+		}
+		probes++
+		if !slices.Contains(c.Env, want) {
+			t.Errorf("%s ran with Env %v, want it to include %q", c.Name, c.Env, want)
+		}
+	}
+	if probes == 0 {
+		t.Fatal("no ansible command was run; this test would pass whatever the root did")
 	}
 }

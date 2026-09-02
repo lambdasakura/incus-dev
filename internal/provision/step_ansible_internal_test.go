@@ -1,12 +1,15 @@
 package provision
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
-
-	yamlv2 "go.yaml.in/yaml/v2"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
 	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
@@ -107,50 +110,81 @@ func TestExecAnsibleFailsWhenTempDirUnavailable(t *testing.T) {
 
 // A secret must reach the playbook as it was written.
 //
-// Ansible templates every value it reads from --extra-vars, so a token that
-// happens to contain {{ was evaluated: "abc{{ 1 + 1 }}def" arrived as
-// "abc2def", and one naming an undefined variable aborted the play with an
-// error about a variable the user never wrote. The same secret reaches a run
-// step byte for byte, so the two ways of injecting it disagreed.
-func TestSecretsAreWrittenUntemplated(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "secrets.yml")
+// Only real ansible-playbook can say whether it does. Two earlier shapes both
+// passed a Go parser and corrupted the value in Ansible: plain JSON templates
+// it, and !unsafe YAML re-reads its type. A Go YAML library reads both back
+// correctly, so a test written against one guards nothing.
+func TestSecretsSurviveRealAnsible(t *testing.T) {
+	if _, err := exec.LookPath("ansible-playbook"); err != nil {
+		t.Skip("skipping: ansible-playbook is not installed")
+	}
 
 	secrets := map[string]string{
-		"TEMPLATE":  "abc{{ 1 + 1 }}def",
-		"UNDEFINED": "a{{ oops }}b",
-		"QUOTES":    `a"b'c`,
-		"NEWLINE":   "line1\nline2",
-		"BACKSLASH": `back\slash`,
-		"UNICODE":   "パス",
+		"LEADING_ZERO": "0123456",         // resolves to an octal int if the type is re-read
+		"DECIMAL":      "1.20",            // loses its trailing zero as a float
+		"OFF":          "Off",             // a YAML boolean
+		"EMPTY":        "",                // null
+		"DATE":         "2026-09-01",      // a date object
+		"TEMPLATE":     "abc{{ 1+1 }}def", // evaluated if it is a template
+		"UNDEFINED":    "a{{ oops }}b",    // aborts the play if it is
+		"QUOTES":       `a"b'c`,
+		"NEWLINE":      "line1\nline2",
+		"UNICODE":      "パス",
 	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.json")
 	if err := writeSecrets(path, secrets); err != nil {
 		t.Fatalf("writeSecrets() error = %v", err)
 	}
 
-	body, err := os.ReadFile(path)
-	if err != nil {
+	// Ansible prints each value with a marker around it, so trailing spaces
+	// and emptiness are visible in the output.
+	playbook := filepath.Join(dir, "check.yml")
+	body := "- hosts: localhost\n  gather_facts: false\n  tasks:\n" +
+		"    - debug:\n        msg: \"{{ item }}=[{{ lookup('vars', item) }}]\"\n" +
+		"      loop: [" + quotedNames(secrets) + "]\n"
+	if err := os.WriteFile(playbook, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for name := range secrets {
-		if !strings.Contains(string(body), name+": !unsafe ") {
-			t.Errorf("%s is not tagged !unsafe:\n%s", name, body)
-		}
-	}
-	// The raw braces must survive into the file; escaping them would change
-	// the value just as templating does.
-	if !strings.Contains(string(body), `abc{{ 1 + 1 }}def`) {
-		t.Errorf("the value was rewritten:\n%s", body)
+
+	cmd := exec.Command("ansible-playbook", "-i", "localhost,", "-c", "local",
+		"--extra-vars=@"+path, playbook)
+	cmd.Env = append(os.Environ(), "ANSIBLE_NOCOLOR=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ansible-playbook: %v\n%s", err, out)
 	}
 
-	// And it has to be YAML that reads back as what went in.
-	var got map[string]string
-	if err := yamlv2.Unmarshal(body, &got); err != nil {
-		t.Fatalf("the file is not YAML: %v\n%s", err, body)
-	}
 	for name, want := range secrets {
-		if got[name] != want {
-			t.Errorf("%s = %q, want %q", name, got[name], want)
+		// Ansible prints the message as a JSON string, so the expected value
+		// is escaped the same way before looking for it.
+		if !strings.Contains(string(out), asJSONFragment(t, name+"=["+want+"]")) {
+			t.Errorf("%s did not arrive as %q; ansible said:\n%s", name, want, out)
 		}
 	}
+}
+
+// quotedNames renders the variable names as a YAML list of quoted strings.
+// Unquoted, a name like OFF is read as a boolean by the playbook itself.
+func quotedNames(secrets map[string]string) string {
+	names := slices.Sorted(maps.Keys(secrets))
+	for i, name := range names {
+		names[i] = strconv.Quote(name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// asJSONFragment renders text as it appears inside a JSON string, which is how
+// ansible-playbook prints a debug message.
+func asJSONFragment(t *testing.T, text string) string {
+	t.Helper()
+
+	var sb strings.Builder
+	encoder := json.NewEncoder(&sb)
+	encoder.SetEscapeHTML(false) // ansible does not escape them either
+	if err := encoder.Encode(text); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Trim(strings.TrimSpace(sb.String()), `"`)
 }

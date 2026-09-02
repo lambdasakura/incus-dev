@@ -63,35 +63,35 @@ func TestFakeConfigAndDevices(t *testing.T) {
 	ctx := context.Background()
 	f := incustest.New().AddInstance(&incus.Instance{Name: "dev-x", Status: "Stopped"})
 
-	if err := f.ApplyConfig(ctx, "dev-x", nil); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: nil}, ""); err != nil {
 		t.Fatalf("ApplyConfig(nil) error = %v", err)
 	}
-	if err := f.ApplyDevices(ctx, "dev-x", nil); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: nil}, ""); err != nil {
 		t.Fatalf("ApplyDevices(nil) error = %v", err)
 	}
 	if len(f.Calls) != 0 {
 		t.Errorf("recorded a call for an empty apply: %v", f.Calls)
 	}
 
-	if err := f.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.UnsetConfig(ctx, "dev-x", []string{"a"}); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"a"}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := f.Instances["dev-x"].Config["a"]; ok {
 		t.Error("UnsetConfig() did not remove it")
 	}
-	if err := f.UnsetConfig(ctx, "dev-x", nil); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: nil}, ""); err != nil {
 		t.Fatalf("UnsetConfig(nil) error = %v", err)
 	}
 
 	// As the real thing does, a declared device is replaced.
 	dev := map[string]incus.Device{"ws": {"type": "disk", "path": "/ws", "shift": "true"}}
-	if err := f.ApplyDevices(ctx, "dev-x", dev); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: dev}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.ApplyDevices(ctx, "dev-x", map[string]incus.Device{"ws": {"type": "disk", "path": "/ws2"}}); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{"ws": {"type": "disk", "path": "/ws2"}}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	got := f.Instances["dev-x"].Devices["ws"]
@@ -103,7 +103,7 @@ func TestFakeConfigAndDevices(t *testing.T) {
 	}
 
 	// A changed type means a recreated device.
-	if err := f.ApplyDevices(ctx, "dev-x", map[string]incus.Device{"ws": {"type": "proxy"}}); err != nil {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{"ws": {"type": "proxy"}}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := f.Instances["dev-x"].Devices["ws"]["path"]; ok {
@@ -115,13 +115,13 @@ func TestFakeConfigOnMissingInstance(t *testing.T) {
 	ctx := context.Background()
 	f := incustest.New()
 
-	if err := f.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}); !errors.Is(err, incus.ErrInstanceNotFound) {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, ""); !errors.Is(err, incus.ErrInstanceNotFound) {
 		t.Errorf("ApplyConfig() error = %v", err)
 	}
-	if err := f.ApplyDevices(ctx, "dev-x", map[string]incus.Device{"d": {"type": "disk"}}); !errors.Is(err, incus.ErrInstanceNotFound) {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{"d": {"type": "disk"}}}, ""); !errors.Is(err, incus.ErrInstanceNotFound) {
 		t.Errorf("ApplyDevices() error = %v", err)
 	}
-	if err := f.UnsetConfig(ctx, "dev-x", []string{"a"}); !errors.Is(err, incus.ErrInstanceNotFound) {
+	if err := f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"a"}}, ""); !errors.Is(err, incus.ErrInstanceNotFound) {
 		t.Errorf("UnsetConfig() error = %v", err)
 	}
 }
@@ -183,11 +183,13 @@ func TestFakeErrorInjection(t *testing.T) {
 		"stop":   func(f *incustest.Fake) error { return f.StopInstance(ctx, "dev-x") },
 		"delete": func(f *incustest.Fake) error { return f.DeleteInstance(ctx, "dev-x") },
 		"config": func(f *incustest.Fake) error {
-			return f.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"})
+			return f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: map[string]string{"a": "1"}, UnsetConfig: nil}, "")
 		},
-		"unset": func(f *incustest.Fake) error { return f.UnsetConfig(ctx, "dev-x", []string{"a"}) },
+		"unset": func(f *incustest.Fake) error {
+			return f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetConfig: nil, UnsetConfig: []string{"a"}}, "")
+		},
 		"devices": func(f *incustest.Fake) error {
-			return f.ApplyDevices(ctx, "dev-x", map[string]incus.Device{"d": {"type": "disk"}})
+			return f.UpdateInstance(ctx, "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{"d": {"type": "disk"}}}, "")
 		},
 		"profile": func(f *incustest.Fake) error { _, err := f.ProfileExists(ctx, "p"); return err },
 		"exec": func(f *incustest.Fake) error {
@@ -350,9 +352,9 @@ func TestFakeApplyDevicesReplaces(t *testing.T) {
 		},
 	})
 
-	err := f.ApplyDevices(context.Background(), "dev-x", map[string]incus.Device{
+	err := f.UpdateInstance(context.Background(), "dev-x", incus.InstanceChange{SetDevices: map[string]incus.Device{
 		"data": {"type": "disk", "source": "/srv/data", "path": "/data"},
-	})
+	}}, "")
 	if err != nil {
 		t.Fatalf("ApplyDevices() error = %v", err)
 	}

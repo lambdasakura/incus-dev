@@ -18,6 +18,10 @@ import (
 // It checks the host-side prerequisites — idmap, the profiles existing — just
 // as up does. It reads from Incus, and changes nothing.
 func (a *App) Plan(ctx context.Context) error {
+	if err := checkVolumeNames(a.cfg, a.instance); err != nil {
+		return err
+	}
+
 	plan, err := a.idmapPlan()
 	if err != nil {
 		return err

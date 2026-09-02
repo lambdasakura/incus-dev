@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -160,7 +158,7 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 
 	// Secrets go in a file of their own: a mode 0600 temporary file, deleted
 	// once the run is over.
-	secretsPath := filepath.Join(dir, "secrets.yml")
+	secretsPath := filepath.Join(dir, "secrets.json")
 	if len(env.Secrets) > 0 {
 		if err := writeSecrets(secretsPath, env.Secrets); err != nil {
 			return fmt.Errorf("write secrets: %w", err)
@@ -243,28 +241,31 @@ func writeJSON(path string, v any) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// writeSecrets writes the secrets as YAML that Ansible will not template.
+// writeSecrets writes the secrets so Ansible neither templates them nor
+// re-reads their type.
 //
-// Everything --extra-vars reads is a template, so a secret holding {{ was
-// evaluated rather than delivered: "abc{{ 1 + 1 }}def" arrived as "abc2def",
-// and one naming an undefined variable aborted the play with an error about a
-// name the user never wrote. The value may never be logged, which leaves
-// almost nothing to diagnose it by. !unsafe is Ansible's own way of saying a
-// scalar is data.
+// Two ways to get this wrong, both measured against real ansible-playbook.
+// Plain JSON makes every value a template, so a token holding {{ is evaluated:
+// "abc{{ 1 + 1 }}def" arrives as "abc2def". YAML tagged !unsafe stops that but
+// re-resolves the scalar's implicit type from its raw text, throwing the
+// quoting away: "0123456" arrives as the integer 42798, "Off" as false, "" as
+// null. That is the wider corruption of the two, and it is the one a password
+// or a numeric token runs into.
 //
-// The values are written as JSON strings, which are valid YAML double-quoted
-// scalars, so quotes, newlines and non-ASCII survive without a YAML library
-// deciding how to fold them.
+// The mapping below is how Ansible itself serialises a value that must not be
+// templated, and its JSON decoder turns it back into a string that is exactly
+// what went in. If a future Ansible stopped recognising it the playbook would
+// receive a mapping -- visibly wrong, rather than quietly a different value.
 func writeSecrets(path string, secrets map[string]string) error {
-	var sb strings.Builder
-	for _, name := range slices.Sorted(maps.Keys(secrets)) {
-		// A string always marshals, and JSON's escaping is exactly what a
-		// YAML double-quoted scalar accepts.
-		quoted, _ := json.Marshal(secrets[name]) //nolint:errchkjson // a string cannot fail
-		sb.WriteString(name + ": !unsafe " + string(quoted) + "\n")
+	wrapped := make(map[string]map[string]string, len(secrets))
+	for name, value := range secrets {
+		wrapped[name] = map[string]string{unsafeMarker: value}
 	}
-	return os.WriteFile(path, []byte(sb.String()), 0o600)
+	return writeJSON(path, wrapped)
 }
+
+// unsafeMarker is the key Ansible's JSON decoder reads as "this string is data".
+const unsafeMarker = "__ansible_unsafe"
 
 // ansibleEnv points Ansible at the project's ansible.cfg when it has one
 // (spec 6.5.3).
