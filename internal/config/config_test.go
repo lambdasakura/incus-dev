@@ -355,6 +355,11 @@ func TestParseErrors(t *testing.T) {
 			want: "=",
 		},
 		{
+			name: "a comma in a volume name",
+			yaml: minimal + "\nvolumes:\n  \"a,b\":\n    path: /data\n",
+			want: ",",
+		},
+		{
 			name: "an empty extra_args entry",
 			yaml: minimal + "\nprovision:\n  - ansible:\n      playbook: p.yml\n      extra_args: [\"\"]\n",
 			want: "extra_args",

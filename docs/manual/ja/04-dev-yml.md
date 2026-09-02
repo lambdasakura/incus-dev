@@ -10,7 +10,7 @@
 schema: 1                          # 必須
 
 runtime:
-  version: "1.0"                   # 任意。要求するidevの互換バージョン
+  version: "1.0"                   # 任意。要求するruntime契約のバージョン
 
 project:
   name: my-project                 # 必須。instance名の元になる
@@ -81,8 +81,9 @@ runtime:
   version: "1.0"
 ```
 
-このプロジェクトが要求する `idev` の互換バージョン。
-満たさない `idev` で実行するとエラーになる。
+このプロジェクトが要求する **runtime契約** のバージョン。現在は `1.0` で、
+`idev` のリリース番号とは別物である。dev.ymlの意味が、古いidevでは
+満たせない形で変わったときに上がる。満たさない `idev` は実行を拒否する。
 
 `MAJOR`、`MAJOR.MINOR`、`MAJOR.MINOR.PATCH` の形式を受け付ける。
 
@@ -136,6 +137,10 @@ image: images:debian/12
 
 利用可能なものは `incus image list images: <keyword>` で確認できる。
 
+**既存instanceに対して変更しても効果は無い。** instanceは作成時のimageを
+持ち続けるため、`idev up` は警告するだけで作り直さない。
+作り直すには `idev rebuild` を使う。
+
 idev は特定のOSを前提としない。imageと構成手順の整合はプロジェクトの責任である。
 
 ### `type` は無い
@@ -150,6 +155,11 @@ disk の `shift` もコンテナ固有の仕組みである。workspaceの共有
 ### `profiles`
 
 **ホストに既に存在するProfileを名前で参照するだけ** のフィールド。
+
+`image` と同様、instance作成時にのみ設定される。後から変更した場合、
+`idev up` は付け替えずに警告する。どのProfileをidevが付けたのかという記録が
+無いため、利用者が自分で付けたものを外しかねないからである。
+新しい一覧で作り直すには `idev rebuild` を使う。
 
 ```yaml
 profiles:
@@ -349,6 +359,10 @@ volumes:
 
 `idev rebuild` しても中身は残る。`idev destroy` でも残るため、
 消したい場合は `idev destroy --volumes` を使う。
+
+**宣言から消したり名前を変えたりしてもデータは消えない。**
+idevは作成したvolumeを覚えているので、宣言から消えたものは `idev up` が警告し、
+`idev destroy --volumes` の削除対象にも残る。
 
 ビルドキャッシュやデータベースの実体など、
 「環境は作り直したいが消したくないもの」に向く。

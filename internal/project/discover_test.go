@@ -107,8 +107,14 @@ func TestDiscoverConfigDirWithoutConfigFile(t *testing.T) {
 	if !errors.Is(err, project.ErrNotFound) {
 		t.Fatalf("Discover() error = %v, want ErrNotFound", err)
 	}
-	if want := filepath.Join(".incus-dev", "dev.yml"); !strings.Contains(err.Error(), want) {
-		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+	// "exists but ... is missing", not the generic "was not found in ... or any
+	// parent directory": both name .incus-dev/dev.yml, so matching that alone
+	// would pass either way.
+	if !strings.Contains(err.Error(), "exists but") {
+		t.Errorf("error = %q, want it to say the directory is there without the file", err.Error())
+	}
+	if want := filepath.Join(root, ".incus-dev"); !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to name %q", err.Error(), want)
 	}
 }
 

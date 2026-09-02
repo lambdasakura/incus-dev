@@ -50,6 +50,8 @@ idevは自身が作成したinstanceを、instance configで印付けする。
 user.incus-dev.project = example-project
 user.incus-dev.root    = /home/user/src/example-project
 user.incus-dev.schema  = 1
+user.incus-dev.image   = images:ubuntu/24.04
+user.incus-dev.volumes = default/dev-example-project-cache
 ```
 
 目的：
@@ -112,7 +114,7 @@ CPUやメモリも `limits.cpu` / `limits.memory` として素通しする。
 ```go
 req := api.InstancesPost{
     Name: spec.Name,
-    Type: api.InstanceType(spec.Type),
+    Type: api.InstanceTypeContainer,
     InstancePut: api.InstancePut{
         Config:   spec.Config,
         Devices:  toAPIDevices(spec.Devices),
@@ -126,6 +128,17 @@ req := api.InstancesPost{
 `idev up` は、instanceが既に存在する場合も宣言内容を再適用する。
 
 これにより `dev.yml` の変更（リソース増減、device追加）が反映される。
+
+**profileも作成時にしか設定しない。** Profileはroot diskとネットワークを
+決めるものであり、そのうちどれをidevが付けたかの記録が無いため、
+利用者が自分で付けたProfileを外してしまう恐れがある。
+宣言と食い違う場合は警告する。
+
+ただし **image は作り直さない。** 既存instanceのimageを差し替えることは
+できないためである。作成時のimageを `user.incus-dev.image` に記録しておき、
+宣言と食い違う場合は警告する（黙って無視すると、利用者は
+`instance.image` を変えたのに古い環境のまま作業を続けることになる）。
+作り直すには `idev rebuild` を使う。
 
 ### 5.4.4 削除の扱い
 

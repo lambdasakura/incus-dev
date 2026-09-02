@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lambdasakura/incus-dev/internal/cli"
 	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
@@ -68,10 +69,12 @@ func codeIn(md string) string {
 func TestSkillReferencesExistingCommands(t *testing.T) {
 	root := filepath.Join("..", "skills")
 
-	known := map[string]bool{
-		"up": true, "provision": true, "shell": true, "exec": true,
-		"status": true, "validate": true, "destroy": true, "rebuild": true,
-		"snapshot": true, "completion": true,
+	// Taken from the command tree, not written out here: a hand-kept list
+	// would have to be updated alongside the CLI, which is the very thing this
+	// test exists to catch.
+	known := map[string]bool{}
+	for _, c := range cli.NewRootCommand("test").Commands() {
+		known[c.Name()] = true
 	}
 	// Pick up the `idev <subcommand>` shape; `idev --version` and the like are out
 	// of scope.
@@ -161,4 +164,82 @@ func skillName(front string) string {
 		}
 	}
 	return ""
+}
+
+// The two skills, and the two manuals, hold the same set of files.
+//
+// A page added to one language and forgotten in the other is the way these
+// pairs drift (CLAUDE.md, "利用者向け文書は英語と日本語の両方を保つ").
+func TestTranslationsHoldTheSameFiles(t *testing.T) {
+	for _, pair := range []struct{ en, ja string }{
+		{filepath.Join("..", "skills", "incus-dev"), filepath.Join("..", "skills", "incus-dev-ja")},
+		{filepath.Join("..", "docs", "manual"), filepath.Join("..", "docs", "manual", "ja")},
+	} {
+		t.Run(filepath.Base(pair.en), func(t *testing.T) {
+			en, ja := relativeFiles(t, pair.en), relativeFiles(t, pair.ja)
+
+			for name := range en {
+				if !ja[name] {
+					t.Errorf("%s has %s, %s does not", pair.en, name, pair.ja)
+				}
+			}
+			for name := range ja {
+				if !en[name] {
+					t.Errorf("%s has %s, %s does not", pair.ja, name, pair.en)
+				}
+			}
+		})
+	}
+}
+
+// relativeFiles lists the files under dir, excluding the nested ja/ directory.
+func relativeFiles(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+
+	out := map[string]bool{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && d.Name() == "ja" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		out[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return out
+}
+
+// Every manual page links to its counterpart in the other language.
+//
+// It is how a reader switches, and one page was missing the link while the
+// other fifteen carried it.
+func TestManualPagesLinkToTheOtherLanguage(t *testing.T) {
+	for _, tt := range []struct{ dir, want string }{
+		{filepath.Join("..", "docs", "manual"), "日本語版"},
+		{filepath.Join("..", "docs", "manual", "ja"), "English version"},
+	} {
+		for name := range relativeFiles(t, tt.dir) {
+			if !strings.HasSuffix(name, ".md") {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(tt.dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), tt.want) {
+				t.Errorf("%s: no link to the other language (want %q)", filepath.Join(tt.dir, name), tt.want)
+			}
+		}
+	}
 }

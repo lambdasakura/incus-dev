@@ -600,6 +600,176 @@ provision:
 	}
 }
 
+// Changing instance.image on an existing instance is said out loud.
+//
+// up never re-images an instance, so the declaration and the reality drift
+// apart silently: the user edits image:, runs up, and gets the old
+// environment with nothing said.
+func TestUpWarnsWhenTheDeclaredImageChanged(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedImageKey:   "images:debian/12",
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	for _, want := range []string{"images:debian/12", "images:ubuntu/24.04", "rebuild"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("warning = %q, want it to mention %q", errOut.String(), want)
+		}
+	}
+}
+
+// profiles: [] and an instance with none is not a change.
+func TestUpDoesNotWarnWhenProfilesMatch(t *testing.T) {
+	cfg := mustParse(t, rootYAML+`  profiles: []
+  devices:
+    root:
+      type: disk
+      pool: default
+      path: /
+`)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "instance.profiles") {
+		t.Errorf("warning = %q, want none when the lists match", errOut.String())
+	}
+}
+
+// Changing instance.profiles on an existing instance is said out loud too.
+func TestUpWarnsWhenTheDeclaredProfilesChanged(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"  profiles:\n    - default\n    - gpu\n")
+
+	client := incustest.New()
+	client.Profiles = []string{"default", "gpu"}
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config:   map[string]string{managedProjectKey: "example-project"},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	for _, want := range []string{"gpu", "rebuild"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("warning = %q, want it to mention %q", errOut.String(), want)
+		}
+	}
+}
+
+// A volume dropped from dev.yml stays reachable and is said out loud.
+//
+// Nothing names it any more, so without the record its data would sit on the
+// pool with no idev command able to remove it.
+func TestVolumeDroppedFromTheDeclaration(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.Volumes["default/dev-example-project-cache"] = true
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	for _, want := range []string{"dev-example-project-cache", "--volumes"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("warning = %q, want it to mention %q", errOut.String(), want)
+		}
+	}
+
+	// A record that is not pool/name is skipped rather than acted on.
+	client.Instances["dev-example-project"].Config[managedVolumesKey] =
+		"default/dev-example-project-cache,malformed"
+
+	// And destroy --volumes can still reach it.
+	if err := app.Destroy(context.Background(), DestroyOptions{Volumes: true}); err != nil {
+		t.Fatalf("Destroy() error = %v", err)
+	}
+	if client.Volumes["default/dev-example-project-cache"] {
+		t.Error("the volume that left the declaration was not deleted")
+	}
+}
+
+// status reports the image the instance was made from, not the declaration.
+func TestStatusReportsTheInstanceImage(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedImageKey:   "images:debian/12",
+		},
+	})
+
+	out := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Status(context.Background(), false); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "images:debian/12") {
+		t.Errorf("status =\n%s\nwant the image the instance was made from", out.String())
+	}
+}
+
 // provision checks the same prerequisites, and only for the steps selected.
 func TestProvisionChecksPrerequisitesOfSelectedSteps(t *testing.T) {
 	root := t.TempDir()
@@ -818,6 +988,54 @@ func TestUpPropagatesEnsureRunningLookupError(t *testing.T) {
 }
 
 // The list of keys needing a restart is not mixed up (spec 05-incus.md 5.4.5).
+// Removing a key that needs a restart warns too.
+//
+// Only the "set" half of restartRequiredChanges was covered: the loop over the
+// unset keys could be deleted with the suite still green, so dropping
+// security.nesting from dev.yml on a running instance said nothing about the
+// restart it needs (spec 05-incus.md 5.4.5).
+func TestRestartRequiredForRemovedKeys(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		Config: map[string]string{
+			managedProjectKey:  "example-project",
+			managedKeysKey:     "security.nesting",
+			"security.nesting": "true",
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	// The restart warning itself, not any other line that happens to name the
+	// key: "Removing config no longer declared" mentions it too.
+	line := lineContaining(errOut.String(), "restart it to apply")
+	if !strings.Contains(line, "security.nesting") {
+		t.Errorf("restart warning = %q, want it to name the removed key", line)
+	}
+}
+
+// lineContaining returns the first line holding sub, or "".
+func lineContaining(out, sub string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, sub) {
+			return line
+		}
+	}
+	return ""
+}
+
 func TestRestartRequiredKeys(t *testing.T) {
 	for _, key := range []string{"raw.idmap", "security.nesting", "security.privileged"} {
 		t.Run(key, func(t *testing.T) {

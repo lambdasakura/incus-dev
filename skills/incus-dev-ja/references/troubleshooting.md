@@ -5,17 +5,19 @@
 
 ## 設定・使い方
 
-### `instance <名前> does not exist; run 'idev up' first`
+### `instance <name> does not exist; run 'idev up' first`
 
-`provision` / `shell` / `exec` / `status` を、環境を作る前に呼んでいる。
-`idev up` を先に実行する。暗黙に作りにいくことはない（意図しない構築を避けるため）。
+`provision` / `shell` / `exec` / `destroy` / `rebuild` / `snapshot` を、
+環境を作る前に呼んでいる。`idev up` を先に実行する。
+暗黙に作りにいくことはない（意図しない構築を避けるため）。
+（`idev status` は例外で、`NOT CREATED` を表示して正常終了する。）
 
-### `instance <名前> exists but is not managed by idev for project "<name>"`
+### `instance <name> exists but is not managed by idev for project "<name>"`
 
 同名のinstanceが手動で作られている。idevは印（`user.incus-dev.project`）の
 無いinstanceを破壊しない。既存を消すか、`project.name` を変えて名前をずらす。
 
-### `incus profile(s) not found on this host: <名前>`
+### `incus profile(s) not found on this host: <name>`
 
 `instance.profiles` はホストに **既にあるProfileの名前参照** であって、
 idevはProfileを作らない。対処は次のいずれか。
@@ -54,7 +56,7 @@ sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLIS
 2行とも要る（1行目が送信、2行目が戻り）。再起動で消えるので永続化が要る。
 詳細は docs/troubleshooting.ja.md の 1。
 
-### `instance <名前> did not become ready within <時間>`
+### `instance <name> did not become ready within <duration>`
 
 起動はしたが、コンテナ内でコマンドを実行できる状態にならない。
 末尾の終了コードやエラーが原因を示す。imageが壊れている、

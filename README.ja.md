@@ -199,7 +199,8 @@ make test-integration   # Incus実機に対する統合テスト
 
 ## 実装状況
 
-以下はすべて実装済みで、Incus実機に対する統合テストで動作を確認している。
+以下はすべて実装済みである。中核（ライフサイクル、provisioning、
+workspaceのマウント、idmap）はIncus実機に対する統合テストで確認している。
 
 - `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` /
   `destroy` / `snapshot`

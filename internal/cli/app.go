@@ -212,6 +212,9 @@ func (a *App) Up(ctx context.Context, opt UpOptions) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
+		a.warnImageChanged(inst)
+		a.warnProfilesChanged(inst)
+		a.warnVolumesDropped(inst)
 		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
 			return err
 		}
@@ -319,20 +322,25 @@ type DestroyOptions struct {
 // recreated instance, so deleting them is the user's explicit call
 // (spec 04-cli.md 4.5).
 func (a *App) Destroy(ctx context.Context, opt DestroyOptions) error {
-	if _, err := a.managedInstance(ctx); err != nil {
+	inst, err := a.managedInstance(ctx)
+	if err != nil {
 		return err
 	}
+	// Read what the instance recorded before it is gone. It covers volumes
+	// that have since left the declaration, which nothing else names.
+	volumes := recordedVolumes(inst.Config, a.cfg, a.instance)
+
 	a.log.Info("Deleting instance " + a.instance)
 	if err := a.client.DeleteInstance(ctx, a.instance); err != nil {
 		return err
 	}
 
 	if opt.Volumes {
-		if err := a.deleteVolumes(ctx); err != nil {
+		if err := a.deleteVolumes(ctx, volumes); err != nil {
 			return err
 		}
-	} else if len(a.cfg.Volumes) > 0 {
-		a.log.Info(fmt.Sprintf("Kept %d volume(s). Use --volumes to delete them", len(a.cfg.Volumes)))
+	} else if len(volumes) > 0 {
+		a.log.Info(fmt.Sprintf("Kept %d volume(s). Use --volumes to delete them", len(volumes)))
 	}
 
 	a.log.Info("Instance deleted. Source tree on the host is untouched")
@@ -367,11 +375,16 @@ func (a *App) ensureVolumes(ctx context.Context) error {
 	return nil
 }
 
-// deleteVolumes deletes the declared persistent volumes.
-func (a *App) deleteVolumes(ctx context.Context) error {
-	for _, key := range slices.Sorted(maps.Keys(a.cfg.Volumes)) {
-		vol := a.cfg.Volumes[key]
-		pool, name := vol.PoolOrDefault(), volumeName(a.instance, key)
+// deleteVolumes deletes the given volumes, named as pool/name.
+//
+// The list comes from what the instance recorded, not from the declaration, so
+// a volume dropped from dev.yml is still reachable.
+func (a *App) deleteVolumes(ctx context.Context, refs []string) error {
+	for _, ref := range refs {
+		pool, name, ok := splitVolume(ref)
+		if !ok {
+			continue
+		}
 
 		exists, err := a.client.VolumeExists(ctx, pool, name)
 		if err != nil {
@@ -532,6 +545,10 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 	case err == nil:
 		report.Exists = true
 		report.Status = inst.Status
+		// What the instance was made from, which up does not change.
+		if was := inst.Config[managedImageKey]; was != "" {
+			report.Image = was
+		}
 		report.Managed = isManagedBy(inst.Config, a.cfg.Project.Name)
 		report.Profiles = inst.Profiles
 		report.Config = limitsOf(inst.Config)
@@ -592,7 +609,7 @@ func (a *App) Validate() error {
 
 // reapplyInstance re-applies what was declared to an existing instance.
 func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan, opt UpOptions) error {
-	desired := desiredConfig(a.cfg, plan)
+	desired := desiredConfig(a.cfg, plan, inst.Config, a.instance)
 	// Keep the state from before applying; afterwards the difference is gone.
 	before := maps.Clone(inst.Config)
 
@@ -677,6 +694,63 @@ func restartRequiredChanges(running bool, before, desired map[string]string, uns
 // idmapPlan resolves the idmap strategy to apply.
 func (a *App) idmapPlan() (idmapPlan, error) {
 	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap)
+}
+
+// warnImageChanged says so when instance.image no longer matches what the
+// instance was made from.
+//
+// up does not re-image an existing instance, so without this the edit simply
+// has no effect and nothing says why (spec 05-incus.md 5.4.3).
+func (a *App) warnImageChanged(inst *incus.Instance) {
+	was := inst.Config[managedImageKey]
+	if was == "" || was == a.cfg.Instance.Image {
+		return
+	}
+	a.log.Warn(fmt.Sprintf(
+		"instance.image is %s but this instance was created from %s; "+
+			"run 'idev rebuild' to recreate it from the declared image",
+		a.cfg.Instance.Image, was))
+}
+
+// warnVolumesDropped says so when a volume idev created has left the
+// declaration.
+//
+// Nothing names it any more, so the data would sit on the pool with no way to
+// reach it (spec 03-configuration.md 3.13).
+func (a *App) warnVolumesDropped(inst *incus.Instance) {
+	declared := declaredVolumes(a.cfg, a.instance)
+
+	var dropped []string
+	for _, ref := range splitList(inst.Config[managedVolumesKey]) {
+		if !slices.Contains(declared, ref) {
+			dropped = append(dropped, ref)
+		}
+	}
+	if len(dropped) == 0 {
+		return
+	}
+	a.log.Warn(fmt.Sprintf(
+		"volume(s) no longer declared, and their data is kept: %s\n"+
+			"        remove them with 'idev destroy --volumes', or declare them again",
+		strings.Join(dropped, ", ")))
+}
+
+// warnProfilesChanged says so when instance.profiles no longer matches what
+// the instance has.
+//
+// Profiles are set when the instance is created (spec 05-incus.md 5.4.2) and
+// idev does not reassign them: they decide the root disk and the network, and
+// idev has no record of which of them it put there, so removing one could take
+// away a profile the user attached themselves.
+func (a *App) warnProfilesChanged(inst *incus.Instance) {
+	want := a.cfg.ProfileNames()
+	if slices.Equal(want, inst.Profiles) {
+		return
+	}
+	a.log.Warn(fmt.Sprintf(
+		"instance.profiles is [%s] but this instance has [%s]; "+
+			"profiles are set when the instance is created, so run 'idev rebuild' to change them",
+		strings.Join(want, ", "), strings.Join(inst.Profiles, ", ")))
 }
 
 // checkProfiles verifies the named profiles exist. idev never creates one.

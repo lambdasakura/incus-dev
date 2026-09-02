@@ -8,9 +8,10 @@ environment are covered in more depth in the repository's
 
 ### `instance <name> does not exist; run 'idev up' first`
 
-You called `provision` / `shell` / `exec` / `status` before the environment
-existed. Run `idev up` first. It never creates one implicitly, so that nothing
-gets built by accident.
+You called `provision` / `shell` / `exec` / `destroy` / `rebuild` / `snapshot`
+before the environment existed. Run `idev up` first. It never creates one
+implicitly, so that nothing gets built by accident. (`idev status` is the
+exception: it reports `NOT CREATED` and exits 0.)
 
 ### `instance <name> exists but is not managed by idev for project "<name>"`
 

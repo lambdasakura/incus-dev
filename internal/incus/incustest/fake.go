@@ -49,6 +49,7 @@ func New() *Fake {
 	return &Fake{
 		Instances:           map[string]*incus.Instance{},
 		SnapshotsByInstance: map[string][]incus.Snapshot{},
+		Volumes:             map[string]bool{},
 		Profiles:            []string{"default"},
 	}
 }
@@ -279,9 +280,6 @@ func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) 
 func (f *Fake) CreateVolume(_ context.Context, pool, name string, config map[string]string) error {
 	if err := f.record("volume create %s %s %v", pool, name, sortedPairs(config)); err != nil {
 		return err
-	}
-	if f.Volumes == nil {
-		f.Volumes = map[string]bool{}
 	}
 	f.Volumes[pool+"/"+name] = true
 	return nil

@@ -27,10 +27,18 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # The same target a developer runs and CI runs, so a tag cannot publish
-      # a tree they would have rejected.
+      # golangci-lint is not on the runner, and make lint quietly falls back
+      # to gofmt and go vet without it. That fallback does not type-check
+      # test/integration/, which only .golangci.yml's build-tags reaches, so a
+      # tag could publish a tree whose integration tests do not compile.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version-file: .golangci-lint-version
+
+      # The same tests a developer runs and CI runs, so a tag cannot publish a
+      # tree they would have rejected.
       - name: Test
-        run: make check
+        run: make tidy test
 
   release:
     name: release

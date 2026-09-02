@@ -130,6 +130,11 @@ func validateVolumes(c *Config, ps *problems) {
 		if name == WorkspaceDeviceName {
 			ps.add(path, "%q is reserved for the workspace mount", WorkspaceDeviceName)
 		}
+		if strings.Contains(name, listSeparator) || strings.Contains(name, "/") {
+			// Both are separators in idev's own record of the volumes it
+			// created (user.incus-dev.volumes, "pool/name" joined by commas).
+			ps.add(path, "name must not contain %q or %q", listSeparator, "/")
+		}
 		if _, conflict := c.Instance.Devices[name]; conflict {
 			ps.add(path, "conflicts with instance.devices.%s", name)
 		}

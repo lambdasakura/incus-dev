@@ -10,7 +10,7 @@ The file always lives at `.incus-dev/dev.yml`.
 schema: 1                          # required
 
 runtime:
-  version: "1.0"                   # optional. the idev version this project needs
+  version: "1.0"                   # optional. the runtime contract this needs
 
 project:
   name: my-project                 # required. the instance name is derived from it
@@ -81,8 +81,10 @@ runtime:
   version: "1.0"
 ```
 
-The `idev` version this project needs. Running it with an `idev` that does not
-satisfy the constraint is an error.
+The **runtime contract** this project needs, currently `1.0` — not an `idev`
+release number. It goes up when the meaning of dev.yml changes in a way an
+older idev could not honour, and an idev that does not satisfy the constraint
+refuses to run.
 
 `MAJOR`, `MAJOR.MINOR` and `MAJOR.MINOR.PATCH` are all accepted.
 
@@ -138,6 +140,10 @@ image: images:debian/12
 
 `incus image list images: <keyword>` shows what is available.
 
+**Changing this on an existing instance does nothing.** An instance keeps the
+image it was created from, so `idev up` warns and leaves it alone; use
+`idev rebuild` to recreate it.
+
 idev assumes no particular OS. Keeping the image and the provisioning steps
 consistent is the project's responsibility.
 
@@ -154,6 +160,11 @@ be designed differently. That is not planned.
 
 A field that does nothing but **reference profiles that already exist on the
 host, by name**.
+
+Like `image`, these are set when the instance is created. Changing the list
+later makes `idev up` warn rather than reassign them, because idev has no
+record of which profiles it attached and which you did; `idev rebuild`
+recreates the instance with the new list.
 
 ```yaml
 profiles:
@@ -364,6 +375,10 @@ The contents survive `idev rebuild`. They also survive `idev destroy`; use
 
 Good for build caches, database files — anything you want to keep while the
 environment around it is thrown away.
+
+**Removing or renaming an entry does not delete the data.** idev remembers the
+volumes it created, so `idev up` says which ones have left the declaration and
+`idev destroy --volumes` still removes them.
 
 ---
 

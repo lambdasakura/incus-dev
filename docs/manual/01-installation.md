@@ -1,5 +1,7 @@
 # 1. Installation
 
+*[日本語版 / Japanese](ja/01-installation.md)*
+
 ## 1.1 Requirements
 
 | Where | What you need |

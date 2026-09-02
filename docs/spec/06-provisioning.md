@@ -262,8 +262,9 @@ provision:
 Roleやcollectionの導入手順を `.incus-dev/` の中で完結させられる。
 導入先はAnsibleの既定に従い、idevは場所を指定しない。
 
-`ansible` ステップと同じく、最初に実行する前に `ansible-playbook` と
-`community.general` の有無を確認する（6.5.1）。
+最初に実行する前に `ansible-galaxy` が使えることを確認する（6.5.1）。
+`community.general` の有無は確認しない。それを導入するのがこのステップ
+だからである。
 
 ---
 

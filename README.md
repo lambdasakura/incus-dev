@@ -208,8 +208,9 @@ workspace ownership, a missing profile — are covered in
 
 ## Status
 
-All of the following is implemented, and verified by integration tests against
-a real Incus daemon.
+All of the following is implemented. The core of it — the lifecycle,
+provisioning, the workspace mount and the idmap — is verified by integration
+tests against a real Incus daemon.
 
 - `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` /
   `destroy` / `snapshot`

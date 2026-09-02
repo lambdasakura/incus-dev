@@ -83,7 +83,7 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
   config:
     limits.cpu: "8"
 `)
-	got := desiredConfig(cfg, rawPlan)
+	got := desiredConfig(cfg, rawPlan, nil, "dev-example-project")
 
 	if got["limits.cpu"] != "8" {
 		t.Errorf("limits.cpu = %q", got["limits.cpu"])
@@ -107,7 +107,7 @@ func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := desiredConfig(cfg, plan)["raw.idmap"]; got != "both 1234 0" {
+	if got := desiredConfig(cfg, plan, nil, "dev-example-project")["raw.idmap"]; got != "both 1234 0" {
 		t.Errorf("raw.idmap = %q, want the explicit setting left alone", got)
 	}
 }
@@ -139,7 +139,7 @@ func TestDesiredConfigRecordsManagedKeys(t *testing.T) {
     limits.cpu: "8"
     limits.memory: 16GiB
 `)
-	got := desiredConfig(cfg, rawPlan)[managedKeysKey]
+	got := desiredConfig(cfg, rawPlan, nil, "dev-example-project")[managedKeysKey]
 
 	if got != "limits.cpu,limits.memory,raw.idmap" {
 		t.Errorf("%s = %q", managedKeysKey, got)
@@ -194,7 +194,7 @@ func TestStaleConfigKeys(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			got := staleConfigKeys(tt.current, desiredConfig(cfg, plan), plan)
+			got := staleConfigKeys(tt.current, desiredConfig(cfg, plan, nil, "dev-example-project"), plan)
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("staleConfigKeys() mismatch (-want +got):\n%s", diff)
 			}
@@ -235,7 +235,7 @@ func TestDesiredConfigRecordsManagedDevices(t *testing.T) {
       source: /srv/a
       path: /a
 `)
-	got := desiredConfig(cfg, rawPlan)[managedDevicesKey]
+	got := desiredConfig(cfg, rawPlan, nil, "dev-example-project")[managedDevicesKey]
 
 	if got != "data,workspace" {
 		t.Errorf("%s = %q", managedDevicesKey, got)

@@ -34,11 +34,15 @@ cover:
 cover-html: cover
 	go tool cover -html=$(COVER)
 
+# The fallback is weaker than it looks: go vet does not type-check
+# test/integration/, which only .golangci.yml's build-tags reach. Say so, so a
+# green run is not mistaken for the real thing.
 lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run ./...; \
 	else \
-		echo "golangci-lint is not installed; falling back to gofmt / go vet (make tools installs it)"; \
+		echo "golangci-lint is not installed, so this is gofmt / go vet only"; \
+		echo "  it does not check test/integration/; run 'make tools' to install it"; \
 		out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi; \
 		go vet ./...; \
 	fi
@@ -53,7 +57,8 @@ fmt:
 tools:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION)
 
-# What CI enforces, so a green check here means a green pipeline.
+# The checks CI runs on the source. CI additionally builds the release with
+# goreleaser, which no target here covers.
 check: tidy lint test
 
 tidy:

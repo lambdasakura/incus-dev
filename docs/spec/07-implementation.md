@@ -124,7 +124,6 @@ type Config struct {
 
 type Instance struct {
     Image    string                       `json:"image"`
-    Type     string                       `json:"type,omitempty"`
     Profiles *[]string                    `json:"profiles,omitempty"`
     Config   map[string]string            `json:"config,omitempty"`
     Devices  map[string]map[string]string `json:"devices,omitempty"`

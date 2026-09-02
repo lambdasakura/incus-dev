@@ -19,6 +19,14 @@ const (
 	managedKeysKey = config.ReservedConfigPrefix + "managed"
 	// managedDevicesKey records which devices idev created.
 	managedDevicesKey = config.ReservedConfigPrefix + "devices"
+	// managedImageKey records the image the instance was created from. up
+	// never re-images an existing instance, so this is what tells the user
+	// their edit to instance.image has not taken effect.
+	managedImageKey = config.ReservedConfigPrefix + "image"
+	// managedVolumesKey records the volumes idev created, as pool/name. A
+	// volume dropped from the declaration would otherwise be unreachable:
+	// nothing names it any more, so nothing could delete it.
+	managedVolumesKey = config.ReservedConfigPrefix + "volumes"
 )
 
 // idmapConfigKey is the key that maps uids and gids in an unprivileged
@@ -26,7 +34,11 @@ const (
 const idmapConfigKey = "raw.idmap"
 
 // desiredConfig builds the instance config to apply, from dev.yml.
-func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
+//
+// current is the instance's config as it stands, or nil when it is being
+// created. It is read for the volume record, which accumulates: a volume that
+// leaves the declaration stays reachable.
+func desiredConfig(cfg *config.Config, plan idmapPlan, current map[string]string, instance string) map[string]string {
 	out := make(map[string]string, len(cfg.Instance.Config)+4)
 	for k, v := range cfg.Instance.Config {
 		out[k] = v
@@ -35,6 +47,9 @@ func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	out[managedProjectKey] = cfg.Project.Name
 	out[managedRootKey] = cfg.Root
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
+	// Only meaningful at creation: an existing instance keeps the image it was
+	// made from, and reapplyInstance leaves this key as it found it.
+	out[managedImageKey] = cfg.Instance.Image
 
 	// The raw strategy maps the invoking host user onto root in the container.
 	if v := plan.rawIDMap(); v != "" {
@@ -46,8 +61,37 @@ func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	// keys themselves are not included.
 	out[managedKeysKey] = strings.Join(managedNames(out), ",")
 	out[managedDevicesKey] = strings.Join(managedDeviceNames(cfg), ",")
+	out[managedVolumesKey] = strings.Join(knownVolumes(current, cfg, instance), ",")
 
 	return out
+}
+
+// knownVolumes returns every volume idev has created for this instance: what
+// is declared now, plus what an earlier run recorded.
+func knownVolumes(current map[string]string, cfg *config.Config, instance string) []string {
+	out := declaredVolumes(cfg, instance)
+	for _, ref := range splitList(current[managedVolumesKey]) {
+		if !slices.Contains(out, ref) {
+			out = append(out, ref)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// declaredVolumes returns the volumes dev.yml asks for, as pool/name.
+func declaredVolumes(cfg *config.Config, instance string) []string {
+	out := make([]string, 0, len(cfg.Volumes))
+	for _, key := range slices.Sorted(maps.Keys(cfg.Volumes)) {
+		out = append(out, cfg.Volumes[key].PoolOrDefault()+"/"+volumeName(instance, key))
+	}
+	return out
+}
+
+// splitVolume splits a recorded pool/name back apart.
+func splitVolume(ref string) (pool, name string, ok bool) {
+	pool, name, ok = strings.Cut(ref, "/")
+	return pool, name, ok && pool != "" && name != ""
 }
 
 // managedDeviceNames returns the devices idev creates.
@@ -221,7 +265,7 @@ func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.Instanc
 		Image:      cfg.Instance.Image,
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg, plan),
+		Config:     desiredConfig(cfg, plan, nil, name),
 		Devices:    desiredDevices(cfg, plan, name),
 	}
 }
@@ -238,4 +282,14 @@ func stepsAt(steps []config.Step, indices []int) []config.Step {
 		out = append(out, steps[i])
 	}
 	return out
+}
+
+// recordedVolumes returns the volumes to consider idev's, newest record first
+// and falling back to the declaration for an instance made before the record
+// existed.
+func recordedVolumes(instanceConfig map[string]string, cfg *config.Config, instance string) []string {
+	if recorded, ok := instanceConfig[managedVolumesKey]; ok {
+		return splitList(recorded)
+	}
+	return declaredVolumes(cfg, instance)
 }

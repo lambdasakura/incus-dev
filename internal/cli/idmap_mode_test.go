@@ -150,7 +150,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 	t.Run("raw", func(t *testing.T) {
 		plan := idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1000}
 
-		if got := desiredConfig(cfg, plan)[idmapConfigKey]; !strings.HasPrefix(got, "uid 1000 0") {
+		if got := desiredConfig(cfg, plan, nil, "dev-example-project")[idmapConfigKey]; !strings.HasPrefix(got, "uid 1000 0") {
 			t.Errorf("raw.idmap = %q", got)
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
@@ -161,7 +161,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 	t.Run("shift", func(t *testing.T) {
 		plan := idmapPlan{Mode: config.IDMapShift, Managed: true}
 
-		if got, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
+		if got, ok := desiredConfig(cfg, plan, nil, "dev-example-project")[idmapConfigKey]; ok {
 			t.Errorf("raw.idmap = %q, want it unset under shift", got)
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "true" {
@@ -172,7 +172,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
 		plan := idmapPlan{Mode: config.IDMapNone, Managed: true}
 
-		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
+		if _, ok := desiredConfig(cfg, plan, nil, "dev-example-project")[idmapConfigKey]; ok {
 			t.Error("want raw.idmap unset under none")
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {
@@ -185,7 +185,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 	t.Run("managed by the user", func(t *testing.T) {
 		plan := idmapPlan{Managed: false}
 
-		if _, ok := desiredConfig(cfg, plan)[idmapConfigKey]; ok {
+		if _, ok := desiredConfig(cfg, plan, nil, "dev-example-project")[idmapConfigKey]; ok {
 			t.Error("want raw.idmap unset")
 		}
 		if got := desiredDevices(cfg, plan, "dev-example-project")["workspace"]["shift"]; got != "false" {

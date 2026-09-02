@@ -64,7 +64,11 @@ func (a *App) Plan(ctx context.Context) error {
 func planActions(cfg *config.Config, name string, current *incus.Instance, idmap idmapPlan) []string {
 	var out []string
 
-	desiredCfg := desiredConfig(cfg, idmap)
+	var currentCfg map[string]string
+	if current != nil {
+		currentCfg = current.Config
+	}
+	desiredCfg := desiredConfig(cfg, idmap, currentCfg, name)
 	desiredDev := desiredDevices(cfg, idmap, name)
 
 	if current == nil {

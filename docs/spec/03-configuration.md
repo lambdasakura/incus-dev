@@ -184,7 +184,6 @@ detached HEADの場合はコミットの短縮ハッシュを使う。
 ```yaml
 instance:
   image: images:ubuntu/24.04
-  type: container
 
   profiles:
     - default
@@ -707,6 +706,13 @@ volumes:
 ビルドキャッシュやデータベースの実体など、
 「作り直したいが消したくないもの」を置く。
 
+
+idevは作成したvolumeを `user.incus-dev.volumes` へ `pool/name` の形で記録する
+（[05-incus.md](05-incus.md) 5.2）。宣言から消えたvolumeは、記録が無ければ
+どのコマンドからも参照できなくなり、データがpool上に残り続けるためである。
+
+宣言から消えたvolumeについては `idev up` が警告し、
+`idev destroy --volumes` の削除対象には含める。
 ---
 
 ## 3.14 shell
