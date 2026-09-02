@@ -102,29 +102,40 @@ func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 	return incus.Target{Project: project}
 }
 
+// reach says whether a command talks to Incus.
+//
+// It is one decision with two consequences -- whether to connect, and whether
+// the instance name has to be derivable -- and they have to agree. A nil
+// connect function used to carry both, which reads as "no connector" at the
+// call site and as "the name is optional" at the other end.
+type reach int
+
+const (
+	// online commands operate on the instance.
+	online reach = iota
+	// offline commands make no Incus call, and their instance name need not
+	// resolve: `idev validate` is expected to run in a CI job with no Incus
+	// (spec 04-cli.md 4.7), where project.scope: branch may find no git
+	// either.
+	offline
+)
+
 // newApp discovers the project, loads the configuration, connects to Incus and
 // builds the App.
 func newApp(ctx context.Context, g *globalFlags) (*App, error) {
-	return buildApp(ctx, g, incus.Connect)
+	return buildApp(ctx, g, online)
 }
 
 // newOfflineApp builds the App without connecting to Incus, for the commands
-// that make no Incus call. `idev validate` is expected to run in a CI job where
-// no Incus is reachable (spec 04-cli.md 4.7).
+// that make no Incus call.
 func newOfflineApp(ctx context.Context, g *globalFlags) (*App, error) {
-	return buildApp(ctx, g, nil)
-}
-
-// offlineOptions marks the App as one that does not operate on the instance.
-func offlineOptions(connect func(context.Context, incus.Target) (*incus.API, error)) bool {
-	return connect == nil
+	return buildApp(ctx, g, offline)
 }
 
 // buildApp discovers the project, loads the configuration and builds the App.
-// It connects to Incus when connect is non-nil.
 // The context reaches the git that resolves project.scope: branch, so an
 // offline command is interruptible (spec 07-implementation.md).
-func buildApp(ctx context.Context, g *globalFlags, connect func(context.Context, incus.Target) (*incus.API, error)) (*App, error) {
+func buildApp(ctx context.Context, g *globalFlags, r reach) (*App, error) {
 	start := g.directory
 	if start == "" {
 		wd, err := os.Getwd()
@@ -155,8 +166,8 @@ func buildApp(ctx context.Context, g *globalFlags, connect func(context.Context,
 
 	// Left nil for the commands that never reach Incus.
 	var client incus.Client
-	if connect != nil {
-		api, err := connect(ctx, target)
+	if r == online {
+		api, err := incus.Connect(ctx, target)
 		if err != nil {
 			return nil, err
 		}
@@ -166,7 +177,7 @@ func buildApp(ctx context.Context, g *globalFlags, connect func(context.Context,
 	}
 
 	return NewApp(AppOptions{
-		InstanceNameOptional: offlineOptions(connect),
+		InstanceNameOptional: r == offline,
 		Config:               cfg,
 		Branch:               gitBranch(ctx, cmdRunner, proj.Root),
 		Client:               client,
