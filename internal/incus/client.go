@@ -18,6 +18,10 @@ var ErrInstanceNotFound = errors.New("instance not found")
 // while idev was creating it.
 var ErrInstanceExists = errors.New("instance already exists")
 
+// ErrSnapshotExists reports that the instance already has a snapshot of that
+// name.
+var ErrSnapshotExists = errors.New("snapshot already exists")
+
 // ErrPoolNotFound reports that the storage pool itself is not there.
 //
 // It is not the same as a missing volume: no volume can exist on a pool that
@@ -186,6 +190,9 @@ type WaitOptions struct {
 // errors.Is(ErrInstanceNotFound).
 type Client interface {
 	Instance(ctx context.Context, name string) (*Instance, error)
+	// ListInstances lists the containers in the project, with their config, so
+	// an instance idev made under a name it no longer derives can be found.
+	ListInstances(ctx context.Context) ([]Instance, error)
 
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 	StartInstance(ctx context.Context, name string) error

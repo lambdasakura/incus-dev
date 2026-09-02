@@ -716,7 +716,9 @@ provision:
 		Profiles: []string{"default"},
 		Config: map[string]string{
 			"user.incus-dev.project": "example-project",
-			"limits.cpu":             "8",
+			// What up records, so the shape is the one a real instance has.
+			"user.incus-dev.image": "images:ubuntu/24.04",
+			"limits.cpu":           "8",
 		},
 		Devices: map[string]incus.Device{"workspace": {"type": "disk"}},
 	})

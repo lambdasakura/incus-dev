@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 )
 
 // handler is a slog.Handler that prints "[idev] message".
@@ -17,6 +18,9 @@ type handler struct {
 	// does not sign off as though nothing happened. Shared, since WithAttrs
 	// hands out a new handler over the same writer.
 	warnings *int
+	// mu guards both of the shared halves. slog documents Handle as callable
+	// concurrently, and every copy WithAttrs makes writes to the same place.
+	mu *sync.Mutex
 }
 
 func newLogger(w io.Writer, verbose bool) *slog.Logger {
@@ -24,12 +28,17 @@ func newLogger(w io.Writer, verbose bool) *slog.Logger {
 	if verbose {
 		level = slog.LevelDebug
 	}
-	return slog.New(&handler{w: w, level: level, warnings: new(int)})
+	return slog.New(&handler{w: w, level: level, warnings: new(int), mu: &sync.Mutex{}})
 }
 
 func (h *handler) Enabled(_ context.Context, l slog.Level) bool { return l >= h.level }
 
 func (h *handler) Handle(_ context.Context, r slog.Record) error {
+	if h.mu != nil {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+	}
+
 	var sb strings.Builder
 	sb.WriteString("[idev] ")
 
@@ -72,6 +81,10 @@ func warningCount(l *slog.Logger) int {
 	h, ok := l.Handler().(*handler)
 	if !ok || h.warnings == nil {
 		return 0
+	}
+	if h.mu != nil {
+		h.mu.Lock()
+		defer h.mu.Unlock()
 	}
 	return *h.warnings
 }

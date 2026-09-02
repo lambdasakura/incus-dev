@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -406,12 +407,12 @@ func TestStaleConfigKeysIgnoresWhatIsAlreadyGone(t *testing.T) {
 
 // Unsetting a key the instance never had changes nothing, so it must not be
 // reported as needing a restart.
-func TestRestartRequiredChangesIgnoresUnsettingWhatIsAbsent(t *testing.T) {
-	got := restartRequiredChanges(true, map[string]string{}, map[string]string{},
-		[]string{"security.nesting"})
+func TestRestartOwedIgnoresUnsettingWhatIsAbsent(t *testing.T) {
+	_, all, _ := restartOwed(true, map[string]string{}, map[string]string{},
+		[]string{"security.nesting"}, time.Time{})
 
-	if len(got) != 0 {
-		t.Errorf("restartRequiredChanges() = %v, want none for a key that was not set", got)
+	if len(all) != 0 {
+		t.Errorf("restartOwed() = %v, want none for a key that was not set", all)
 	}
 }
 
@@ -443,5 +444,21 @@ func TestDesiredDevicesLeavesASourcelessDiskAlone(t *testing.T) {
 
 	if _, ok := devices["root"]["shift"]; ok {
 		t.Errorf("root device = %v, want no shift on a disk that mounts no host path", devices["root"])
+	}
+}
+
+// A stopped instance applies everything when it starts, so nothing is owed —
+// including anything an earlier run left owed.
+func TestRestartOwedIsEmptyForAStoppedInstance(t *testing.T) {
+	before := map[string]string{
+		managedRestartKey: recordRestart(time.Now(),
+			map[string]bootedValue{"security.nesting": {value: "false", known: true}}),
+	}
+
+	fresh, all, owed := restartOwed(false, before,
+		map[string]string{"security.nesting": "true"}, nil, time.Time{})
+
+	if fresh != nil || all != nil || owed != nil {
+		t.Errorf("restartOwed() = %v, %v, %v; want nothing owed", fresh, all, owed)
 	}
 }

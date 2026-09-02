@@ -104,6 +104,18 @@ func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error)
 	return inst, nil
 }
 
+// ListInstances lists the registered instances.
+func (f *Fake) ListInstances(_ context.Context) ([]incus.Instance, error) {
+	if err := f.record("instances"); err != nil {
+		return nil, err
+	}
+	out := make([]incus.Instance, 0, len(f.Instances))
+	for _, name := range slices.Sorted(maps.Keys(f.Instances)) {
+		out = append(out, *f.Instances[name])
+	}
+	return out, nil
+}
+
 // CreateInstance registers an instance, in the Stopped state.
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
 	if err := f.record("create %s image=%s profiles=%v noprofiles=%v config=%v devices=%v",

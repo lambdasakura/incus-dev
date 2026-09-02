@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -89,4 +90,29 @@ func TestLoggerWriteError(t *testing.T) {
 
 	// Through slog the error is dropped, and nothing panics.
 	newLogger(errWriter{}, false).Info("message")
+}
+
+// slog documents Handle as callable concurrently, and WithAttrs hands out a
+// handler over the same writer and the same count. Nothing in the CLI logs
+// off the main goroutine today; the first background log line would corrupt
+// both.
+func TestHandlerIsSafeForConcurrentUse(t *testing.T) {
+	var buf bytes.Buffer
+	l := newLogger(&buf, false)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 200 {
+				l.Warn("careful")
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := warningCount(l); got != 800 {
+		t.Errorf("warningCount() = %d, want 800", got)
+	}
 }

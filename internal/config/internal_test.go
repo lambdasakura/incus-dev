@@ -119,7 +119,7 @@ func TestParseVersion(t *testing.T) {
 }
 
 func TestRuntimeCompatibleReportsInvalidCurrent(t *testing.T) {
-	if _, err := runtimeCompatible("1.0", "broken"); err == nil {
+	if _, _, err := runtimeCompatible("1.0", "broken"); err == nil {
 		t.Error("want an error when the current version is malformed")
 	}
 }

@@ -883,7 +883,7 @@ func TestPlanSaysNothingAboutARestartOnAStoppedInstance(t *testing.T) {
 		Profiles: []string{"default"},
 		Config: map[string]string{
 			managedProjectKey: "example-project",
-			managedRestartKey: recordRestart(time.Time{}, []string{"security.nesting"}),
+			managedRestartKey: recordRestart(time.Time{}, map[string]bootedValue{"security.nesting": {value: "false", known: true}}),
 		},
 	})
 
@@ -1713,7 +1713,7 @@ func TestRestartIsOwedUntilItHappens(t *testing.T) {
 	}
 	client.Instances["dev-example-project"].LastUsedAt = time.Time{}
 	client.Instances["dev-example-project"].Config[managedRestartKey] =
-		recordRestart(time.Time{}, []string{"security.nesting"})
+		recordRestart(time.Time{}, map[string]bootedValue{"security.nesting": {value: "false", known: true}})
 
 	// A stopped instance owes nothing: starting it applies everything.
 	client.Instances["dev-example-project"].Status = "Stopped"

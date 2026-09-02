@@ -135,6 +135,11 @@ func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*
 	target := resolveTarget(g, cfg)
 
 	log := newLogger(os.Stderr, g.verbose)
+	if proj.Shadowed != "" {
+		log.Warn(fmt.Sprintf(
+			"%s is not a regular file, so it was skipped; this run acts on the project at %s",
+			proj.Shadowed, proj.Root))
+	}
 	cmdRunner := runner.NewWithLogger(log)
 
 	// Left nil for the commands that never reach Incus.

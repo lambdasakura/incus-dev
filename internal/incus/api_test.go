@@ -142,6 +142,19 @@ func (f *fakeServer) addInstance(name string, put api.InstancePut) *api.Instance
 	return full
 }
 
+func (f *fakeServer) GetInstances(api.InstanceType) ([]api.Instance, error) {
+	if err := f.record("GetInstances"); err != nil {
+		return nil, err
+	}
+	out := make([]api.Instance, 0, len(f.instances))
+	for name, full := range f.instances {
+		inst := full.Instance
+		inst.Name = name
+		out = append(out, inst)
+	}
+	return out, nil
+}
+
 func (f *fakeServer) GetInstanceFull(name string) (*api.InstanceFull, string, error) {
 	if f.beforeInstance != nil {
 		f.beforeInstance()
@@ -1412,5 +1425,69 @@ func TestCreateInstanceReportsALostRace(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("error = %q, want it to say the instance is already there", err.Error())
+	}
+}
+
+// 'idev snapshot create' with no name derives one from the clock to the
+// second, so two in a row collide. The database error says nothing.
+func TestCreateSnapshotReportsACollision(t *testing.T) {
+	f := newFakeServer()
+	f.err = map[string]error{
+		"CreateInstanceSnapshot": errors.New(
+			`Failed creating instance snapshot record "20260901-125602": ` +
+				`Add snapshot info to the database: This "instances_snapshots" entry already exists`),
+	}
+	a, _ := newAPI(f)
+
+	err := a.CreateSnapshot(context.Background(), "dev-x", "20260901-125602")
+	if !errors.Is(err, ErrSnapshotExists) {
+		t.Errorf("error = %v, want ErrSnapshotExists", err)
+	}
+}
+
+// ListInstances is how idev finds an instance of its own under a name it no
+// longer derives, so it has to carry the markers.
+func TestListInstances(t *testing.T) {
+	f := newFakeServer()
+	inst := f.addInstance("dev-x", api.InstancePut{})
+	inst.Config = map[string]string{"user.incus-dev.project": "x"}
+	a, _ := newAPI(f)
+
+	got, err := a.ListInstances(context.Background())
+	if err != nil {
+		t.Fatalf("ListInstances() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "dev-x" {
+		t.Fatalf("ListInstances() = %v, want the one instance", got)
+	}
+	if got[0].Config["user.incus-dev.project"] != "x" {
+		t.Errorf("Config = %v, want the markers carried", got[0].Config)
+	}
+
+	f.err = map[string]error{"GetInstances": errors.New("boom")}
+	if _, err := a.ListInstances(context.Background()); err == nil {
+		t.Error("ListInstances() = nil error, want the failure reported")
+	}
+}
+
+// A cancelled Exec whose ExecInstance never succeeded has no control socket,
+// so there is no signal on the wire to wait for. Waiting anyway makes Ctrl-C
+// during the boot-time retry loop hang for the whole grace period, with SIGINT
+// already trapped so a second one does not help.
+func TestExecDoesNotWaitWhenItNeverStarted(t *testing.T) {
+	f := newFakeServer()
+	f.addInstance("dev-x", api.InstancePut{})
+	f.err = map[string]error{"ExecInstance": errors.New("not ready")}
+	a, _ := newAPI(f)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	if _, err := a.Exec(ctx, "dev-x", []string{"true"}, ExecOptions{}); err == nil {
+		t.Fatal("Exec() = nil error, want the failure reported")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("Exec() took %v, want it not to wait for a signal it never sent", elapsed)
 	}
 }

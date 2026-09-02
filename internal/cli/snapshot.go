@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/lambdasakura/incus-dev/internal/incus"
 )
 
 // snapshotTimeFormat names a snapshot when no name was given.
@@ -44,7 +47,8 @@ func (a *App) CreateSnapshot(ctx context.Context, name string) error {
 	if _, err := a.managedInstance(ctx, sharedEnvironment); err != nil {
 		return err
 	}
-	if name == "" {
+	generated := name == ""
+	if generated {
 		name = time.Now().Format(snapshotTimeFormat)
 	}
 	if err := checkSnapshotName(name); err != nil {
@@ -52,6 +56,17 @@ func (a *App) CreateSnapshot(ctx context.Context, name string) error {
 	}
 
 	if err := a.client.CreateSnapshot(ctx, a.instance, name); err != nil {
+		if errors.Is(err, incus.ErrSnapshotExists) {
+			// Why it happened only when idev chose the name. Told to someone
+			// who typed it, the explanation is simply untrue.
+			hint := ""
+			if generated {
+				hint = "; the name with no argument is the time to the second, " +
+					"so two in a row collide"
+			}
+			return fmt.Errorf("%w: %s already has a snapshot named %q%s",
+				err, a.instance, name, hint)
+		}
 		return err
 	}
 	a.log.Info("Created snapshot " + name)

@@ -20,6 +20,7 @@ import (
 // incus.InstanceServer satisfies it as it is. Tests replace it with a fake.
 type server interface {
 	GetInstanceFull(name string) (*api.InstanceFull, string, error)
+	GetInstances(instType api.InstanceType) ([]api.Instance, error)
 	CreateInstanceFromImage(source incusclient.ImageServer, image api.Image, req api.InstancesPost) (incusclient.RemoteOperation, error)
 	UpdateInstance(name string, put api.InstancePut, etag string) (incusclient.Operation, error)
 	UpdateInstanceState(name string, state api.InstanceStatePut, etag string) (incusclient.Operation, error)
@@ -72,6 +73,25 @@ func (a *API) console() Console {
 }
 
 var _ Client = (*API)(nil)
+
+// ListInstances lists the containers in the project with their config.
+//
+// idev needs it to find an instance of its own under a name it no longer
+// derives: the naming rules have changed, and a project.scope: branch
+// checkout upgraded across one of those changes would otherwise get a second,
+// empty environment while the provisioned one kept running unreachable.
+func (a *API) ListInstances(_ context.Context) ([]Instance, error) {
+	list, err := a.Server.GetInstances(api.InstanceTypeContainer)
+	if err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+
+	out := make([]Instance, 0, len(list))
+	for _, inst := range list {
+		out = append(out, Instance{Name: inst.Name, Status: inst.Status, Config: inst.Config})
+	}
+	return out, nil
+}
 
 // missingScope reports whether a 404 is about the project or the storage pool
 // the object was asked for in, rather than the object itself.
@@ -465,16 +485,29 @@ func (a *API) DeleteVolume(_ context.Context, pool, name string) error {
 	return nil
 }
 
+// snapshotError reports a failed snapshot, recognising the collision Incus
+// reports from its database layer.
+//
+// 'idev snapshot create' with no name derives one from the clock to the
+// second, so two in a row collide -- and the raw text says nothing about
+// what happened.
+func snapshotError(name string, err error) error {
+	if strings.Contains(err.Error(), `This "instances_snapshots" entry already exists`) {
+		return fmt.Errorf("create snapshot %s: %w", name, ErrSnapshotExists)
+	}
+	return fmt.Errorf("create snapshot %s: %w", name, err)
+}
+
 // CreateSnapshot takes a snapshot of an instance.
 func (a *API) CreateSnapshot(ctx context.Context, instance, snapshot string) error {
 	a.log("create snapshot", "instance", instance, "snapshot", snapshot)
 
 	op, err := a.Server.CreateInstanceSnapshot(instance, api.InstanceSnapshotsPost{Name: snapshot})
 	if err != nil {
-		return fmt.Errorf("create snapshot %s: %w", snapshot, err)
+		return snapshotError(snapshot, err)
 	}
 	if err := op.WaitContext(ctx); err != nil {
-		return fmt.Errorf("create snapshot %s: %w", snapshot, err)
+		return snapshotError(snapshot, err)
 	}
 	return nil
 }
@@ -557,8 +590,15 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 
 	// On an interruption the process exits almost at once, which would leave
 	// the signal unsent on the wire.
+	//
+	// started, not just ctx.Err(): waitExec retries Exec while the instance
+	// boots, so ExecInstance legitimately fails in that window. With no
+	// control socket there is no signal to wait for, and waiting anyway hangs
+	// Ctrl-C for the whole grace period -- with SIGINT already trapped, so a
+	// second one does not help.
+	started := false
 	defer func() {
-		if ctx.Err() != nil {
+		if started && ctx.Err() != nil {
 			awaitSignalSent(sent)
 		}
 	}()
@@ -597,6 +637,9 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 	if err != nil {
 		return 0, fmt.Errorf("exec in %s: %w", name, err)
 	}
+	// From here the control socket exists, so an interruption has somewhere
+	// to go and is worth waiting for.
+	started = true
 	if err := op.WaitContext(ctx); err != nil {
 		return 0, fmt.Errorf("exec in %s: %w", name, err)
 	}

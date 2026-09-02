@@ -1228,3 +1228,53 @@ func TestLocatedProblemsKeepTheirPath(t *testing.T) {
 		t.Errorf("error = %v, want it filed at instance.image", err)
 	}
 }
+
+// instance.type was a documented no-op that is now rejected, so it is the
+// line most likely to be sitting in an older dev.yml. The schema's generic
+// "additional properties not allowed" never says that deleting it is the
+// whole fix.
+func TestInstanceTypeSaysItWasDropped(t *testing.T) {
+	_, err := config.Parse([]byte(
+		"schema: 1\nproject:\n  name: p\ninstance:\n  image: i\n  type: container\n"),
+		config.Options{})
+	if err == nil {
+		t.Fatal("Parse() = nil error, want it rejected")
+	}
+	for _, want := range []string{"instance.type", "containers"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+}
+
+// A pin below what idev provides is refused too, and saying "this idev
+// provides 1.0" reads as idev being too old when it is the pin that is.
+func TestRuntimeVersionSaysWhichSideIsBehind(t *testing.T) {
+	tests := []struct{ version, want string }{
+		{"0.9", "older than this idev"},
+		{"2.0", "newer idev"},
+	}
+
+	for _, tt := range tests {
+		_, err := config.Parse([]byte(
+			"schema: 1\nruntime:\n  version: \""+tt.version+"\"\nproject:\n  name: p\ninstance:\n  image: i\n"),
+			config.Options{})
+		if err == nil {
+			t.Fatalf("Parse(%q) = nil error, want it rejected", tt.version)
+		}
+		if !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("Parse(%q) error = %q, want it to contain %q", tt.version, err.Error(), tt.want)
+		}
+	}
+}
+
+// A pin idev cannot parse is reported as unparseable, not as one side being
+// behind the other.
+func TestRuntimeVersionUnparseableStaysUnparseable(t *testing.T) {
+	_, err := config.Parse([]byte(
+		"schema: 1\nruntime:\n  version: \"1.0-rc1\"\nproject:\n  name: p\ninstance:\n  image: i\n"),
+		config.Options{})
+	if err == nil || !strings.Contains(err.Error(), "expected MAJOR") {
+		t.Errorf("error = %v, want the format reported", err)
+	}
+}

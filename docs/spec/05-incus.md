@@ -56,7 +56,7 @@ user.incus-dev.root    = /home/user/src/example-project
 user.incus-dev.schema  = 1
 user.incus-dev.image   = images:ubuntu/24.04
 user.incus-dev.volumes = default/dev-example-project-cache
-user.incus-dev.restart-pending = 2026-09-01T00:00:00Z|security.nesting
+user.incus-dev.restart-pending = 2026-09-01T00:00:00Z|security.nesting=false
 ```
 
 目的：
@@ -205,10 +205,20 @@ idev up --restart
 再起動は明示的な指示があった場合のみ行う。
 
 **再起動が必要であるという事実は instance へ記録する**
-（`user.incus-dev.restart-pending`、`<適用時点の起動時刻>|<キー>` の形）。警告を出すのは変更を書き込んだ回であり、
+（`user.incus-dev.restart-pending`、`<適用時点の起動時刻>|<キー>=<起動時の値>` の形）。
+警告を出すのは変更を書き込んだ回であり、
 利用者がその案内に従って `idev up --restart` を実行する頃には、
 宣言とinstanceのconfigは既に一致していて比較対象が残っていないためである。
 記録が無いと、案内されたコマンドが何もせずに終わる。
+
+**値まで記録するのは、変更を元に戻した場合に収束させるためである。**
+キーだけを記録すると、`true` → `false` → `true` と戻したときに
+「変更された」と判定し続ける。実行中のコンテナは既に `true` で動いており
+再起動しても何も変わらないため、警告が永久に消えず、
+案内に従った `idev up --restart` は何も適用せずに
+利用者の作業中プロセスだけを停止させる。
+
+起動時の値と宣言が一致した時点で、そのキーの記録は消す。
 
 記録は再起動に成功した時点で消す。停止中のinstanceに対しても消す
 （この後の起動で反映されるため）。
@@ -278,6 +288,9 @@ package incus
 
 type Client interface {
     Instance(ctx context.Context, name string) (*Instance, error)
+    // ListInstances はproject内のcontainerをconfigつきで列挙する。
+    // 命名規則が変わった後も、idevが作ったinstanceを見つけるために使う。
+    ListInstances(ctx context.Context) ([]Instance, error)
 
     CreateInstance(ctx context.Context, spec InstanceSpec) error
     StartInstance(ctx context.Context, name string) error

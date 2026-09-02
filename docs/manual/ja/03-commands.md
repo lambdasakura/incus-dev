@@ -260,6 +260,36 @@ dev.yml が別のものを求めている場合に限り、`image_declared` と
 
 ---
 
+### 古いidevが作ったinstance
+
+instanceの命名やマーカーの付け方が変わる前に作られたinstanceは引き継がれない。
+`idev up` は隣に新しいinstanceを作り、その際に古い方の名前と
+削除用の `incus delete` を表示する。
+
+移行は行わない。idevが必要とする情報の多くが、そのinstanceには記録されていないためである。
+具体的に失われるものは以下。
+
+| 欠けている記録 | idevができないこと |
+| --- | --- |
+| `user.incus-dev.image` | 何のimageから作られたかを答える。`status` は推測せずその旨を表示する |
+| `user.incus-dev.managed` | `dev.yml` から消したconfigキーの削除に追従する |
+| `user.incus-dev.devices` | `dev.yml` から消したdeviceの削除に追従する |
+
+こうしたinstanceに対する最初の `idev up` は、追従できなくなるconfigキーとdeviceを
+名前で挙げる。それを言えるのはその実行が最後だからである
+（記録を書いた時点で、記録の外にあるものへは手が届かなくなる）。
+古い `dev.yml` が設定したものと利用者が手で設定したものをidevは区別できないため、
+どちらも削除しない。
+
+永続ボリュームは例外で、disk deviceとして接続されたままなので
+記録が無くても `idev destroy --volumes` が見つけて削除する。
+
+**確実なのは作り直すことである。** 古いinstanceから必要なものを取り出し、
+`incus delete` して `idev up` を実行する。
+workspaceはbind mountなので、ホスト側のソースツリーは影響を受けない。
+
+---
+
 ## 3.7 `idev destroy`
 
 instanceを削除する。

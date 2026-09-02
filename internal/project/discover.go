@@ -28,6 +28,12 @@ type Project struct {
 	Root string
 	// ConfigPath is the absolute path of dev.yml.
 	ConfigPath string
+	// Shadowed is a nearer dev.yml that could not be used, if there was one.
+	//
+	// The search continues past it so a real project above is not hidden, but
+	// silently using the parent's instance is not what someone standing in the
+	// nearer directory expects.
+	Shadowed string
 }
 
 // isAbsent reports whether the path simply is not there.
@@ -65,7 +71,7 @@ func Discover(startDir string) (*Project, error) {
 		configPath := filepath.Join(dir, ConfigDir, ConfigFile)
 		switch info, err := os.Stat(configPath); {
 		case err == nil && info.Mode().IsRegular():
-			return &Project{Root: dir, ConfigPath: configPath}, nil
+			return &Project{Root: dir, ConfigPath: configPath, Shadowed: wrongKind}, nil
 		case err == nil:
 			// It is there; it is the wrong kind of thing. Keep looking -- a
 			// real project above must not be hidden by it -- but remember it,

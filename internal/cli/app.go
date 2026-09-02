@@ -179,7 +179,7 @@ func (a *App) HasVolumes(ctx context.Context) bool {
 	// The record is not proof: destroy never prunes it, so it outlives a
 	// volume someone removed by hand. Ask what destroy would actually find,
 	// the same way deleteVolumes does.
-	for _, ref := range recordedVolumes(inst.Config, a.cfg, a.instance) {
+	for _, ref := range recordedVolumes(inst, a.cfg, a.instance) {
 		pool, name, ok := splitVolume(ref)
 		if !ok {
 			continue
@@ -250,11 +250,13 @@ func (a *App) up(ctx context.Context, opt UpOptions, plan idmapPlan, env provisi
 			return err
 		}
 		a.pruneVolumeRecord(ctx, inst)
+		a.warnUnrecorded(inst, plan)
 		a.warnChanges(inst, remountsHere)
 		if err := a.reapplyInstance(ctx, inst, plan, opt); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
+		a.warnStrandedInstances(ctx)
 		a.log.Info("Creating instance " + a.instance)
 		// Before the instance, which mounts them.
 		if err := a.ensureVolumes(ctx); err != nil {
@@ -382,7 +384,7 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 	}
 	// Read what the instance recorded before it is gone. It covers volumes
 	// that have since left the declaration, which nothing else names.
-	volumes := recordedVolumes(inst.Config, a.cfg, a.instance)
+	volumes := recordedVolumes(inst, a.cfg, a.instance)
 
 	// The instance goes first: Incus refuses to delete a volume while it is
 	// attached to one.
@@ -565,7 +567,7 @@ func (a *App) Rebuild(ctx context.Context) error {
 		// the instance is about to go. Carry it over, or a volume that has
 		// left the declaration becomes unreachable — which is what rebuild is
 		// recommended for in the first place.
-		a.carried = recordedVolumes(inst.Config, a.cfg, a.instance)
+		a.carried = recordedVolumes(inst, a.cfg, a.instance)
 
 		// rebuild keeps the persistent volumes, since surviving a rebuild is
 		// exactly what they are for.
@@ -724,6 +726,13 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 			if was != a.cfg.Instance.Image {
 				report.ImageDeclared = a.cfg.Instance.Image
 			}
+		} else {
+			// An instance made before the record. Showing the declaration as
+			// the instance's image would say it was made from it, which is
+			// the one thing this row is for and the one thing idev cannot
+			// know; imageRow says so instead.
+			report.Image = ""
+			report.ImageDeclared = a.cfg.Instance.Image
 		}
 		report.Managed = isManagedBy(inst.Config, a.cfg.Project.Name)
 		report.Profiles = inst.Profiles
@@ -828,7 +837,7 @@ func (a *App) settleRestart(ctx context.Context, running bool, lastStart time.Ti
 		return a.clearRestartPending(ctx, before)
 	}
 
-	fresh, changed := restartOwed(running, before, desired, unset, lastStart)
+	fresh, changed, booted := restartOwed(running, before, desired, unset, lastStart)
 
 	if len(changed) == 0 {
 		// Nothing owed. A record left by an earlier run was retired by a
@@ -839,7 +848,7 @@ func (a *App) settleRestart(ctx context.Context, running bool, lastStart time.Ti
 	if !opt.Restart {
 		a.log.Warn(restartWarning(fresh, changed))
 
-		record := recordRestart(lastStart, changed)
+		record := recordRestart(lastStart, booted)
 		if before[managedRestartKey] == record {
 			return nil
 		}
@@ -863,16 +872,36 @@ func (a *App) settleRestart(ctx context.Context, running bool, lastStart time.Ti
 // The record carries the instance's start time as it was when the change was
 // applied. A later start — by the user, or by the host coming back up —
 // applied it, so there is nothing left to warn about.
-func pendingRestart(before map[string]string, lastStart time.Time) []string {
-	at, keys, ok := strings.Cut(before[managedRestartKey], "|")
+// bootedValue is what the running container has for a pending key.
+//
+// known is false for a record written before the value was stored: such a key
+// is owed a restart, and nothing about the declaration can retire it, because
+// there is nothing to compare against.
+type bootedValue struct {
+	value string
+	known bool
+}
+
+func pendingRestart(before map[string]string, lastStart time.Time) map[string]bootedValue {
+	at, entries, ok := strings.Cut(before[managedRestartKey], "|")
 	if !ok {
 		return nil
 	}
 	recorded, err := time.Parse(time.RFC3339Nano, at)
 	if err != nil || lastStart.After(recorded) {
+		// A restart since then applied everything, so nothing is owed.
 		return nil
 	}
-	return splitList(keys)
+
+	out := map[string]bootedValue{}
+	for _, entry := range splitList(entries) {
+		// key=value since this format carries the booted value. An entry
+		// without one was written by an older idev, which recorded only that
+		// a restart was owed.
+		key, value, ok := strings.Cut(entry, "=")
+		out[key] = bootedValue{value: value, known: ok}
+	}
+	return out
 }
 
 // restartOwed returns what this run changed and needs a restart for, and the
@@ -880,17 +909,50 @@ func pendingRestart(before map[string]string, lastStart time.Time) []string {
 // since.
 //
 // The preview computes it the same way, so it can say the same thing up will.
-func restartOwed(running bool, before, desired map[string]string, unset []string, lastStart time.Time) (fresh, all []string) {
-	fresh = restartRequiredChanges(running, before, desired, unset)
+func restartOwed(running bool, before, desired map[string]string, unset []string, lastStart time.Time) (fresh, all []string, owedValues map[string]bootedValue) {
+	if !running {
+		return nil, nil, nil
+	}
 
-	all = slices.Clone(fresh)
-	for _, k := range pendingRestart(before, lastStart) {
-		if !slices.Contains(all, k) {
-			all = append(all, k)
+	// What the running container actually booted with. An earlier run recorded
+	// it for the keys it changed; for the rest it is what is stored, since
+	// nothing has changed them since the instance started.
+	booted := pendingRestart(before, lastStart)
+
+	owed := map[string]bootedValue{}
+	for _, k := range restartRequiredKeys {
+		was, recorded := booted[k]
+		if !recorded {
+			was = bootedValue{value: before[k], known: true}
+		}
+
+		want, declared := desired[k]
+		switch {
+		case declared:
+		case slices.Contains(unset, k):
+			want = ""
+		default:
+			// Neither declared nor being unset: the stored value stays as it
+			// is, and a restart is owed if the container is not running with
+			// it -- an earlier run changed it and nothing has restarted since.
+			want = before[k]
+		}
+		if was.known && sameIDMapping(k, want, was.value) {
+			// The container is already running with this. A value changed and
+			// changed back is not a change, and restarting would apply
+			// nothing while killing whatever is running inside.
+			continue
+		}
+		owed[k] = was
+		all = append(all, k)
+		if !recorded || before[k] != want {
+			fresh = append(fresh, k)
 		}
 	}
+
+	slices.Sort(fresh)
 	slices.Sort(all)
-	return fresh, all
+	return fresh, all, owed
 }
 
 // restartWarning renders what is owed. Two wordings, because "changed" is
@@ -906,9 +968,60 @@ func restartWarning(fresh, all []string) string {
 		strings.Join(all, ", "))
 }
 
+// sameIDMapping reports whether two values apply the same thing.
+//
+// Only raw.idmap needs it: idev used to write "both <id> 0" and now writes
+// "uid <id> 0" and "gid <id> 0" on separate lines. The kernel mapping is
+// identical when the ids are, so demanding a restart to respell it would cost
+// every upgraded instance whatever was running inside it.
+func sameIDMapping(key, want, have string) bool {
+	if want == have {
+		return true
+	}
+	if key != idmapConfigKey {
+		return false
+	}
+	return normalizeIDMap(want) == normalizeIDMap(have)
+}
+
+// normalizeIDMap rewrites a raw.idmap into one comparable form: sorted lines,
+// with "both" expanded into its uid and gid halves.
+func normalizeIDMap(value string) string {
+	var lines []string
+	for _, line := range strings.Split(value, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			// Not a shape idev writes; compare it as it is.
+			if line = strings.TrimSpace(line); line != "" {
+				lines = append(lines, line)
+			}
+			continue
+		}
+		if fields[0] == "both" {
+			lines = append(lines,
+				"uid "+fields[1]+" "+fields[2],
+				"gid "+fields[1]+" "+fields[2])
+			continue
+		}
+		lines = append(lines, strings.Join(fields, " "))
+	}
+	slices.Sort(lines)
+	return strings.Join(lines, "\n")
+}
+
 // recordRestart renders the record: when the change was applied, and to what.
-func recordRestart(lastStart time.Time, keys []string) string {
-	return lastStart.Format(time.RFC3339Nano) + "|" + strings.Join(keys, ",")
+func recordRestart(lastStart time.Time, booted map[string]bootedValue) string {
+	entries := make([]string, 0, len(booted))
+	for _, k := range slices.Sorted(maps.Keys(booted)) {
+		if b := booted[k]; b.known {
+			entries = append(entries, k+"="+b.value)
+		} else {
+			// Keep it unknown rather than inventing a value that would let a
+			// later run decide the restart is no longer owed.
+			entries = append(entries, k)
+		}
+	}
+	return lastStart.Format(time.RFC3339Nano) + "|" + strings.Join(entries, ",")
 }
 
 // clearRestartPending drops the record that a restart is owed.
@@ -924,32 +1037,6 @@ func (a *App) clearRestartPending(ctx context.Context, before map[string]string)
 // limits.* is not among them: in a container both increases and decreases take
 // effect while it runs (verified on real hardware; VMs are out of scope).
 var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
-
-// restartRequiredChanges returns the changes that need a restart to take
-// effect.
-//
-// Only keys idev actually changed or unset count. Including untouched keys
-// would warn on every run even when nothing happened.
-func restartRequiredChanges(running bool, before, desired map[string]string, unset []string) []string {
-	if !running {
-		return nil
-	}
-
-	var changed []string
-	for _, k := range restartRequiredKeys {
-		if want, declared := desired[k]; declared && before[k] != want {
-			changed = append(changed, k)
-		}
-	}
-	for _, k := range unset {
-		if slices.Contains(restartRequiredKeys, k) && before[k] != "" {
-			changed = append(changed, k)
-		}
-	}
-	slices.Sort(changed)
-
-	return slices.Compact(changed)
-}
 
 // idmapPlan resolves the idmap strategy to apply.
 func (a *App) idmapPlan() (idmapPlan, error) {
@@ -972,6 +1059,106 @@ func (a *App) warnImageChanged(inst *incus.Instance) {
 		a.cfg.Instance.Image, was))
 }
 
+// legacyProjectKey is the marker an idev before the rename wrote.
+//
+// Such an instance is not adopted -- the markers moved, and nothing migrates
+// them -- so the only thing idev can usefully do is say it is there.
+const legacyProjectKey = "user.incus-devkit.project"
+
+// warnStrandedInstances says so when this project already has an instance
+// under a name idev no longer derives.
+//
+// The rules that derive a name have changed, and so has the marker prefix. A
+// checkout upgraded across either would otherwise get a second, empty
+// environment while the provisioned one keeps running: unreachable by every
+// idev command, and with volumes nothing can name.
+func (a *App) warnStrandedInstances(ctx context.Context) {
+	all, err := a.client.ListInstances(ctx)
+	if err != nil {
+		// Advisory only. Failing up over it would be worse than the warning
+		// it is trying to give.
+		a.log.Debug("could not look for older instances: " + err.Error())
+		return
+	}
+
+	for _, inst := range all {
+		if inst.Name == a.instance {
+			continue
+		}
+		project, legacy := inst.Config[managedProjectKey], inst.Config[legacyProjectKey]
+		if project != a.cfg.Project.Name && legacy != a.cfg.Project.Name {
+			continue
+		}
+		if root := inst.Config[managedRootKey]; root != "" && root != a.cfg.Root {
+			// Another checkout of the same project, which is what
+			// project.scope is for. Not stranded.
+			continue
+		}
+
+		if legacy != "" {
+			a.log.Warn(fmt.Sprintf(
+				"%s belongs to this project but was made by an older idev, under the "+
+					"markers it used then.\n"+
+					"                idev will not adopt it; take anything you need out of "+
+					"it, then 'incus delete %s'", inst.Name, inst.Name))
+			continue
+		}
+		a.log.Warn(fmt.Sprintf(
+			"%s belongs to this project but idev no longer derives that name, so a new "+
+				"instance is being created.\n"+
+				"                The old one keeps running; remove it with 'incus delete %s'",
+			inst.Name, inst.Name))
+	}
+}
+
+// warnUnrecorded names the settings an instance carries that idev will never
+// be able to follow.
+//
+// Before idev recorded what it applied, there was nothing to tell a key from
+// an older dev.yml apart from one set by hand -- and removing the second
+// would be wrong, so both are left. This run writes the records, and from
+// then on those settings sit outside them for good, so this is the last
+// moment anything can point at them.
+func (a *App) warnUnrecorded(inst *incus.Instance, plan idmapPlan) {
+	if _, ok := inst.Config[managedKeysKey]; ok {
+		return
+	}
+	if _, ok := inst.Config[managedDevicesKey]; ok {
+		return
+	}
+
+	desiredCfg := desiredConfig(a.cfg, plan, inst.Config, a.instance)
+	var loose []string
+	for _, k := range slices.Sorted(maps.Keys(inst.Config)) {
+		// Incus writes volatile.* and image.* itself. Listing what the user
+		// cannot have set, and cannot act on, buries the ones they can.
+		if strings.HasPrefix(k, config.ReservedConfigPrefix) ||
+			strings.HasPrefix(k, "volatile.") || strings.HasPrefix(k, "image.") {
+			continue
+		}
+		if _, declared := desiredCfg[k]; !declared {
+			loose = append(loose, k)
+		}
+	}
+
+	desiredDev := desiredDevices(a.cfg, plan, a.instance)
+	for _, name := range slices.Sorted(maps.Keys(inst.Devices)) {
+		if _, declared := desiredDev[name]; !declared {
+			loose = append(loose, name+" (device)")
+		}
+	}
+
+	if len(loose) == 0 {
+		return
+	}
+	a.log.Warn(fmt.Sprintf(
+		"this instance predates idev's record of what it applied, so these are left "+
+			"alone and will not be followed: %s\n"+
+			"                idev cannot tell one an older dev.yml set from one you set "+
+			"by hand; remove any you no longer want, or 'idev rebuild' for a clean one",
+		strings.Join(loose, ", ")))
+}
+
 // warnChanges says what up cannot apply to an existing instance.
 func (a *App) warnChanges(inst *incus.Instance, eff checkoutEffect) {
 	a.warnDifferentCheckout(inst, eff)
@@ -988,7 +1175,7 @@ func (a *App) warnRestartNeeded(inst *incus.Instance, plan idmapPlan) {
 		return
 	}
 	desired := desiredConfig(a.cfg, plan, inst.Config, a.instance)
-	fresh, all := restartOwed(true, inst.Config, desired,
+	fresh, all, _ := restartOwed(true, inst.Config, desired,
 		staleConfigKeys(inst.Config, desired, plan), inst.LastUsedAt)
 	if len(all) == 0 {
 		return
@@ -1272,8 +1459,14 @@ func workspaceRow(r statusReport) string {
 
 // imageRow shows the image, and the declaration when it asks for another one.
 func imageRow(r statusReport) string {
-	if r.ImageDeclared == "" {
+	switch {
+	case r.ImageDeclared == "":
 		return r.Image
+	case r.Image == "":
+		// Made before idev recorded it. The declaration is all there is, and
+		// saying so is the difference between a fact and a guess.
+		return r.ImageDeclared + " (declared; this instance predates the record, " +
+			"so what it was made from is not recorded)"
 	}
 	return r.Image + " (dev.yml declares " + r.ImageDeclared + "; idev rebuild to recreate)"
 }

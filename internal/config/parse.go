@@ -186,6 +186,9 @@ func validateSchema(doc any, ps *problems) {
 	found := make([]Problem, 0, 8)
 	collectLeafProblems(verr, message.NewPrinter(language.English), &found, false)
 	sort.SliceStable(found, func(i, j int) bool { return found[i].Path < found[j].Path })
+	for i := range found {
+		explainRetiredField(&found[i])
+	}
 	*ps = append(*ps, found...)
 }
 
@@ -197,6 +200,22 @@ func validateSchema(doc any, ps *problems) {
 // reports for them belongs to something else entirely, so the leaf would be
 // filed at the root -- indistinguishable from a problem with the whole file.
 // The key itself is already quoted in the message.
+// retiredFields are fields idev used to accept, and what to say instead of
+// the schema's "additional properties not allowed" -- which never says that
+// deleting the line is the whole fix.
+var retiredFields = map[string]struct{ path, message string }{
+	"instance:additional properties 'type' not allowed": {
+		path:    "instance.type",
+		message: "idev manages containers only, so this is no longer accepted; remove the line",
+	},
+}
+
+func explainRetiredField(p *Problem) {
+	if r, ok := retiredFields[p.Path+":"+p.Message]; ok {
+		p.Path, p.Message = r.path, r.message
+	}
+}
+
 func collectLeafProblems(e *jsonschema.ValidationError, p *message.Printer, out *[]Problem, aboutAKey bool) {
 	if _, ok := e.ErrorKind.(*kind.PropertyNames); ok {
 		aboutAKey = true

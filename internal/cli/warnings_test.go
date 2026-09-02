@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -109,7 +110,7 @@ func TestReadyLineDoesNotSayIdevFailedToApply(t *testing.T) {
 func TestPlanReportsAPendingRestartOnce(t *testing.T) {
 	started := time.Now().Add(-time.Hour)
 	app, _, errOut := appFromAnotherCheckout(t, map[string]string{
-		managedRestartKey: recordRestart(started, []string{"security.nesting"}),
+		managedRestartKey: recordRestart(started, map[string]bootedValue{"security.nesting": {value: "false", known: true}}),
 	})
 
 	out := &bytes.Buffer{}
@@ -221,7 +222,7 @@ func TestHasVolumesIsFalseWithoutAnInstance(t *testing.T) {
 // not ask for a restart.
 func TestPlanSaysNothingAboutRestartingAStoppedInstance(t *testing.T) {
 	app, client, errOut := appFromAnotherCheckout(t, map[string]string{
-		managedRestartKey: recordRestart(time.Now().Add(-time.Hour), []string{"security.nesting"}),
+		managedRestartKey: recordRestart(time.Now().Add(-time.Hour), map[string]bootedValue{"security.nesting": {value: "false", known: true}}),
 	})
 	// appFromAnotherCheckout leaves it Running; stop it.
 	client.Instances["dev-example-project"].Status = "Stopped"
@@ -594,11 +595,11 @@ func TestStatusDeclaresTheWorkspaceSourceOnlyOnDrift(t *testing.T) {
 // disappears on the very next run.
 func TestRestartRecordKeepsSubSecondPrecision(t *testing.T) {
 	started := time.Date(2026, 9, 1, 12, 0, 0, 123456789, time.UTC)
-	record := recordRestart(started, []string{"raw.idmap"})
+	record := recordRestart(started, map[string]bootedValue{"raw.idmap": {value: "uid 1000 0", known: true}})
 
 	got := pendingRestart(map[string]string{managedRestartKey: record}, started)
 
-	if len(got) != 1 || got[0] != "raw.idmap" {
+	if b := got["raw.idmap"]; b.value != "uid 1000 0" || !b.known {
 		t.Errorf("pendingRestart() = %v, want the record still owed", got)
 	}
 }
@@ -959,5 +960,511 @@ func TestDestroyVolumesStopsOnAnUncheckableVolume(t *testing.T) {
 	err := app.Destroy(context.Background(), DestroyOptions{Volumes: true})
 	if err == nil || !strings.Contains(err.Error(), "dev-example-project-a") {
 		t.Errorf("error = %v, want the volume named", err)
+	}
+}
+
+// A restart-required value changed and then changed back needs no restart:
+// the running container already has what dev.yml now asks for.
+//
+// Comparing the stored config before and after reads the revert as a fresh
+// change, so the warning never goes away and 'idev up --restart' kills the
+// container to apply nothing.
+func TestRestartOwedClearsWhenAChangeIsReverted(t *testing.T) {
+	cfg := mustParse(t, rootYAML+
+		"  config:\n    security.nesting: \"true\"\nworkspace:\n  idmap: none\n")
+
+	client := incustest.New()
+	started := time.Now().Add(-time.Hour)
+	client.AddInstance(&incus.Instance{
+		Name:       "dev-example-project",
+		Status:     "Running",
+		Profiles:   []string{"default"},
+		LastUsedAt: started,
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedKeysKey:    "security.nesting",
+			// The declaration said false last run, so this is what is stored;
+			// the container booted with true.
+			"security.nesting": "false",
+			managedRestartKey:  recordRestart(started, map[string]bootedValue{"security.nesting": {value: "true", known: true}}),
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart") {
+		t.Errorf("output = %q, want no restart warning once the value is back", errOut.String())
+	}
+	if got := client.Instances["dev-example-project"].Config[managedRestartKey]; got != "" {
+		t.Errorf("%s = %q, want the record cleared", managedRestartKey, got)
+	}
+}
+
+// A change that is still a change keeps the record, and the record carries
+// what the container booted with.
+func TestRestartRecordCarriesTheBootedValue(t *testing.T) {
+	cfg := mustParse(t, rootYAML+
+		"  config:\n    security.nesting: \"true\"\nworkspace:\n  idmap: none\n")
+
+	client := incustest.New()
+	started := time.Now().Add(-time.Hour)
+	client.AddInstance(&incus.Instance{
+		Name:       "dev-example-project",
+		Status:     "Running",
+		Profiles:   []string{"default"},
+		LastUsedAt: started,
+		Config: map[string]string{
+			managedProjectKey:  "example-project",
+			"security.nesting": "false",
+		},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	got := client.Instances["dev-example-project"].Config[managedRestartKey]
+	if !strings.Contains(got, "security.nesting=false") {
+		t.Errorf("%s = %q, want it to record what the container booted with", managedRestartKey, got)
+	}
+}
+
+// Two snapshots in the same second are the "run it twice" case for the one
+// command whose default name comes from the clock.
+func TestSnapshotCollisionIsExplained(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+	client.FailOn = map[string]error{
+		"snapshot create": fmt.Errorf("create snapshot x: %w", incus.ErrSnapshotExists),
+	}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	// The clock explanation belongs only to the name idev chose itself.
+	err := app.CreateSnapshot(context.Background(), "")
+	if err == nil {
+		t.Fatal("CreateSnapshot() = nil error, want the collision reported")
+	}
+	for _, want := range []string{"already has a snapshot", "time to the second"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+	if !errors.Is(err, incus.ErrSnapshotExists) {
+		t.Errorf("error = %v, want it to stay matchable", err)
+	}
+
+	err = app.CreateSnapshot(context.Background(), "before-upgrade")
+	if err == nil {
+		t.Fatal("CreateSnapshot() = nil error, want the collision reported")
+	}
+	if strings.Contains(err.Error(), "time to the second") {
+		t.Errorf("error = %q, want no clock explanation for a name the user typed", err.Error())
+	}
+}
+
+// A record written before values were stored says a restart is owed and does
+// not say what the container booted with. Reading the missing value as ""
+// makes it match a key an earlier run unset, and the owed restart vanishes:
+// no warning, the record cleared, and 'idev up --restart' refusing to
+// restart. The container keeps running with the old idmap for good.
+func TestOldRestartRecordForAnUnsetKeyStaysOwed(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"workspace:\n  idmap: none\n")
+
+	started := time.Now().Add(-time.Hour)
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:       "dev-example-project",
+		Status:     "Running",
+		Profiles:   []string{"default"},
+		LastUsedAt: started,
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			// What an older idev wrote: the key, no value. It unset
+			// raw.idmap in the same run, so the config no longer has it.
+			managedRestartKey: started.Format(time.RFC3339Nano) + "|raw.idmap",
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "raw.idmap") {
+		t.Errorf("output = %q, want the owed restart still reported", errOut.String())
+	}
+	if got := client.Instances["dev-example-project"].Config[managedRestartKey]; got == "" {
+		t.Error("the record was cleared, so nothing will report it again")
+	}
+}
+
+// And --restart actually restarts for it.
+func TestOldRestartRecordForAnUnsetKeyRestarts(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"workspace:\n  idmap: none\n")
+
+	started := time.Now().Add(-time.Hour)
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:       "dev-example-project",
+		Status:     "Running",
+		Profiles:   []string{"default"},
+		LastUsedAt: started,
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedRestartKey: started.Format(time.RFC3339Nano) + "|raw.idmap",
+		},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{Restart: true}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !slices.Contains(client.Calls, "stop dev-example-project") {
+		t.Errorf("calls = %v, want the instance restarted", client.Calls)
+	}
+}
+
+// An unknown booted value stays unknown when the record is rewritten:
+// inventing one would let the next run decide the restart is no longer owed.
+func TestUnknownBootedValueSurvivesRewriting(t *testing.T) {
+	record := recordRestart(time.Time{}, map[string]bootedValue{
+		"raw.idmap":        {known: false},
+		"security.nesting": {value: "true", known: true},
+	})
+
+	got := pendingRestart(map[string]string{managedRestartKey: record}, time.Time{})
+
+	if b := got["raw.idmap"]; b.known {
+		t.Errorf("raw.idmap = %+v, want it still unknown", b)
+	}
+	if b := got["security.nesting"]; !b.known || b.value != "true" {
+		t.Errorf("security.nesting = %+v, want the value kept", b)
+	}
+}
+
+// The rules that derive an instance name have changed, so an upgraded
+// checkout can stop finding its own environment. Creating a second, empty one
+// beside it -- with the provisioned one still running, unreachable by every
+// idev command, and its volumes unnameable -- must not happen silently.
+func TestUpNamesAnInstanceItCanNoLongerDerive(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project-feature-a-very-long-branch-name",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedRootKey:    cfg.Root,
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	got := errOut.String()
+	if !strings.Contains(got, "dev-example-project-feature-a-very-long-branch-name") {
+		t.Errorf("output = %q, want the stranded instance named", got)
+	}
+}
+
+// The same for one an older idev made under the previous marker prefix: idev
+// will not adopt it, so the user has to be told it is there.
+func TestUpNamesAnInstanceFromAnOlderMarkerPrefix(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project-old",
+		Status: "Running",
+		Config: map[string]string{
+			"user.incus-devkit.project": "example-project",
+			"user.incus-devkit.root":    cfg.Root,
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "dev-example-project-old") {
+		t.Errorf("output = %q, want the older instance named", errOut.String())
+	}
+}
+
+// The raw.idmap idev writes changed spelling; the mapping did not. Demanding
+// a restart to apply what the kernel is already doing costs every upgrader
+// whatever they had running inside the container.
+func TestUpDoesNotRestartForARespelledIDMap(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"workspace:\n  idmap: raw\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:       "dev-example-project",
+		Status:     "Running",
+		Profiles:   []string{"default"},
+		LastUsedAt: time.Now().Add(-time.Hour),
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			// What an older idev wrote for the same mapping.
+			idmapConfigKey: "both 1000 0",
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut,
+		Host:       &HostIDs{UID: 1000, GID: 1000},
+		CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "restart") {
+		t.Errorf("output = %q, want no restart for the same mapping respelled", errOut.String())
+	}
+}
+
+// The look for a stranded instance is advisory: a failure must not stop up,
+// and another checkout of the same project is not stranded.
+func TestStrandedLookIsAdvisoryAndScopeAware(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	t.Run("a failure does not stop up", func(t *testing.T) {
+		client := incustest.New()
+		client.FailOn = map[string]error{"instances": errBoom}
+
+		app := NewApp(AppOptions{
+			Config: cfg, Client: client, Runner: &runnertest.Fake{},
+			Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+		})
+		if err := app.Up(context.Background(), UpOptions{}); err != nil {
+			t.Errorf("Up() error = %v, want the look to be advisory", err)
+		}
+	})
+
+	t.Run("another checkout is not stranded", func(t *testing.T) {
+		client := incustest.New()
+		client.AddInstance(&incus.Instance{
+			Name:   "dev-example-project-other",
+			Status: "Running",
+			Config: map[string]string{
+				managedProjectKey: "example-project",
+				managedRootKey:    "/home/u/another-checkout",
+			},
+		})
+		// Nor is somebody else's project.
+		client.AddInstance(&incus.Instance{
+			Name:   "dev-unrelated",
+			Status: "Running",
+			Config: map[string]string{managedProjectKey: "unrelated"},
+		})
+
+		errOut := &bytes.Buffer{}
+		app := NewApp(AppOptions{
+			Config: cfg, Client: client, Runner: &runnertest.Fake{},
+			Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+		})
+		if err := app.Up(context.Background(), UpOptions{}); err != nil {
+			t.Fatalf("Up() error = %v", err)
+		}
+		for _, unwanted := range []string{"dev-example-project-other", "dev-unrelated"} {
+			if strings.Contains(errOut.String(), unwanted) {
+				t.Errorf("output = %q, want %q left alone", errOut.String(), unwanted)
+			}
+		}
+	})
+
+	// The instance being created cannot be its own stranded predecessor, even
+	// if it appears in the listing between the lookup and the list.
+	t.Run("the instance itself is skipped", func(t *testing.T) {
+		client := incustest.New()
+		client.AddInstance(&incus.Instance{
+			Name:   "dev-example-project",
+			Status: "Running",
+			Config: map[string]string{managedProjectKey: "example-project"},
+		})
+
+		errOut := &bytes.Buffer{}
+		app := NewApp(AppOptions{
+			Config: cfg, Client: client, Runner: &runnertest.Fake{},
+			Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+		})
+		app.warnStrandedInstances(context.Background())
+
+		if errOut.String() != "" {
+			t.Errorf("output = %q, want nothing said about the instance itself", errOut.String())
+		}
+	})
+}
+
+// An instance made before the volume record still has its volumes attached as
+// disk devices, so 'destroy --volumes' can find them there. Falling back to
+// the declaration alone means the flag silently deletes nothing for exactly
+// the volumes the user can no longer name.
+func TestDestroyVolumesFindsThemOnAnInstanceWithNoRecord(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.Volumes["default/dev-example-project-data"] = true
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		// No user.incus-dev.volumes: this instance predates it.
+		Config: map[string]string{managedProjectKey: "example-project"},
+		Devices: map[string]incus.Device{
+			"data": {"type": "disk", "pool": "default",
+				"source": "dev-example-project-data", "path": "/data"},
+			"workspace": {"type": "disk", "source": "/home/u/src/example", "path": "/workspace"},
+		},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Destroy(context.Background(), DestroyOptions{Volumes: true}); err != nil {
+		t.Fatalf("Destroy() error = %v", err)
+	}
+	if !slices.Contains(client.Calls, "volume delete default dev-example-project-data") {
+		t.Errorf("calls = %v, want the volume deleted", client.Calls)
+	}
+	// The workspace is a host path, not a volume.
+	for _, c := range client.Calls {
+		if strings.HasPrefix(c, "volume delete") && strings.Contains(c, "workspace") {
+			t.Errorf("calls = %v, want the workspace bind mount left alone", client.Calls)
+		}
+	}
+}
+
+// status must not present the declared image as the one the instance was made
+// from when it has no record of it.
+func TestStatusDoesNotInventTheImageOfAnOlderInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+
+	out := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Status(context.Background(), false); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "not recorded") {
+		t.Errorf("status =\n%s\nwant the image row to say it is not recorded", out.String())
+	}
+}
+
+// An instance from before idev recorded what it applied cannot have its old
+// config and devices told apart from ones set by hand, so idev leaves them.
+// The first up is the last moment anything can say so: it writes the records,
+// and from then on those settings are outside them for good.
+func TestUpNamesWhatItCannotManageOnAnOlderInstance(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"  config:\n    limits.memory: 2GiB\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:     "dev-example-project",
+		Status:   "Running",
+		Profiles: []string{"default"},
+		// No user.incus-dev.managed or .devices: this instance predates them.
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			"limits.memory":   "1GiB", // declared, so idev takes it over
+			"limits.cpu":      "2",    // not declared: from an older dev.yml, or by hand
+			// Incus's own, which the user did not set and cannot act on.
+			"image.os":            "Alpine",
+			"volatile.base_image": "abc123",
+		},
+		Devices: map[string]incus.Device{
+			"workspace": {"type": "disk", "source": "/home/u/src/example", "path": "/workspace"},
+			"extradisk": {"type": "disk", "source": "/srv/x", "path": "/x"},
+		},
+	})
+
+	errOut := &bytes.Buffer{}
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+
+	got := errOut.String()
+	for _, want := range []string{"limits.cpu", "extradisk"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output = %q, want it to name %q", got, want)
+		}
+	}
+	// Declared things are managed from now on, so they are not in the list.
+	if strings.Contains(got, "limits.memory") {
+		t.Errorf("output = %q, want the declared key left out", got)
+	}
+	for _, unwanted := range []string{"image.os", "volatile."} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("output = %q, want %q left out; Incus set it", got, unwanted)
+		}
+	}
+	// And it is said once: the next run has the records.
+	errOut.Reset()
+	if err := app.Up(context.Background(), UpOptions{}); err != nil {
+		t.Fatalf("Up() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "limits.cpu") {
+		t.Errorf("second run = %q, want it said only while it could be", errOut.String())
 	}
 }

@@ -285,3 +285,33 @@ func TestDiscoverKeepsLookingPastAConfigOfTheWrongKind(t *testing.T) {
 		t.Errorf("Root = %q, want %q", got.Root, root)
 	}
 }
+
+// The project above is used, and the nearer dev.yml that could not be is
+// reported, so a run from that directory is not silently redirected.
+func TestDiscoverReportsTheConfigItSkipped(t *testing.T) {
+	root := t.TempDir()
+	mkProject(t, root)
+
+	sub := filepath.Join(root, "sub")
+	shadow := filepath.Join(sub, ".incus-dev", "dev.yml")
+	if err := os.MkdirAll(shadow, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := project.Discover(sub)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if got.Shadowed != shadow {
+		t.Errorf("Shadowed = %q, want %q", got.Shadowed, shadow)
+	}
+
+	// Nothing was skipped in the ordinary case.
+	plain, err := project.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Shadowed != "" {
+		t.Errorf("Shadowed = %q, want it empty", plain.Shadowed)
+	}
+}

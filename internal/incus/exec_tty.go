@@ -96,7 +96,22 @@ type control struct {
 // run (spec 05-incus.md 5.7.3).
 func (c control) forwardInterrupt(send func(any) error) {
 	_ = send(signalMessage(syscall.SIGTERM))
-	if c.sent != nil {
+	c.finish()
+}
+
+// finish releases whoever is waiting for the signal to go out.
+//
+// Every exit from handle goes through it: retiring on a failed send without
+// closing sent leaves the caller waiting out the whole grace period for a
+// signal nothing will ever send.
+func (c control) finish() {
+	if c.sent == nil {
+		return
+	}
+	select {
+	case <-c.sent:
+		// Already closed by forwardInterrupt.
+	default:
 		close(c.sent)
 	}
 }
@@ -122,6 +137,8 @@ func controlHandler(c control) func(*websocket.Conn) {
 // or a dropped signal, whereas treating a failure here as a failure of the
 // run itself would destroy the user's work.
 func (c control) handle(send func(any) error) {
+	defer c.finish()
+
 	for {
 		select {
 		case <-c.done:

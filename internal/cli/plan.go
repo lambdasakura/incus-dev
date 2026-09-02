@@ -311,9 +311,24 @@ func stepsAt(steps []config.Step, indices []int) []config.Step {
 // recordedVolumes returns the volumes to consider idev's, newest record first
 // and falling back to the declaration for an instance made before the record
 // existed.
-func recordedVolumes(instanceConfig map[string]string, cfg *config.Config, instance string) []string {
-	if recorded, ok := instanceConfig[managedVolumesKey]; ok {
+func recordedVolumes(inst *incus.Instance, cfg *config.Config, instance string) []string {
+	if recorded, ok := inst.Config[managedVolumesKey]; ok {
 		return splitList(recorded)
 	}
-	return declaredVolumes(cfg, instance)
+
+	// No record: the instance predates it. Its volumes are still attached as
+	// disk devices, and that is the only place left that names them -- the
+	// declaration alone would miss exactly the ones the user can no longer
+	// reach any other way.
+	out := declaredVolumes(cfg, instance)
+	for _, name := range slices.Sorted(maps.Keys(inst.Devices)) {
+		dev := inst.Devices[name]
+		if !isVolumeSource(dev) || dev["source"] == "" {
+			continue
+		}
+		if ref := dev["pool"] + "/" + dev["source"]; !slices.Contains(out, ref) {
+			out = append(out, ref)
+		}
+	}
+	return out
 }

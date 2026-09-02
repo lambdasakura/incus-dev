@@ -270,6 +270,35 @@ declares, and is omitted when it declares none.
 
 ---
 
+### Instances made by an older idev
+
+An instance created before a change to how idev names or marks them is not
+adopted: `idev up` builds a new one beside it and says so, naming the old one
+and the `incus delete` that removes it.
+
+Nothing migrates the old one, because most of what idev would need was never
+recorded on it. What that costs, concretely:
+
+| Missing record | What idev cannot do |
+| --- | --- |
+| `user.incus-dev.image` | say what the instance was made from; `status` says so rather than guessing |
+| `user.incus-dev.managed` | follow a config key you have since removed from `dev.yml` |
+| `user.incus-dev.devices` | remove a device you have since removed from `dev.yml` |
+
+The first `idev up` on such an instance names the config keys and devices it
+will not be able to follow, since it is the last run that can: writing the
+records puts everything outside them beyond reach. idev cannot tell one an
+older `dev.yml` set from one you set by hand, so it removes neither.
+
+Persistent volumes are the exception: they are still attached as disk devices,
+so `idev destroy --volumes` finds and deletes them even without the record.
+
+**Recreating is the reliable path.** Take anything you need out of the old
+instance, `incus delete` it, and run `idev up`. The workspace is a bind mount,
+so your source tree is not involved.
+
+---
+
 ## 3.7 `idev destroy`
 
 Deletes the instance.

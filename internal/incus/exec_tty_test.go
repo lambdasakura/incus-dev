@@ -517,3 +517,40 @@ func TestAPIExecTermCanBeOverridden(t *testing.T) {
 		t.Errorf("TERM = %q, want the explicit setting to win", got)
 	}
 }
+
+// A resize that fails retires the handler, so nothing will forward an
+// interruption afterwards. Leaving sent open on the way out makes the caller
+// wait out the whole grace period for a signal that will never be sent.
+func TestControlHandlerClosesSentWhenItRetires(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resized := make(chan struct{}, 1)
+	resized <- struct{}{}
+
+	c := control{
+		ctx:     ctx,
+		done:    make(chan struct{}),
+		sent:    make(chan struct{}),
+		resized: resized,
+		console: newFakeConsole(),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.handle(func(any) error { return errors.New("socket gone") })
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handle() never returned")
+	}
+
+	select {
+	case <-c.sent:
+	case <-time.After(time.Second):
+		t.Error("sent was left open, so the caller waits out the grace period for nothing")
+	}
+}

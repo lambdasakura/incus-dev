@@ -68,31 +68,43 @@ func validateRuntime(c *Config, ps *problems) {
 	if c.Runtime == nil || c.Runtime.Version == "" {
 		return
 	}
-	ok, err := runtimeCompatible(c.Runtime.Version, RuntimeVersion)
+	ok, older, err := runtimeCompatible(c.Runtime.Version, RuntimeVersion)
 	switch {
 	case err != nil:
 		ps.add("runtime.version", "%v", err)
+	case !ok && older:
+		// Which side is behind, since a pin below what idev provides is
+		// refused too and "this idev provides 1.0" reads as idev being old.
+		ps.add("runtime.version",
+			"%s is older than this idev, which provides %s; "+
+				"raise the pin, or keep using the idev it was written for",
+			c.Runtime.Version, RuntimeVersion)
 	case !ok:
 		ps.add("runtime.version",
-			"requires runtime %s but this idev provides %s", c.Runtime.Version, RuntimeVersion)
+			"%s needs a newer idev than this one, which provides %s",
+			c.Runtime.Version, RuntimeVersion)
 	}
 }
 
 // runtimeCompatible reports whether current satisfies required: the majors
 // must match, and required's minor must not exceed current's.
-func runtimeCompatible(required, current string) (bool, error) {
+// runtimeCompatible reports whether idev can honour the pinned version, and
+// when it cannot, whether the pin is behind idev rather than ahead of it.
+func runtimeCompatible(required, current string) (ok, older bool, err error) {
 	rMajor, rMinor, err := parseVersion(required)
 	if err != nil {
-		return false, fmt.Errorf("invalid version %q: %w", required, err)
+		return false, false, fmt.Errorf("invalid version %q: %w", required, err)
 	}
 	cMajor, cMinor, err := parseVersion(current)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
+
+	older = rMajor < cMajor || (rMajor == cMajor && rMinor < cMinor)
 	if rMajor != cMajor {
-		return false, nil
+		return false, older, nil
 	}
-	return rMinor <= cMinor, nil
+	return rMinor <= cMinor, older, nil
 }
 
 func parseVersion(v string) (major, minor int, err error) {
