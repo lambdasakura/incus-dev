@@ -7,10 +7,35 @@
 
 ### `instance <name> does not exist; run 'idev up' first`
 
-`provision` / `shell` / `exec` / `destroy` / `rebuild` / `snapshot` を、
+`provision` / `shell` / `exec` / `rebuild` / `snapshot` を、
 環境を作る前に呼んでいる。`idev up` を先に実行する。
 暗黙に作りにいくことはない（意図しない構築を避けるため）。
 （`idev status` は例外で、`NOT CREATED` を表示して正常終了する。）
+
+### `instance <name> does not exist; nothing was deleted`
+
+既に無い環境に対して `idev destroy` を実行している。
+実際に削除した場合と区別できるよう終了コードは1になる。
+このメッセージが言っていないことに注意する。永続volumeはinstanceより長く残るため、
+`--volumes` を付けていた場合は `incus storage volume list <pool>` で確認する。
+
+### `... nothing names these again: <pool>/<volume>`
+
+instanceが既に消えた後で `destroy` / `rebuild` が失敗した場合に出る。
+多くはCtrl-Cで、待機を中断してもdaemon側の削除は止まらないため起きる。
+どのvolumeがidevのものかという記録はinstance上にあるので、
+`dev.yml` から外れていたvolumeを指すものが何も残らない。
+このメッセージが、その名前が現れる最後の場所である。
+後で `idev up` に拾わせるなら `dev.yml` に書き戻し、
+不要なら表示されたコマンドで削除する。
+`dev.yml` に宣言されたままのvolumeは、次の `idev up` が名前で拾うため列挙しない。
+
+### `no answer on standard input; pass --force to proceed without asking`
+
+破壊操作の確認を行うコマンドを、標準入力が無い状態で実行している
+（CI、hook、stdinのリダイレクトなど）。これは拒否ではなく、
+答える相手がいなかったという意味である。`--force` で確認を省略するか、
+標準入力から答えを渡す（`printf y | idev destroy`）。
 
 ### `instance <name> exists but is not managed by idev for project "<name>"`
 

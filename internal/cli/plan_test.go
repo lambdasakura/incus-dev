@@ -318,6 +318,36 @@ func TestInstanceNameScopeBranchError(t *testing.T) {
 
 // Reading the branch name works in a repository with no commits, and on a
 // detached HEAD.
+// The reason git failed is the whole diagnosis: not installed, not a
+// repository and exited non-zero send the user to three different places.
+func TestGitBranchWithNothingToReport(t *testing.T) {
+	// Both commands succeed and print nothing: there is no git failure to
+	// pass on, so the message must not pretend to have one.
+	fake := &runnertest.Fake{Stdout: map[string]string{"git -C /r": "\n"}}
+
+	_, err := gitBranch(context.Background(), fake, "/r")()
+	if err == nil {
+		t.Fatal("gitBranch() = nil error, want one")
+	}
+	if want := "could not determine the git branch of /r"; err.Error() != want {
+		t.Errorf("gitBranch() error = %q, want %q", err, want)
+	}
+}
+
+func TestGitBranchSaysWhyItFailed(t *testing.T) {
+	fake := &runnertest.Fake{Err: map[string]error{
+		"git -C /r": errors.New("exec: \"git\": executable file not found in $PATH"),
+	}}
+
+	_, err := gitBranch(context.Background(), fake, "/r")()
+	if err == nil {
+		t.Fatal("gitBranch() = nil error, want one")
+	}
+	if !strings.Contains(err.Error(), "executable file not found") {
+		t.Errorf("gitBranch() error = %q, want the reason git failed", err)
+	}
+}
+
 func TestGitBranch(t *testing.T) {
 	tests := []struct {
 		name    string

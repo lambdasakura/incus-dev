@@ -315,3 +315,59 @@ func TestDiscoverReportsTheConfigItSkipped(t *testing.T) {
 		t.Errorf("Shadowed = %q, want it empty", plain.Shadowed)
 	}
 }
+
+// Stat follows a symbolic link, so a link to nothing looks exactly like no
+// file at all -- and the user is told to create a dev.yml that ls shows them.
+func TestDanglingConfigSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, project.ConfigDir), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, project.ConfigDir, project.ConfigFile)
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := project.Discover(dir)
+	if err == nil {
+		t.Fatal("Discover() = nil error, want one")
+	}
+	if strings.Contains(err.Error(), "is missing") {
+		t.Errorf("Discover() = %q, want it to say the link does not resolve, "+
+			"not that a file the user can see is missing", err)
+	}
+	if !strings.Contains(err.Error(), "link") {
+		t.Errorf("Discover() = %q, want it to name the symbolic link", err)
+	}
+}
+
+// The CLI warns about a nearer dev.yml it skipped, and has one wording for
+// it. Discover knows which of the two reasons applies; if only the path
+// travels, the warning says "is not a regular file" about a dangling link.
+func TestShadowedCarriesTheReason(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{"", "child"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub, project.ConfigDir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, project.ConfigDir, project.ConfigFile),
+		[]byte("schema: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "child", project.ConfigDir, project.ConfigFile)
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := project.Discover(filepath.Join(dir, "child"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Shadowed == "" {
+		t.Fatal("Shadowed is empty, want the link that was skipped")
+	}
+	if !strings.Contains(p.ShadowedWhy, "link") {
+		t.Errorf("ShadowedWhy = %q, want it to say the link does not resolve", p.ShadowedWhy)
+	}
+}

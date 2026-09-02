@@ -341,6 +341,24 @@ func TestBuildGatesHold(t *testing.T) {
 		})
 	}
 
+	// The three shapes GitHub allows, so a rewrite that changes nothing about
+	// when CI runs cannot take the trigger check out with an unmarshal error.
+	t.Run("the trigger shapes all read", func(t *testing.T) {
+		for _, body := range []string{
+			"on:\n  push:\n    branches: [main]\n  pull_request:\njobs: {}\n",
+			"on: [push, pull_request]\njobs: {}\n",
+			"on: push\njobs: {}\n",
+		} {
+			var wf workflow
+			if err := yaml.Unmarshal([]byte(body), &wf); err != nil {
+				t.Fatalf("%q: %v", body, err)
+			}
+			if _, ok := wf.OnAsBoolean["push"]; !ok {
+				t.Errorf("%q gave triggers %v, want push among them", body, wf.OnAsBoolean)
+			}
+		}
+	})
+
 	t.Run("CI is triggered at all", func(t *testing.T) {
 		// Every other check here asks what CI runs. None of them asks whether
 		// CI runs: reducing on: to workflow_dispatch leaves them all green
@@ -406,8 +424,8 @@ type workflow struct {
 	// YAML 1.1 reads a bare `on` as the boolean true, so the trigger block
 	// arrives under the key "true". Reading it under "on" finds nothing and
 	// says so about no workflow ever written, so both are taken.
-	On          map[string]any `json:"on"`
-	OnAsBoolean map[string]any `json:"true"`
+	On          triggers `json:"on"`
+	OnAsBoolean triggers `json:"true"`
 }
 
 // enforced reports whether a step or job still fails the workflow when its
@@ -427,14 +445,18 @@ func enforced(cond, continueOnError json.RawMessage) bool {
 		return false
 	}
 	switch strings.TrimSpace(string(continueOnError)) {
-	case "", "false", `"false"`:
+	case "", "false":
 		return true
 	}
+	// Anything else, including the string "false". GitHub casts a non-empty
+	// string to true, so a quoted "false" tolerates the failure -- and
+	// guessing which spellings are falsy is the mistake that let
+	// `if: ${{ false }}` through. A workflow writing this fails the test.
 	return false
 }
 
 // workflowTriggers returns the events a workflow runs on.
-func workflowTriggers(t *testing.T, path string) map[string]any {
+func workflowTriggers(t *testing.T, path string) triggers {
 	t.Helper()
 
 	var wf workflow
@@ -449,6 +471,31 @@ func workflowTriggers(t *testing.T, path string) map[string]any {
 		t.Fatalf("%s states no triggers, so nothing in it runs", path)
 	}
 	return on
+}
+
+// triggers accepts the three shapes GitHub allows for on:: a mapping of
+// event to filters, a list of events, or one event on its own.
+type triggers map[string]any
+
+func (t *triggers) UnmarshalJSON(b []byte) error {
+	var mapping map[string]any
+	if err := json.Unmarshal(b, &mapping); err == nil {
+		*t = mapping
+		return nil
+	}
+	var events []string
+	if err := json.Unmarshal(b, &events); err != nil {
+		var one string
+		if err := json.Unmarshal(b, &one); err != nil {
+			return err
+		}
+		events = []string{one}
+	}
+	*t = triggers{}
+	for _, event := range events {
+		(*t)[event] = nil
+	}
+	return nil
 }
 
 // stringOrList accepts either shape a workflow may use.
@@ -819,7 +866,7 @@ func TestEnforced(t *testing.T) {
 	}{
 		{"nothing set", "", "", true},
 		{"failure fatal, said out loud", "", "false", true},
-		{"failure fatal, as a string", "", `"false"`, true},
+		{"failure fatal, as a string", "", `"false"`, false},
 		{"failure allowed", "", "true", false},
 		{"failure allowed, as a string", "", `"true"`, false},
 		{"failure allowed by an expression", "", `"${{ github.event_name }}"`, false},

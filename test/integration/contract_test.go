@@ -21,7 +21,7 @@ import (
 func TestIncusMeetsTheClientContract(t *testing.T) {
 	requireIncus(t)
 
-	client, err := incus.Connect(incus.Target{Project: "default"})
+	client, err := incus.Connect(context.Background(), incus.Target{Project: "default"})
 	if err != nil {
 		t.Fatalf("connect to Incus: %v", err)
 	}

@@ -45,17 +45,28 @@ func instanceNameFor(cfg *config.Config, branch branchFunc) (string, error) {
 // fails on a detached HEAD, where the commit's short hash is used instead.
 func gitBranch(ctx context.Context, r runner.Runner, root string) branchFunc {
 	return func() (string, error) {
+		// The first failure, kept: git not being installed, the directory not
+		// being a repository and git exiting non-zero send the user to three
+		// different places, and every command that names the instance is dead
+		// until they know which one it is.
+		var why error
 		for _, args := range [][]string{
 			{"-C", root, "symbolic-ref", "--short", "HEAD"},
 			{"-C", root, "rev-parse", "--short", "HEAD"},
 		} {
 			res, err := r.Run(ctx, runner.Command{Name: "git", Args: args})
 			if err != nil {
+				if why == nil {
+					why = err
+				}
 				continue
 			}
 			if name := strings.TrimSpace(string(res.Stdout)); name != "" {
 				return name, nil
 			}
+		}
+		if why != nil {
+			return "", fmt.Errorf("could not determine the git branch of %s: %w", root, why)
 		}
 		return "", fmt.Errorf("could not determine the git branch of %s", root)
 	}

@@ -44,7 +44,7 @@ func checkSnapshotName(name string) error {
 // CreateSnapshot takes a snapshot of the instance, naming it after the current
 // time when no name was given.
 func (a *App) CreateSnapshot(ctx context.Context, name string) error {
-	if _, err := a.managedInstance(ctx, sharedEnvironment); err != nil {
+	if _, err := a.managedInstance(ctx, sharedEnvironment, adviseUp); err != nil {
 		return err
 	}
 	generated := name == ""
@@ -76,7 +76,7 @@ func (a *App) CreateSnapshot(ctx context.Context, name string) error {
 
 // ListSnapshots prints the snapshots.
 func (a *App) ListSnapshots(ctx context.Context) error {
-	if _, err := a.managedInstance(ctx, sharedEnvironment); err != nil {
+	if _, err := a.managedInstance(ctx, sharedEnvironment, adviseUp); err != nil {
 		return err
 	}
 
@@ -105,7 +105,7 @@ func (a *App) ListSnapshots(ctx context.Context) error {
 //
 // Its current state is lost. The workspace on the host is unaffected.
 func (a *App) RestoreSnapshot(ctx context.Context, name string) error {
-	if _, err := a.managedInstance(ctx, sharedEnvironment); err != nil {
+	if _, err := a.managedInstance(ctx, sharedEnvironment, adviseUp); err != nil {
 		return err
 	}
 
@@ -120,7 +120,7 @@ func (a *App) RestoreSnapshot(ctx context.Context, name string) error {
 
 // DeleteSnapshot deletes a snapshot.
 func (a *App) DeleteSnapshot(ctx context.Context, name string) error {
-	if _, err := a.managedInstance(ctx, sharedEnvironment); err != nil {
+	if _, err := a.managedInstance(ctx, sharedEnvironment, adviseUp); err != nil {
 		return err
 	}
 	if err := a.client.DeleteSnapshot(ctx, a.instance, name); err != nil {

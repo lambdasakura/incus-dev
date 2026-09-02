@@ -906,9 +906,14 @@ func TestUpDropsARecordOnAMissingPool(t *testing.T) {
 	}
 }
 
-// The preview shows a volume on a pool that is gone as one that would be
-// created; up is what reports the pool, and says so plainly.
-func TestPlanToleratesAMissingPool(t *testing.T) {
+// A pool that is gone stops the preview, rather than showing the volume as
+// one that would be created.
+//
+// This used to go the other way, on the grounds that up reports the pool
+// itself. But spec 04-cli.md 4.7 is why validate has no --check-host flag:
+// this command is the host-side check, so a plan it prints has to be a plan
+// that can run.
+func TestPlanReportsAMissingPool(t *testing.T) {
 	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n    pool: oldpool\n")
 
 	client := incustest.New()
@@ -928,11 +933,12 @@ func TestPlanToleratesAMissingPool(t *testing.T) {
 		Out: out, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	if err := app.Plan(context.Background()); err != nil {
-		t.Fatalf("Plan() error = %v", err)
+	err := app.Plan(context.Background())
+	if !errors.Is(err, incus.ErrPoolNotFound) {
+		t.Fatalf("Plan() error = %v, want ErrPoolNotFound", err)
 	}
-	if !strings.Contains(out.String(), "Create volume") {
-		t.Errorf("plan =\n%s\nwant the volume shown as one to create", out.String())
+	if strings.Contains(out.String(), "Create volume") {
+		t.Errorf("plan =\n%s\nwant no plan printed for a pool that is not there", out.String())
 	}
 }
 

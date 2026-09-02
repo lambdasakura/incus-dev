@@ -55,6 +55,13 @@ func (a *App) Plan(ctx context.Context) error {
 		a.pruneVolumeRecord(ctx, current)
 		a.warnChanges(current, wouldRemountHere)
 		a.warnRestartNeeded(current, plan)
+	} else if err := a.client.CheckImage(ctx, a.cfg.Instance.Image); err != nil {
+		// Only when the instance would be created, because that is the only
+		// time up fetches an image. The reference is resolved against a
+		// remote, so this is the one check nothing offline can make -- and
+		// the image is the likeliest thing in dev.yml to be mistyped
+		// (spec 04-cli.md 4.7).
+		return err
 	}
 
 	existing, err := a.existingVolumes(ctx)
@@ -120,12 +127,11 @@ func (a *App) existingVolumes(ctx context.Context) (map[string]bool, error) {
 		vol := a.cfg.Volumes[key]
 		pool, name := vol.PoolOrDefault(), volumeName(a.instance, key)
 
+		// A pool that is not there stops up on its first volume, so the
+		// preflight stops here too. Reporting the volume as one that would be
+		// created and exiting 0 is the false green light spec 04-cli.md 4.7
+		// leans on this command not to give.
 		exists, err := a.client.VolumeExists(ctx, pool, name)
-		if errors.Is(err, incus.ErrPoolNotFound) {
-			// up would fail on this, and says so itself; the preview reports
-			// the volume as one that would be created rather than stopping.
-			exists, err = false, nil
-		}
 		if err != nil {
 			return nil, err
 		}

@@ -34,12 +34,12 @@ var errNoIncus = errors.New("connect to the local incus")
 
 // stub is an appFactory handing out an App the test prepared.
 func stub(app *App) appFactory {
-	return func(*globalFlags) (*App, error) { return app, nil }
+	return func(context.Context, *globalFlags) (*App, error) { return app, nil }
 }
 
 // failing is an appFactory that cannot build an App.
 func failing(err error) appFactory {
-	return func(*globalFlags) (*App, error) { return nil, err }
+	return func(context.Context, *globalFlags) (*App, error) { return nil, err }
 }
 
 // testProject creates a temporary directory holding a dev.yml.
@@ -281,7 +281,7 @@ func noIncus(t *testing.T) {
 func TestNewAppDiscoversProject(t *testing.T) {
 	root := testProject(t, rootYAML)
 
-	app, err := newOfflineApp(&globalFlags{directory: root, incusProject: "default"})
+	app, err := newOfflineApp(context.Background(), &globalFlags{directory: root, incusProject: "default"})
 	if err != nil {
 		t.Fatalf("newOfflineApp() error = %v", err)
 	}
@@ -293,7 +293,7 @@ func TestNewAppDiscoversProject(t *testing.T) {
 func TestNewAppUsesWorkingDirectoryByDefault(t *testing.T) {
 	t.Chdir(testProject(t, rootYAML))
 
-	if _, err := newOfflineApp(&globalFlags{}); err != nil {
+	if _, err := newOfflineApp(context.Background(), &globalFlags{}); err != nil {
 		t.Errorf("newOfflineApp() error = %v", err)
 	}
 }
@@ -305,7 +305,7 @@ func TestNewOfflineAppDoesNotConnect(t *testing.T) {
 
 	noIncus(t)
 
-	if _, err := newOfflineApp(&globalFlags{directory: root}); err != nil {
+	if _, err := newOfflineApp(context.Background(), &globalFlags{directory: root}); err != nil {
 		t.Errorf("newOfflineApp() error = %v, want no attempt to connect", err)
 	}
 }
@@ -316,7 +316,7 @@ func TestNewAppConnects(t *testing.T) {
 
 	noIncus(t)
 
-	_, err := newApp(&globalFlags{directory: root})
+	_, err := newApp(context.Background(), &globalFlags{directory: root})
 	if err == nil || !strings.Contains(err.Error(), "incus") {
 		t.Errorf("error = %v, want the unreachable daemon reported", err)
 	}
@@ -338,7 +338,7 @@ instance:
   image: images:ubuntu/24.04
 `)
 
-	app, err := newOfflineApp(&globalFlags{directory: root})
+	app, err := newOfflineApp(context.Background(), &globalFlags{directory: root})
 	if err != nil {
 		t.Fatalf("newOfflineApp() error = %v", err)
 	}
@@ -347,21 +347,21 @@ instance:
 	}
 
 	noIncus(t)
-	if _, err := newApp(&globalFlags{directory: root}); err == nil {
+	if _, err := newApp(context.Background(), &globalFlags{directory: root}); err == nil {
 		t.Error("newApp() = nil error, want the commands that need the instance to fail")
 	}
 }
 
 func TestNewAppErrors(t *testing.T) {
 	t.Run("no project", func(t *testing.T) {
-		if _, err := newOfflineApp(&globalFlags{directory: t.TempDir()}); err == nil {
+		if _, err := newOfflineApp(context.Background(), &globalFlags{directory: t.TempDir()}); err == nil {
 			t.Error("error = nil, want error")
 		}
 	})
 
 	t.Run("invalid configuration", func(t *testing.T) {
 		root := testProject(t, "schema: 1\nfeatures: {}\n")
-		_, err := newOfflineApp(&globalFlags{directory: root})
+		_, err := newOfflineApp(context.Background(), &globalFlags{directory: root})
 		if err == nil || !strings.Contains(err.Error(), "features") {
 			t.Errorf("error = %v, want the configuration problem reported", err)
 		}
@@ -415,7 +415,6 @@ func TestConfirm(t *testing.T) {
 		{"yes", true},
 		{"n\n", false},
 		{"\n", false},
-		{"", false},
 		{"maybe\n", false},
 	}
 
@@ -423,13 +422,54 @@ func TestConfirm(t *testing.T) {
 		t.Run(strings.TrimSpace(tt.input), func(t *testing.T) {
 			var out bytes.Buffer
 
-			if got := confirm(strings.NewReader(tt.input), &out, "Continue?"); got != tt.want {
+			got, err := confirm(strings.NewReader(tt.input), &out, "Continue?", false)
+			if err != nil {
+				t.Fatalf("confirm(%q) error = %v", tt.input, err)
+			}
+			if got != tt.want {
 				t.Errorf("confirm(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 			if !strings.Contains(out.String(), "Continue?") {
 				t.Errorf("the prompt was not printed: %q", out.String())
 			}
 		})
+	}
+}
+
+// Nobody there to answer is not the same as an answer of no. Spec 04-cli.md
+// 4.14 designs these commands to be driven from CI, where the difference is
+// the whole diagnosis: --force exists for exactly this.
+func TestConfirmWithNobodyToAsk(t *testing.T) {
+	var out bytes.Buffer
+
+	got, err := confirm(strings.NewReader(""), &out, "Continue?", false)
+	if got {
+		t.Error("confirm on closed input = true, want false")
+	}
+	if !errors.Is(err, errNoAnswer) {
+		t.Fatalf("confirm on closed input error = %v, want errNoAnswer", err)
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error = %q, want it to name the flag that proceeds without asking", err)
+	}
+
+	// A declined confirmation must stay distinguishable from this one.
+	if _, err := confirm(strings.NewReader("n\n"), &out, "Continue?", false); err != nil {
+		t.Errorf("confirm(\"n\") error = %v, want nil", err)
+	}
+}
+
+// Ctrl-D at a prompt is a person declining, so the answer must not be advice
+// to re-run without the prompt -- that is the thing they just declined.
+func TestConfirmAtATerminalReadsEOFAsARefusal(t *testing.T) {
+	var out bytes.Buffer
+
+	got, err := confirm(strings.NewReader(""), &out, "Continue?", true)
+	if got {
+		t.Error("confirm on Ctrl-D = true, want false")
+	}
+	if err != nil {
+		t.Errorf("confirm on Ctrl-D error = %v, want nil: it is a refusal, not a missing answer", err)
 	}
 }
 
@@ -690,7 +730,7 @@ func TestDestroyVolumesPromptNamesTheData(t *testing.T) {
 // It is the one condition the user can fix from what they typed, so an
 // unreachable daemon must not be reported ahead of it (spec 04-cli.md 4.3.1).
 func TestExecRequiresACommand(t *testing.T) {
-	never := func(*globalFlags) (*App, error) {
+	never := func(context.Context, *globalFlags) (*App, error) {
 		t.Fatal("built the App before the arguments were checked")
 		return nil, nil
 	}
@@ -721,7 +761,7 @@ func TestMutuallyExclusiveFlags(t *testing.T) {
 		{"up", "--dry-run", "--restart"},
 	} {
 		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
-			never := func(*globalFlags) (*App, error) {
+			never := func(context.Context, *globalFlags) (*App, error) {
 				t.Fatal("built the App before the flags were checked")
 				return nil, nil
 			}
@@ -985,5 +1025,45 @@ func TestUserFacingTextIsASCII(t *testing.T) {
 func TestWarningCountIgnoresAnotherLogger(t *testing.T) {
 	if got := warningCount(slog.New(slog.NewTextHandler(io.Discard, nil))); got != 0 {
 		t.Errorf("warningCount() = %d, want 0 for a logger idev did not build", got)
+	}
+}
+
+// Every command that confirms tells a caller with no stdin the same thing,
+// and runs nothing. Declining and having nobody to ask both stop the command;
+// only the second one has a way forward to offer.
+func TestDestructiveCommandsReportNobodyToAsk(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		call string
+	}{
+		{"destroy", []string{"destroy"}, "delete "},
+		{"rebuild", []string{"rebuild"}, "delete "},
+		{"snapshot restore", []string{"snapshot", "restore", "s1"}, "snapshot restore"},
+		{"snapshot delete", []string{"snapshot", "delete", "s1"}, "snapshot delete"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			app, client := fakeApp(t, out)
+			client.AddInstance(&incus.Instance{
+				Name:   "dev-example-project",
+				Status: "Running",
+				Config: map[string]string{managedProjectKey: "example-project"},
+			})
+
+			root := newRootCommand("test", stub(app), stub(app))
+			root.SetArgs(tt.args)
+			root.SetIn(strings.NewReader(""))
+			root.SetOut(out)
+			root.SetErr(out)
+
+			err := root.ExecuteContext(context.Background())
+			if !errors.Is(err, errNoAnswer) {
+				t.Fatalf("%v error = %v, want errNoAnswer", tt.args, err)
+			}
+			if client.Called(tt.call) {
+				t.Errorf("calls = %v, want nothing run when there was no answer", client.Calls)
+			}
+		})
 	}
 }

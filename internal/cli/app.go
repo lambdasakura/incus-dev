@@ -316,7 +316,7 @@ func (a *App) Provision(ctx context.Context, sel provision.Selection) error {
 		return err
 	}
 
-	if _, err := a.managedInstance(ctx, actsOnMountedTree); err != nil {
+	if _, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp); err != nil {
 		return err
 	}
 	if err := a.ensureRunning(ctx); err != nil {
@@ -378,7 +378,7 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 	if carrying {
 		eff = remountsHere
 	}
-	inst, err := a.managedInstance(ctx, eff)
+	inst, err := a.managedInstance(ctx, eff, adviseNothing)
 	if err != nil {
 		return err
 	}
@@ -393,7 +393,11 @@ func (a *App) destroy(ctx context.Context, opt DestroyOptions, carrying bool) er
 		if opt.Volumes {
 			return volumesUntouched(err, volumes)
 		}
-		return err
+		// Waiting for the operation can fail after the daemon has carried it
+		// out, so the instance may be gone -- and with it the record naming
+		// the volumes that left the declaration. The declared ones the next
+		// up adopts; these nothing else will ever name.
+		return volumesLeftUnnameable(err, undeclaredVolumes(a.cfg, a.instance, volumes))
 	}
 
 	if opt.Volumes {
@@ -545,6 +549,22 @@ func volumesUntouched(err error, refs []string) error {
 		err, strings.Join(named, ", "), volumeDeleteHint(named))
 }
 
+// volumesLeftUnnameable names the volumes that only the instance's own record
+// knew about, for a destroy that may have deleted the instance anyway.
+//
+// It says "if", because the failure does not tell us: a rejected request
+// leaves everything in place, while a wait cut short by Ctrl-C does not stop
+// the daemon finishing the delete.
+func volumesLeftUnnameable(err error, refs []string) error {
+	named := namedVolumes(refs)
+	if len(named) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w\nif the instance was deleted anyway, nothing names these again: %s\n"+
+		"remove them with %s",
+		err, strings.Join(named, ", "), volumeDeleteHint(named))
+}
+
 // Rebuild destroys the instance and creates it again.
 func (a *App) Rebuild(ctx context.Context) error {
 	// Everything up would refuse to start on, found before the instance is
@@ -577,7 +597,30 @@ func (a *App) Rebuild(ctx context.Context) error {
 	case !errors.Is(err, incus.ErrInstanceNotFound):
 		return err
 	}
-	return a.up(ctx, UpOptions{}, plan, env)
+
+	if err := a.up(ctx, UpOptions{}, plan, env); err != nil {
+		// a.carried lives only in this process, and the instance that held
+		// the durable copy is already gone. Whatever the next run does, this
+		// error is the last time these names exist.
+		return a.recordLostWith(err)
+	}
+	return nil
+}
+
+// recordLostWith names the carried volumes when the create half of a rebuild
+// failed, because the record naming them went with the old instance.
+//
+// The declared ones the next up adopts by name; the rest are reachable only
+// through this message.
+func (a *App) recordLostWith(err error) error {
+	named := namedVolumes(undeclaredVolumes(a.cfg, a.instance, a.carried))
+	if len(named) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w\nthe instance holding the volume record is already gone, "+
+		"so nothing names these again: %s\n"+
+		"keep them for the next 'idev up' by hand, or remove them with %s",
+		err, strings.Join(named, ", "), volumeDeleteHint(named))
 }
 
 // Shell runs an interactive shell, or a given command, inside the container.
@@ -594,7 +637,7 @@ func (a *App) Exec(ctx context.Context, argv []string) error {
 
 // execInContainer runs a command inside the container.
 func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) error {
-	if _, err := a.managedInstance(ctx, actsOnMountedTree); err != nil {
+	if _, err := a.managedInstance(ctx, actsOnMountedTree, adviseUp); err != nil {
 		return err
 	}
 	if err := a.ensureRunning(ctx); err != nil {
@@ -1376,11 +1419,25 @@ func (a *App) checkProfiles(ctx context.Context) error {
 		strings.Join(missing, ", "))
 }
 
+// missingAdvice is what to say when the instance is not there.
+//
+// Every instance command shares this lookup, but not the next step: telling
+// someone who is removing an environment to create one is the opposite of
+// what they asked for. It says what this run did, not what is left on the
+// host -- volumes outlive the instance, so "there is nothing to delete" is a
+// claim this lookup cannot make.
+type missingAdvice string
+
+const (
+	adviseUp      missingAdvice = "run 'idev up' first"
+	adviseNothing missingAdvice = "nothing was deleted"
+)
+
 // managedInstance fetches the instance and confirms idev manages it.
-func (a *App) managedInstance(ctx context.Context, eff checkoutEffect) (*incus.Instance, error) {
+func (a *App) managedInstance(ctx context.Context, eff checkoutEffect, advice missingAdvice) (*incus.Instance, error) {
 	inst, err := a.client.Instance(ctx, a.instance)
 	if errors.Is(err, incus.ErrInstanceNotFound) {
-		return nil, fmt.Errorf("instance %s does not exist; run 'idev up' first", a.instance)
+		return nil, fmt.Errorf("instance %s does not exist; %s", a.instance, advice)
 	}
 	if err != nil {
 		return nil, err

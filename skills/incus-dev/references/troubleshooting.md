@@ -8,10 +8,35 @@ environment are covered in more depth in the repository's
 
 ### `instance <name> does not exist; run 'idev up' first`
 
-You called `provision` / `shell` / `exec` / `destroy` / `rebuild` / `snapshot`
-before the environment existed. Run `idev up` first. It never creates one
-implicitly, so that nothing gets built by accident. (`idev status` is the
-exception: it reports `NOT CREATED` and exits 0.)
+You called `provision` / `shell` / `exec` / `rebuild` / `snapshot` before the
+environment existed. Run `idev up` first. It never creates one implicitly, so
+that nothing gets built by accident. (`idev status` is the exception: it
+reports `NOT CREATED` and exits 0.)
+
+### `instance <name> does not exist; nothing was deleted`
+
+`idev destroy` on an environment that is already gone. The exit status is 1 so
+a script can tell it from a destroy that did remove something. Note what it
+does not say: persistent volumes outlive the instance, so if you passed
+`--volumes`, check with `incus storage volume list <pool>`.
+
+### `... nothing names these again: <pool>/<volume>`
+
+A `destroy` or a `rebuild` that failed after the instance was already gone --
+usually Ctrl-C, since interrupting the wait does not stop the daemon finishing
+the delete. The record of which volumes are idev's lives on the instance, so a
+volume that had left `dev.yml` has nothing left to name it. This message is the
+last place those names appear: keep them for a later `idev up` by putting them
+back in `dev.yml`, or remove them with the command it prints. Volumes still
+declared in `dev.yml` are not listed, because the next `idev up` adopts those
+by name.
+
+### `no answer on standard input; pass --force to proceed without asking`
+
+A command that confirms before destroying something was run with nothing on
+standard input -- from CI, a hook, or with stdin redirected. This is not a
+refusal: nobody was there to answer. Pass `--force` to proceed without the
+prompt, or give the answer on stdin (`printf y | idev destroy`).
 
 ### `instance <name> exists but is not managed by idev for project "<name>"`
 

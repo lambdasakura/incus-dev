@@ -28,6 +28,9 @@ type Project struct {
 	Root string
 	// ConfigPath is the absolute path of dev.yml.
 	ConfigPath string
+	// ShadowedWhy says what is wrong with Shadowed, so the caller warning
+	// about it does not have to guess. Both reasons reach here.
+	ShadowedWhy string
 	// Shadowed is a nearer dev.yml that could not be used, if there was one.
 	//
 	// The search continues past it so a real project above is not hidden, but
@@ -42,6 +45,14 @@ type Project struct {
 // is not a project either, so the search carries on upwards.
 func isAbsent(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
+}
+
+// isDanglingLink reports whether the path is a symbolic link whose target is
+// not there. Lstat does not follow the link, so it succeeds where Stat gave
+// ENOENT.
+func isDanglingLink(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 // Discover looks for .incus-dev/dev.yml from startDir upwards and returns
@@ -65,13 +76,13 @@ func Discover(startDir string) (*Project, error) {
 
 	// A directory with .incus-dev/ but no dev.yml, which is likely a mistake.
 	var configDirWithoutFile string
-	var wrongKind string
+	var wrongKind, wrongKindWhy string
 
 	for {
 		configPath := filepath.Join(dir, ConfigDir, ConfigFile)
 		switch info, err := os.Stat(configPath); {
 		case err == nil && info.Mode().IsRegular():
-			return &Project{Root: dir, ConfigPath: configPath, Shadowed: wrongKind}, nil
+			return &Project{Root: dir, ConfigPath: configPath, Shadowed: wrongKind, ShadowedWhy: wrongKindWhy}, nil
 		case err == nil:
 			// It is there; it is the wrong kind of thing. Keep looking -- a
 			// real project above must not be hidden by it -- but remember it,
@@ -79,7 +90,14 @@ func Discover(startDir string) (*Project, error) {
 			// than "dev.yml is missing", which would send the user to create
 			// what they are looking at.
 			if wrongKind == "" {
-				wrongKind = configPath
+				wrongKind, wrongKindWhy = configPath, "is not a regular file"
+			}
+		case isAbsent(err) && isDanglingLink(configPath):
+			// Stat follows the link, so a link to nothing is ENOENT -- the
+			// same answer as nothing being there, which would send the user
+			// to create a dev.yml their own directory listing shows them.
+			if wrongKind == "" {
+				wrongKind, wrongKindWhy = configPath, "is a symbolic link whose target is not there"
 			}
 		case !isAbsent(err):
 			// The error already names the path and the operation.
@@ -100,7 +118,7 @@ func Discover(startDir string) (*Project, error) {
 	}
 
 	if wrongKind != "" {
-		return nil, fmt.Errorf("%w: %s is not a regular file", ErrNotFound, wrongKind)
+		return nil, fmt.Errorf("%w: %s %s", ErrNotFound, wrongKind, wrongKindWhy)
 	}
 	if configDirWithoutFile != "" {
 		return nil, fmt.Errorf("%w: %s exists but %s is missing",

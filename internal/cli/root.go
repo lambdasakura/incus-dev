@@ -32,8 +32,17 @@ const defaultIncusProject = "default"
 // errAborted reports that the confirmation was declined.
 var errAborted = errors.New("aborted")
 
+// errNoAnswer reports that there was nobody to decline it. A caller driving
+// idev from CI gets a diagnosis it can act on rather than "aborted"
+// (spec 04-cli.md 4.14).
+var errNoAnswer = errors.New(
+	"no answer on standard input; pass --force to proceed without asking")
+
 // appFactory builds the App a command uses. Tests replace it.
-type appFactory func(*globalFlags) (*App, error)
+//
+// It takes the command's context because building the App can run git, to
+// resolve project.scope: branch, and that has to be interruptible.
+type appFactory func(context.Context, *globalFlags) (*App, error)
 
 // NewRootCommand builds the root command of idev.
 func NewRootCommand(version string) *cobra.Command {
@@ -95,25 +104,27 @@ func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 
 // newApp discovers the project, loads the configuration, connects to Incus and
 // builds the App.
-func newApp(g *globalFlags) (*App, error) {
-	return buildApp(g, incus.Connect)
+func newApp(ctx context.Context, g *globalFlags) (*App, error) {
+	return buildApp(ctx, g, incus.Connect)
 }
 
 // newOfflineApp builds the App without connecting to Incus, for the commands
 // that make no Incus call. `idev validate` is expected to run in a CI job where
 // no Incus is reachable (spec 04-cli.md 4.7).
-func newOfflineApp(g *globalFlags) (*App, error) {
-	return buildApp(g, nil)
+func newOfflineApp(ctx context.Context, g *globalFlags) (*App, error) {
+	return buildApp(ctx, g, nil)
 }
 
 // offlineOptions marks the App as one that does not operate on the instance.
-func offlineOptions(connect func(incus.Target) (*incus.API, error)) bool {
+func offlineOptions(connect func(context.Context, incus.Target) (*incus.API, error)) bool {
 	return connect == nil
 }
 
 // buildApp discovers the project, loads the configuration and builds the App.
 // It connects to Incus when connect is non-nil.
-func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*App, error) {
+// The context reaches the git that resolves project.scope: branch, so an
+// offline command is interruptible (spec 07-implementation.md).
+func buildApp(ctx context.Context, g *globalFlags, connect func(context.Context, incus.Target) (*incus.API, error)) (*App, error) {
 	start := g.directory
 	if start == "" {
 		wd, err := os.Getwd()
@@ -137,15 +148,15 @@ func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*
 	log := newLogger(os.Stderr, g.verbose)
 	if proj.Shadowed != "" {
 		log.Warn(fmt.Sprintf(
-			"%s is not a regular file, so it was skipped; this run acts on the project at %s",
-			proj.Shadowed, proj.Root))
+			"%s %s, so it was skipped; this run acts on the project at %s",
+			proj.Shadowed, proj.ShadowedWhy, proj.Root))
 	}
 	cmdRunner := runner.NewWithLogger(log)
 
 	// Left nil for the commands that never reach Incus.
 	var client incus.Client
 	if connect != nil {
-		api, err := connect(target)
+		api, err := connect(ctx, target)
 		if err != nil {
 			return nil, err
 		}
@@ -157,7 +168,7 @@ func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*
 	return NewAppFor(AppOptions{
 		InstanceNameOptional: offlineOptions(connect),
 		Config:               cfg,
-		Branch:               gitBranch(context.Background(), cmdRunner, proj.Root),
+		Branch:               gitBranch(ctx, cmdRunner, proj.Root),
 		Client:               client,
 		Runner:               cmdRunner,
 		In:                   os.Stdin,
@@ -189,7 +200,7 @@ func newUpCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Create the instance, then run bootstrap and provisioning",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -229,7 +240,7 @@ func newProvisionCommand(g *globalFlags, newApp, offline appFactory) *cobra.Comm
 			if listOnly {
 				build = offline
 			}
-			app, err := build(g)
+			app, err := build(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -259,7 +270,7 @@ func newShellCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Use:   "shell [-- command...]",
 		Short: "Open a shell in the container, or run the given command",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -286,7 +297,7 @@ func newExecCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -306,7 +317,7 @@ func newStatusCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Show the state of the instance",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -327,7 +338,7 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Delete the instance (the sources on the host are left alone)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -342,7 +353,11 @@ func newDestroyCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 						"Delete instance %s AND its persistent volumes, with everything in them?",
 						app.InstanceName())
 				}
-				if !confirm(cmd.InOrStdin(), cmd.OutOrStdout(), prompt) {
+				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(), prompt, isTerminal(os.Stdin))
+				if err != nil {
+					return err
+				}
+				if !ok {
 					return errAborted
 				}
 			}
@@ -362,13 +377,20 @@ func newRebuildCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Destroy the instance and create it again",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
-			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("Destroy and recreate instance %s?", app.InstanceName())) {
-				return errAborted
+			if !force {
+				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+					fmt.Sprintf("Destroy and recreate instance %s?", app.InstanceName()),
+					isTerminal(os.Stdin))
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return errAborted
+				}
 			}
 			return app.Rebuild(cmd.Context())
 		},
@@ -388,7 +410,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Create a snapshot (named after the current time if omitted)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -405,7 +427,7 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "List the snapshots",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -419,14 +441,20 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Roll the instance back to a snapshot (its current state is lost)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
-			if !force && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("Roll instance %s back to %s? Its current state will be lost.",
-					app.InstanceName(), args[0])) {
-				return errAborted
+			if !force {
+				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+					fmt.Sprintf("Roll instance %s back to %s? Its current state will be lost.",
+						app.InstanceName(), args[0]), isTerminal(os.Stdin))
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return errAborted
+				}
 			}
 			return app.RestoreSnapshot(cmd.Context(), args[0])
 		},
@@ -440,13 +468,19 @@ func newSnapshotCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Short: "Delete a snapshot",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app, err := newApp(g)
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
-			if !deleteForce && !confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
-				fmt.Sprintf("Delete snapshot %s?", args[0])) {
-				return errAborted
+			if !deleteForce {
+				ok, err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(),
+					fmt.Sprintf("Delete snapshot %s?", args[0]), isTerminal(os.Stdin))
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return errAborted
+				}
 			}
 			return app.DeleteSnapshot(cmd.Context(), args[0])
 		},
@@ -462,8 +496,8 @@ func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 		Use:   "validate",
 		Short: "Validate dev.yml (makes no change to Incus at all)",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			app, err := newApp(g)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			app, err := newApp(cmd.Context(), g)
 			if err != nil {
 				return err
 			}
@@ -473,21 +507,30 @@ func newValidateCommand(g *globalFlags, newApp appFactory) *cobra.Command {
 }
 
 // confirm asks for confirmation before a destructive operation.
-func confirm(in io.Reader, out io.Writer, prompt string) bool {
+func confirm(in io.Reader, out io.Writer, prompt string, atTerminal bool) (bool, error) {
 	_, _ = fmt.Fprintf(out, "%s [y/N]: ", prompt)
 
 	// Even at EOF, whatever was read counts as the answer, so input without a
 	// trailing newline works.
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && line == "" {
-		return false
+		// Nothing at all was read. At a terminal that is Ctrl-D, which is a
+		// person declining; anywhere else standard input is closed or empty
+		// and nobody was asked at all. Reporting the second as a refusal
+		// tells a caller in CI the opposite of what it needs to know, and
+		// reporting the first as a missing answer offers a person who just
+		// declined the flag that skips the question.
+		if atTerminal {
+			return false, nil
+		}
+		return false, errNoAnswer
 	}
 
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
-		return true
+		return true, nil
 	default:
-		return false
+		return false, nil
 	}
 }
 

@@ -128,6 +128,21 @@ Run `make test-integration` when the change touches Incus behaviour, and read
 its exit code the same way. Save the full log — a failure two hundred lines up
 is gone if the command ended in `| tail -3`.
 
+Two ways a mutation check lies, both hit in one round: passing
+`INCUS_SOCKET=/nonexistent` to the integration run skips every test and reports
+every mutation as surviving; and a script that re-copies its backup each
+iteration will, after one crash mid-mutation, save the mutated file as the
+backup and restore *that*. Take the pristine copy once, before the first
+mutation, and diff against it at the end.
+
+**Use the make target, not `go test -tags integration` by hand.** That package
+shells out to a binary it builds, so it has no compile-time dependency on
+`internal/`: change the code under test, run it again, and Go serves the
+cached pass. A mutation check done that way reports that every mutation
+survived, which reads as "the tests are blind" and is really "the tests never
+ran". `make test-integration` passes `-count=1`; an ad-hoc invocation must
+too.
+
 ## 8. One topic per commit, staged explicitly
 
 `git add -A` swept unrelated work into one commit three times in this history,

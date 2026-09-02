@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -468,5 +469,41 @@ func TestRunSucceedsDespiteALingeringChild(t *testing.T) {
 	}
 	if res.ExitCode != 0 {
 		t.Errorf("ExitCode = %d, want 0", res.ExitCode)
+	}
+}
+
+// An interrupted command is asked to stop before it is killed.
+//
+// exec.CommandContext defaults Cancel to Process.Kill, so a Ctrl-C during an
+// ansible step gave ansible-playbook no chance to stop the apt-get it was
+// driving inside the container, or to clean up after itself. The run steps
+// forward SIGTERM over the control websocket, so the same Ctrl-C reached the
+// two kinds of step in opposite ways (spec 05-incus.md 5.7.3). WaitDelay is
+// still the backstop for a command that ignores it.
+func TestRunTerminatesBeforeKilling(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("signals and a shell script, so linux only")
+	}
+
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "trapped")
+	script := filepath.Join(dir, "traps.sh")
+	body := "#!/bin/sh\ntrap 'touch " + marker + "; exit 0' TERM\nsleep 30 &\nwait\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil { //nolint:gosec // a test script
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+
+	e := runner.New()
+	if _, err := e.Run(ctx, runner.Command{Name: script}); err == nil {
+		t.Error("Run() = nil error, want the cancellation reported")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the command was killed without being asked to stop: %v", err)
 	}
 }

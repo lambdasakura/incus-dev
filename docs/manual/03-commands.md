@@ -126,6 +126,13 @@ idev up --dry-run
 Lists what would be created, re-applied and removed, and changes nothing in
 Incus. Use it after editing `dev.yml`, to see what is about to happen.
 
+It also makes the host-side checks `up` makes -- the image reference resolves,
+the storage pools exist, the profiles exist, `ansible-playbook` is installed --
+and fails if one of them does not, printing no plan. That is why `idev
+validate` has no flag of its own for them: `validate` reads `dev.yml` offline,
+and this is the check that needs the host. A plan it prints is a plan that can
+run, so `idev validate && idev up --dry-run` is a usable CI gate.
+
 If an instance of the same name exists that `idev` did not create, it fails
 without doing anything, so it cannot destroy something it does not own.
 

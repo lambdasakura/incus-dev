@@ -337,8 +337,43 @@ func TestDestroyRefusesUnmanagedInstance(t *testing.T) {
 func TestDestroyOnMissingInstanceIsAnError(t *testing.T) {
 	app, _, _ := newApp(t, baseYAML)
 
-	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err == nil {
+	err := app.Destroy(context.Background(), cli.DestroyOptions{})
+	if err == nil {
 		t.Fatal("Destroy() = nil error, want a failure when there is nothing to delete")
+	}
+	// The advice belongs to the command, not to the lookup they share: the
+	// only next step offered to someone removing an environment must not be
+	// to create one.
+	if strings.Contains(err.Error(), "idev up") {
+		t.Errorf("Destroy() = %q, want it not to advise creating the instance", err)
+	}
+}
+
+// The commands that do need the instance still say how to get one.
+func TestMissingInstanceAdvisesUpWhereThatHelps(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		run  func(cli.App) error
+	}{
+		{"shell", func(a cli.App) error { return a.Shell(context.Background(), nil) }},
+		{"provision", func(a cli.App) error {
+			return a.Provision(context.Background(), provision.Selection{})
+		}},
+		{"snapshot create", func(a cli.App) error {
+			return a.CreateSnapshot(context.Background(), "s")
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _, _ := newApp(t, baseYAML)
+
+			err := tt.run(*app)
+			if err == nil {
+				t.Fatal("= nil error, want a failure when the instance is not there")
+			}
+			if !strings.Contains(err.Error(), "idev up") {
+				t.Errorf("= %q, want it to say how to create the instance", err)
+			}
+		})
 	}
 }
 

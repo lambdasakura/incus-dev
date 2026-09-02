@@ -563,6 +563,82 @@ provision:
 	}
 }
 
+// The image is the most likely thing in dev.yml to be mistyped, and it is
+// resolved against a remote, so nothing offline can catch it. A preflight
+// that passes on an image up cannot fetch is the false green light spec
+// 04-cli.md 4.7 leans on this command not to give.
+func TestPlanChecksTheImageResolves(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := incustest.New()
+	client.Images = []string{"images:debian/12"} // not the one rootYAML names
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err == nil {
+		t.Error("Plan() = nil error, want the image failure up reports")
+	}
+}
+
+// An instance that is already there is not created again, so up never
+// resolves the image and neither may the preflight.
+func TestPlanLeavesTheImageAloneForAnExistingInstance(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := incustest.New()
+	client.Images = []string{"images:debian/12"}
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{managedProjectKey: "example-project"},
+	})
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	if err := app.Plan(context.Background()); err != nil {
+		t.Errorf("Plan() error = %v, want none: up would not fetch an image", err)
+	}
+}
+
+// A storage pool that is not there stops up on its first volume. The preview
+// used to report the volume as one it would create and exit 0.
+func TestPlanChecksTheStoragePool(t *testing.T) {
+	cfg, err := config.Parse([]byte(rootYAML+`
+volumes:
+  cache:
+    path: /var/cache/x
+    pool: nosuchpool
+`), config.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: incustest.New(), Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err = app.Plan(context.Background())
+	if err == nil {
+		t.Fatal("Plan() = nil error, want the pool failure up reports")
+	}
+	if !errors.Is(err, incus.ErrPoolNotFound) {
+		t.Errorf("Plan() error = %v, want ErrPoolNotFound", err)
+	}
+}
+
 // up --dry-run makes the same host-side checks up does.
 //
 // Spec 04-cli.md 4.7 leans on this: it is why validate has no --check-host
@@ -2696,5 +2772,117 @@ func TestAsUserKeepsArgumentBoundaries(t *testing.T) {
 				t.Errorf("asUser() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// A destroy that fails after the daemon has already deleted the instance
+// leaves the undeclared volumes with nothing left to name them: the record
+// naming them went with the instance. --volumes says so; plain destroy, the
+// more common command and the one that keeps the volumes, returned the bare
+// error.
+func TestDestroyNamesTheUnnameableVolumesWhenItFails(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+	client.FailOn = map[string]error{"delete dev-example-project": context.Canceled}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Destroy(context.Background(), DestroyOptions{})
+	if err == nil {
+		t.Fatal("Destroy() = nil error, want the failure reported")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Destroy() error = %v, want it to wrap the cause", err)
+	}
+	// The declared one is adopted by the next up; the undeclared one is what
+	// nothing will name again.
+	if !strings.Contains(err.Error(), "dev-example-project-old") {
+		t.Errorf("Destroy() error = %q, want it to name the volume nothing else can", err)
+	}
+	if strings.Contains(err.Error(), "dev-example-project-cache") {
+		t.Errorf("Destroy() error = %q, want it not to offer to delete a declared volume", err)
+	}
+}
+
+// rebuild carries the volume record in memory across the destroy, so if the
+// create half fails the record is gone from the only place it was durable.
+// The next rebuild writes a record naming the declared volumes only, and a
+// volume that had left the declaration -- the case rebuild is recommended for
+// -- is never named by idev again.
+func TestRebuildNamesTheCarriedRecordWhenTheCreateFails(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache,default/dev-example-project-old",
+		},
+	})
+	client.FailOn = map[string]error{"create dev-example-project": context.Canceled}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Rebuild(context.Background())
+	if err == nil {
+		t.Fatal("Rebuild() = nil error, want the create failure reported")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Rebuild() error = %v, want it to wrap the cause", err)
+	}
+	if !strings.Contains(err.Error(), "dev-example-project-old") {
+		t.Errorf("Rebuild() error = %q, want it to name the volume the record no longer holds", err)
+	}
+	// The declared one the next up adopts by name, so offering to delete it
+	// would hand the user a command that destroys data idev is about to keep.
+	if strings.Contains(err.Error(), "dev-example-project-cache") {
+		t.Errorf("Rebuild() error = %q, want it not to offer to delete a declared volume", err)
+	}
+}
+
+// With nothing but declared volumes there is nothing the next up cannot find,
+// so the failure is reported on its own.
+func TestRebuildAddsNothingWhenEveryVolumeIsDeclared(t *testing.T) {
+	cfg := mustParse(t, rootYAML+"volumes:\n  cache:\n    path: /cache\n")
+
+	client := incustest.New()
+	client.AddInstance(&incus.Instance{
+		Name:   "dev-example-project",
+		Status: "Running",
+		Config: map[string]string{
+			managedProjectKey: "example-project",
+			managedVolumesKey: "default/dev-example-project-cache",
+		},
+	})
+	client.FailOn = map[string]error{"create dev-example-project": context.Canceled}
+
+	app := NewApp(AppOptions{
+		Config: cfg, Client: client, Runner: &runnertest.Fake{},
+		Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}, CheckIDMap: func(int, int) error { return nil },
+	})
+
+	err := app.Rebuild(context.Background())
+	if err == nil {
+		t.Fatal("Rebuild() = nil error, want the create failure reported")
+	}
+	if got := err.Error(); got != context.Canceled.Error() {
+		t.Errorf("Rebuild() error = %q, want just the cause", got)
 	}
 }

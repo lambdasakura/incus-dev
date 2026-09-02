@@ -38,7 +38,9 @@ func Load(configPath string) (*Config, error) {
 	// than as the wrong kind of thing.
 	info, err := os.Stat(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", configPath, err)
+		// No path of our own: os.PathError already carries it, and the
+		// operation with it.
+		return nil, fmt.Errorf("read the configuration: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("read %s: not a regular file", configPath)
@@ -46,7 +48,7 @@ func Load(configPath string) (*Config, error) {
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // reading the configuration file the user named is the point
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", configPath, err)
+		return nil, fmt.Errorf("read the configuration: %w", err)
 	}
 	root := filepath.Dir(filepath.Dir(configPath))
 	c, err := Parse(data, Options{Root: root})

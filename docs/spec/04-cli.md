@@ -519,3 +519,7 @@ idev rebuild
 idev destroy --force
 idev rebuild --force
 ```
+
+標準入力から一文字も読めなかった場合は「拒否された」とせず、
+`--force` を案内するエラーで終了する。CIやhookから駆動したときに
+「nと答えた」と区別できないと、原因の切り分けができないため。

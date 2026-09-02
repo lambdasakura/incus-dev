@@ -166,6 +166,13 @@ const waitDelay = 2 * time.Second
 // Run executes the command.
 func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
+	// Ask before killing. CommandContext defaults Cancel to Process.Kill, so
+	// a Ctrl-C during an ansible step gave ansible-playbook no chance to stop
+	// what it was driving inside the container, while a run step received a
+	// forwarded SIGTERM -- the same interrupt reaching the two kinds of step
+	// in opposite ways (spec 05-incus.md 5.7.3). WaitDelay below is still the
+	// backstop for a command that ignores it.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = waitDelay
 	cmd.Dir = c.Dir
 	if len(c.Env) > 0 {

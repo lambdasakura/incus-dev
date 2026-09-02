@@ -40,27 +40,50 @@ type cliConfig interface {
 // incus command (~/.config/incus/config.yml), so that the two behave alike.
 // An empty path lets LoadConfig find it, falling back to the defaults when
 // there is no configuration at all.
-func Connect(target Target) (*API, error) {
+func Connect(ctx context.Context, target Target) (*API, error) {
 	config, err := cliconfig.LoadConfig("")
 	if err != nil {
 		return nil, fmt.Errorf("load incus client configuration: %w", err)
 	}
-	return connect(config, target)
+	return connect(ctx, config, target)
 }
 
-func connect(config cliConfig, target Target) (*API, error) {
-	server, err := config.GetInstanceServer(localRemote)
-	if err != nil {
-		return nil, fmt.Errorf("connect to the local incus: %w", err)
+// connect performs the handshake, and gives up when the context does.
+//
+// The client library takes no context for this, and its WithContext mutates
+// the shared client rather than returning a copy -- so a daemon that accepts
+// the connection and never answers wedged every command for the client's
+// hour-long response timeout. The handshake changes nothing on the host, so
+// walking away from it is safe in a way that abandoning a mutation is not.
+func connect(ctx context.Context, config cliConfig, target Target) (*API, error) {
+	type handshake struct {
+		api *API
+		err error
 	}
-	if target.Project != "" {
-		server = server.UseProject(target.Project)
-	}
+	// Buffered, so the goroutine finishes and is collected even when nobody
+	// is left to read the result.
+	done := make(chan handshake, 1)
+	go func() {
+		server, err := config.GetInstanceServer(localRemote)
+		if err != nil {
+			done <- handshake{err: fmt.Errorf("connect to the local incus: %w", err)}
+			return
+		}
+		if target.Project != "" {
+			server = server.UseProject(target.Project)
+		}
+		done <- handshake{api: &API{
+			Server: server,
+			Images: &configImageResolver{config: config},
+		}}
+	}()
 
-	return &API{
-		Server: server,
-		Images: &configImageResolver{config: config},
-	}, nil
+	select {
+	case result := <-done:
+		return result.api, result.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("connect to the local incus: %w", ctx.Err())
+	}
 }
 
 // configImageResolver resolves image references with the same configuration as

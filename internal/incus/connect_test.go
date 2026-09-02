@@ -3,8 +3,10 @@ package incus
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -148,7 +150,7 @@ func serverProject(t *testing.T, client *API) string {
 func TestConnectAlwaysUsesTheLocalRemote(t *testing.T) {
 	config := newFakeCLIConfig()
 
-	client, err := connect(config, Target{})
+	client, err := connect(context.Background(), config, Target{})
 	if err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
@@ -163,7 +165,7 @@ func TestConnectAlwaysUsesTheLocalRemote(t *testing.T) {
 func TestConnectUsesTarget(t *testing.T) {
 	config := newFakeCLIConfig()
 
-	client, err := connect(config, Target{Project: "dev"})
+	client, err := connect(context.Background(), config, Target{Project: "dev"})
 	if err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
@@ -176,7 +178,7 @@ func TestConnectError(t *testing.T) {
 	config := newFakeCLIConfig()
 	config.instanceErr = errAPI
 
-	_, err := connect(config, Target{})
+	_, err := connect(context.Background(), config, Target{})
 	if !errors.Is(err, errAPI) || !strings.Contains(err.Error(), "local") {
 		t.Errorf("error = %v, want an error that names what it tried to reach", err)
 	}
@@ -191,7 +193,7 @@ func TestConnectLoadsCLIConfig(t *testing.T) {
 	t.Setenv("INCUS_CONF", t.TempDir())
 	t.Setenv("INCUS_SOCKET", filepath.Join(t.TempDir(), "does-not-exist.socket"))
 
-	_, err := Connect(Target{})
+	_, err := Connect(context.Background(), Target{})
 	if err == nil || !strings.Contains(err.Error(), "connect to the local incus") {
 		t.Errorf("error = %v, want it to have reached the local remote", err)
 	}
@@ -205,7 +207,7 @@ func TestConnectBrokenCLIConfig(t *testing.T) {
 	}
 	t.Setenv("INCUS_CONF", dir)
 
-	_, err := Connect(Target{})
+	_, err := Connect(context.Background(), Target{})
 	if err == nil || !strings.Contains(err.Error(), "incus client configuration") {
 		t.Errorf("error = %v", err)
 	}
@@ -394,4 +396,54 @@ func TestConfigImageResolverAlias(t *testing.T) {
 			t.Error("Alias() = nil error, want the parse failure reported")
 		}
 	})
+}
+
+// Connecting to a daemon that accepts and never answers must not wedge the
+// command.
+//
+// The client library takes no context for the handshake, and its WithContext
+// mutates the shared client rather than returning a copy, so it cannot be
+// added per call. Nothing has been changed at this point, so returning early
+// is safe -- unlike an abandoned mutation, an abandoned handshake leaves the
+// host exactly as it was.
+func TestConnectStopsWhenTheContextDoes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("unix sockets, so linux only")
+	}
+
+	socket := filepath.Join(t.TempDir(), "incus.socket")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+		}
+	}()
+
+	t.Setenv("INCUS_SOCKET", socket)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err = Connect(ctx, Target{})
+	if err == nil {
+		t.Fatal("Connect() = nil error, want the cancellation reported")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Connect() error = %v, want it to wrap context.Canceled", err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("Connect() took %v; it waited for the daemon instead of the context", elapsed)
+	}
 }

@@ -263,3 +263,83 @@ func TestUpFromAnImageTheDaemonHasNotCached(t *testing.T) {
 		t.Errorf("status = %q, want RUNNING", got)
 	}
 }
+
+// The advice a command gives when the instance is not there belongs to that
+// command, not to the lookup they share. managedInstance answered `idev
+// destroy` with "run 'idev up' first", offering the user the opposite of what
+// they had asked for. Only the real CLI shows what each command prints.
+func TestMissingInstanceAdviceFitsTheCommand(t *testing.T) {
+	f := newFixture(t, minimalYAML) // deliberately no up: nothing is created
+
+	out, err := f.run("destroy", "--force")
+	if err == nil {
+		t.Fatalf("destroy with nothing to delete succeeded:\n%s", out)
+	}
+	if strings.Contains(out, "idev up") {
+		t.Errorf("destroy said %q, want it not to advise creating the instance", out)
+	}
+
+	for _, args := range [][]string{
+		{"shell", "--", "true"},
+		{"provision"},
+		{"snapshot", "create", "wip"},
+	} {
+		out, err := f.run(args...)
+		if err == nil {
+			t.Errorf("%v succeeded without an instance:\n%s", args, out)
+		}
+		if !strings.Contains(out, "idev up") {
+			t.Errorf("%v said %q, want it to say how to create the instance", args, out)
+		}
+	}
+}
+
+// A confirmation with nothing on standard input is not a refusal: nobody was
+// there to refuse. Spec 04-cli.md 4.14 designs these commands to be driven
+// from CI, and only the real CLI has a genuinely closed stdin.
+func TestConfirmationWithNothingOnStdin(t *testing.T) {
+	f := newFixture(t, minimalYAML)
+
+	out, err := f.run("destroy")
+	if err == nil {
+		t.Fatalf("destroy succeeded with no answer:\n%s", out)
+	}
+	if !strings.Contains(out, "--force") {
+		t.Errorf("destroy said %q, want it to name the flag that proceeds without asking", out)
+	}
+}
+
+// up --dry-run is the host-side check: spec 04-cli.md 4.7 is why validate has
+// no --check-host flag, and 4.8 says the prerequisites are checked just as up
+// does. It exited 0 on an image reference and on a storage pool that up then
+// refused -- the two things in dev.yml most likely to be mistyped, and the
+// only two nothing offline can catch. A CI gate of `idev validate && idev up
+// --dry-run` passed and the run that followed failed.
+func TestDryRunRefusesWhatUpWouldRefuse(t *testing.T) {
+	for _, tt := range []struct {
+		name, yaml, want string
+	}{
+		{
+			name: "an image that does not resolve",
+			yaml: strings.Replace(minimalYAML, "{{IMAGE}}", "nosuchremote:debian/12", 1),
+			want: "nosuchremote",
+		},
+		{
+			name: "a storage pool that is not there",
+			yaml: minimalYAML + "volumes:\n  cache:\n    path: /var/cache/x\n    pool: nosuchpool\n",
+			want: "nosuchpool",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t, tt.yaml)
+
+			out, err := f.run("up", "--dry-run")
+			if err == nil {
+				t.Fatalf("up --dry-run exited 0 on what up refuses:\n%s", out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("up --dry-run said %q, want it to name %s", out, tt.want)
+			}
+		})
+	}
+}

@@ -1180,8 +1180,27 @@ func TestLoadReportsAnUnreadableFile(t *testing.T) {
 	}
 
 	_, err := config.Load(path)
-	if err == nil || !strings.Contains(err.Error(), "read "+path) {
-		t.Errorf("error = %v, want the read failure reported", err)
+	if err == nil {
+		t.Fatal("Load() = nil error, want one")
+	}
+	if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %v, want the file and the reason", err)
+	}
+	// os.PathError already carries the path; saying it again is the one place
+	// in the CLI where a wrap repeated a fact instead of adding one.
+	if n := strings.Count(err.Error(), path); n != 1 {
+		t.Errorf("error = %q names the path %d times, want once", err, n)
+	}
+
+	// The stat that runs before the read has its own wrap, and a file that is
+	// not there is the only way to reach it.
+	missing := filepath.Join(t.TempDir(), "absent.yml")
+	_, err = config.Load(missing)
+	if err == nil {
+		t.Fatal("Load() on a missing file = nil error, want one")
+	}
+	if n := strings.Count(err.Error(), missing); n != 1 {
+		t.Errorf("error = %q names the path %d times, want once", err, n)
 	}
 }
 
