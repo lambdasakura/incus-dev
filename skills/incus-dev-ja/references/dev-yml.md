@@ -135,6 +135,13 @@ Debian系以外のimageでは失敗するので、その場合は `bootstrap` �
 
 `instance.devices` で追加したdiskにも同じ対応付けが適用される。
 
+ただし `instance.devices` の `disk` に `pool` を書いた場合はホストのマウントではない。
+その `source` はそのpool上のstorage volume名であり、idevはパスとして解決も検査もしない。
+idevに作成・維持させるvolumeは `volumes` を使う。
+
+device名は `-` で始められず `,` を含められない。キーは `-` で始められず
+`=` と `,` を含められない。どちらも適用前に `idev validate` が報告する。
+
 ## project.scope
 
 同じリポジトリを複数の場所にcloneする、あるいはブランチごとに

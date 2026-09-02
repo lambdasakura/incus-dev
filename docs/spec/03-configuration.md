@@ -142,6 +142,9 @@ provisioning内容のバージョン管理はプロジェクト側のGit履歴�
 
 将来的にはSemVer形式を使用する。
 
+現在の契約は `1.1` である。`1.0` との違いは `workspace` の複数形式
+（3.7.2）だけであり、単一形式しか使わないdev.ymlは `1.0` のままでよい。
+
 ---
 
 ## 3.5 project
@@ -337,6 +340,9 @@ devices:
     connect: tcp:127.0.0.1:8080
 ```
 
+- **ホストのディレクトリをmountするだけなら `workspace` の複数形式（3.7.2）を使う。**
+  ここに書くのは、`nic` や `proxy`、`pool` を伴う `disk` のように
+  Incus deviceをそのまま渡す必要があるものに限る
 - deviceの `source` に相対パスを指定した場合、project rootを基準に解決する
 - ただし `pool` を伴う `disk` の `source` はストレージボリューム名であり、
   パスとして解決も検査もしない
@@ -349,6 +355,20 @@ devices:
 
 ## 3.7 workspace
 
+ホストのディレクトリをコンテナへbind mountする宣言。
+**単一形式**と**複数形式**の2つを受け付ける。
+
+ホストのディレクトリを追加でmountすることは頻繁にある要求であり、
+それを `instance.devices` に生のIncus deviceとして書かせると、
+`type: disk` を毎回書かせたうえ、`pool` の有無で `source` の意味が
+パスからstorage volume名へ変わる（3.6.5）。同じことを2通りに書かせている。
+複数形式はこの重複を解消するために存在する。
+
+`instance.devices` は廃止しない。Incus deviceをそのまま渡す逃げ道であり、
+`nic` や `proxy`、`pool` を伴う `disk` はそこにしか書けない。
+
+### 3.7.1 単一形式
+
 ```yaml
 workspace:
   source: .
@@ -356,9 +376,81 @@ workspace:
   idmap: auto
 ```
 
-省略時は上記の既定値が使用される。
+省略時は上記の既定値が使用される。従来からの形式であり、
+project自身のtreeだけをmountする大半のプロジェクトはこれで足りる。
 
-### 3.7.1 source
+### 3.7.2 複数形式
+
+```yaml
+workspace:
+  idmap: auto                   # instance全体の設定（3.7.6）
+  main:
+    source: .
+    target: /workspace
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+  dataset:
+    source: /srv/dataset
+    target: /data
+    readonly: true
+```
+
+値がオブジェクトのキーがmountであり、その名前がIncus device名になる。
+ただし `main` だけは例外である（後述）。
+
+`idmap` はmountではなくinstance全体の設定なので、エントリの中ではなく
+ここに書く。単一形式での位置と同じである（3.7.6）。
+
+**`main` という名前のエントリがproject自身のtreeである。**
+`shell.cwd` の既定、`provision` の作業ディレクトリ、`idev status` の表示、
+`user.incus-dev.root` に記録する整合性の判定は、すべてこのエントリを指す。
+
+このエントリを省略した場合、`workspace` 全体を省略したときと同じ既定
+（`source: .`、`target: /workspace`）で補う。
+したがって追加mountだけを書きたい場合は次で足りる。
+
+```yaml
+workspace:
+  other-repo:
+    source: ../other-repo
+    target: /other-repo
+```
+
+#### `main` のdevice名は `workspace` である
+
+`main` が生成するdiskのdevice名は `main` ではなく `workspace` である。
+キー名とdevice名が一致しないのはここだけであり、理由は2つある。
+
+1つは、既存instanceが既に `workspace` という名前のdeviceを持っていることである。
+キー名をそのままdevice名にすると、複数形式へ書き換えた瞬間に
+deviceが改名され、既存の環境が次の `up` で作り直される。
+
+もう1つは、単一形式と複数形式が同じ意味でなくなることである。
+単一形式は互換のため `workspace` を名乗り続けるので、
+キー名をdevice名にすると **同じものが書き方によって別のdevice名になる**。
+2つの形式は書き方が違うだけで結果が同じでなければならない。
+
+したがって `workspace` はエントリ名として使えない。
+書かれた場合は `main` を使うよう示してエラーとする。
+同じものに2つの綴りを許すと、どちらで書かれているかを
+読む側が毎回確かめることになる。
+
+#### 形式の判別
+
+値がオブジェクトであるキーが1つでもあれば複数形式、
+そうでなければ単一形式として解釈する。
+
+複数形式でスカラー値を持てるキーは `idmap` だけである。
+`source` / `target` / `readonly` がその位置に現れた場合はエラーとする。
+単一形式から書き換えている途中の、mountに属さない迷子だからである。
+
+逆に、これらをエントリ名として使うこともできない。
+曖昧なまま「たぶんこちら」で解釈すると、
+利用者が意図した形式と異なる解釈が黙って通る。
+エントリ名の規則は3.7.7にまとめる。
+
+### 3.7.3 source
 
 project rootを基準に解決する。
 
@@ -368,11 +460,22 @@ source: .
 
 の場合、project root（`.incus-dev/` の親）を意味する。
 
-### 3.7.2 target
+複数形式でも同じ規則であり、絶対パスも書ける（3.11）。
+
+### 3.7.4 target
 
 コンテナ内部のmount point。既定は `/workspace`。
 
-### 3.7.3 idmap
+複数形式では `main` エントリ以外に既定は無く、省略はエラーとする。
+`/workspace` を暗黙に共有すると、2つのmountが同じ場所を奪い合う。
+
+### 3.7.5 readonly
+
+任意。`true` の場合、コンテナから書き込めないmountにする。
+
+Incus disk deviceの `readonly` にそのまま対応する。
+
+### 3.7.6 idmap
 
 非特権コンテナでbind mountを行う場合、ホスト側uid/gidとコンテナ内uid/gidの
 対応付けが必要になる。方式によってホスト側の前提と結果が異なる。
@@ -414,7 +517,8 @@ uidとgidは異なりうるため、個別に写像する。
 
 #### `shift`
 
-workspaceのdisk deviceに `shift=true` を設定し、idmapped mountを使う。
+ホストのディレクトリをmountするdisk deviceに `shift=true` を設定し、
+idmapped mountを使う（適用対象は後述の「適用範囲」）。
 
 ホスト側の追加設定を要さず、ホストのファイルをコンテナから読み書きできる。
 
@@ -439,12 +543,47 @@ disk deviceへは `shift: "false"` を明示的に書く。deviceの適用は宣
 置き換えるため（[05-incus.md](05-incus.md) 5.4.4）、キーを省くのではなく
 明示することで、以前 `auto` / `shift` で付いた `shift: "true"` が確実に消える。
 
+#### 書く位置
+
+**`idmap` はinstanceに1つである。** `raw` 方式が設定する `raw.idmap` は
+instance configのキーであり、mountごとに別の値を持てない。
+
+したがって `idmap` はmountの中ではなく `workspace` の直下に書く。
+単一形式と複数形式で位置は変わらず、どちらも `workspace.idmap` である。
+
+単一形式：
+
+```yaml
+workspace:
+  source: .
+  target: /workspace
+  idmap: auto
+```
+
+複数形式：
+
+```yaml
+workspace:
+  idmap: auto
+  main:
+    source: .
+    target: /workspace
+```
+
+mountの中に書かれた場合はエラーとし、`workspace.idmap` を示す。
+instance全体の設定をmountの中に置くと、
+2つのmountが違う値を書いたときに何が起きるのかを読む側が推測することになる。
+
+`shift` は本来deviceごとの設定だが、方式の選択自体がinstance単位である以上、
+`shift` だけをmountごとに変えられることにしても一貫しない。
+
 #### 適用範囲
 
-ここで決まった方式は、workspaceだけでなく
-**ホストのディレクトリをマウントする `instance.devices` の `disk` にも適用する**。
+ここで決まった方式は、`main` エントリだけでなく
+**複数形式の全エントリと、ホストのディレクトリをマウントする
+`instance.devices` の `disk` にも適用する**。
 
-workspaceだけを対象にすると、`shift` 方式のホストで
+一部だけを対象にすると、`shift` 方式のホストで
 「workspaceは書けるが追加マウントは書けない」という不整合が生じるためである。
 
 適用対象は `type: disk` かつ `source` を持ち、`pool` を伴わないdeviceに限る
@@ -456,7 +595,32 @@ workspaceだけを対象にすると、`shift` 方式のホストで
 なお `instance.config` に `raw.idmap` が明示されている場合、
 idevは対応付けに一切介入しない。
 
-### 3.7.4 mount方式
+### 3.7.7 名前の規則と衝突
+
+複数形式のキーはIncus device名になるため（`main` を除く。3.7.2）、
+device名の規則をそのまま受ける（3.6.5）。
+
+追加mountの名前として使えないもの：
+
+- `-` で始まる名前（incusが自分のフラグとして読む）
+- `,` を含む名前（`user.incus-dev.devices` はカンマ区切りの一覧である）
+- `source` / `target` / `readonly`。単一形式のキーであり、
+  形式の判別が壊れる（3.7.2）
+- `idmap`。`workspace` 直下でinstance全体の設定を指す（3.7.6）
+- `main`。project自身のtreeを指す名前である（3.7.2）
+- `workspace`。`main` が生成するdevice名である（3.7.2）
+
+次と同じ名前も使えない。いずれも同じinstanceのdevice名空間を共有する。
+
+| 衝突相手 | 理由 |
+| --- | --- |
+| `instance.devices` のキー | 同じdevice名を2つの宣言が主張する |
+| `volumes` のキー | volumeも同名のdeviceとしてmountされる（3.13） |
+
+衝突はvalidateの時点でエラーとする。先に書いたほうを勝たせる規則を作ると、
+どちらが適用されたかがdev.ymlを読んでも分からなくなる。
+
+### 3.7.8 mount方式
 
 Incus disk deviceを使用する。
 
@@ -464,13 +628,33 @@ Incus disk deviceを使用する。
 
 ```yaml
 devices:
-  workspace:
+  workspace:                    # 複数形式の main、または単一形式
     type: disk
     source: <project-root>
     path: /workspace
+  other-repo:                   # 複数形式のその他のエントリはキー名のまま
+    type: disk
+    source: <project-root>/../other-repo
+    path: /other-repo
 ```
 
 実際にはinstanceの `devices` として設定する（[05-incus.md](05-incus.md) 5.4）。
+
+宣言から外れたmountは、次の `idev up` でdeviceごと取り外す。
+idevが設定したdeviceだけが対象であり、その判定は
+`user.incus-dev.devices` の記録による（[05-incus.md](05-incus.md) 5.4.4）。
+
+### 3.7.9 runtime契約
+
+複数形式は、古い `idev` が読めないdev.ymlである。
+`workspace` の未知のキーはschemaが拒否するため、
+「読めたが解釈が違う」ではなく「読めない」として失敗する。
+
+複数形式を使うプロジェクトは `runtime.version` に `1.1` 以上を宣言する
+（3.4）。宣言していない場合でもschemaが拒否するが、
+その失敗はキー名の羅列であって理由を語らない。
+
+この機能の導入に伴い、`idev` が提供するruntime契約は `1.1` になる。
 
 ---
 
@@ -658,6 +842,7 @@ idev_incus_project: default
 | 対象 | 基準 |
 | --- | --- |
 | `workspace.source` | project root |
+| `workspace.*.source`（複数形式、相対パスの場合） | project root |
 | `devices.*.source`（相対パスの場合） | project root |
 | `provision[].ansible.playbook` / `vars` / `inventory` | project root |
 | `provision[].galaxy.requirements` | project root |
@@ -725,7 +910,8 @@ volumes:
 - `idev destroy` では **削除しない**。作り直しても残すためのものであり、
   削除は `idev destroy --volumes` で明示的に指示する
 - `idev rebuild` でも残す
-- キー名は device 名と衝突してはならない
+- キー名は device 名、および `workspace` の複数形式のエントリ名と
+  衝突してはならない（3.7.7）
 
 ビルドキャッシュやデータベースの実体など、
 「作り直したいが消したくないもの」を置く。

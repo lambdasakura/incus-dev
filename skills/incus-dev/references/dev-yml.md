@@ -138,6 +138,14 @@ How uids and gids are mapped when sharing a host directory into the container.
 
 The same mapping is applied to disks added through `instance.devices`.
 
+A `disk` under `instance.devices` with a `pool` is not a host mount: there
+`source` names a storage volume on that pool, and idev neither resolves nor
+checks it as a path. Use `volumes` for one idev should create and keep.
+
+Device names must not start with `-` or contain `,`; keys must not start with
+`-` or contain `=` or `,`. `idev validate` reports either before anything is
+applied.
+
 ## `project.scope`
 
 Change this only when you clone the same repository into several places, or

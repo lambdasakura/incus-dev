@@ -112,7 +112,7 @@ idev管理下でない場合、明示的に失敗する。
 | --- | --- |
 | `instance.config` | 宣言されたkey-valueをそのまま設定 |
 | `instance.devices` | 宣言されたdeviceをそのまま設定 |
-| `workspace` | `workspace` という名前のdisk deviceとして設定（`shift` 方式では `shift=true` を付与） |
+| `workspace` | エントリごとにdisk deviceとして設定。単一形式は `workspace` という名前1つ、複数形式はキー名がそのままdevice名（ただし `main` は `workspace` という名前のdeviceになる。`shift` 方式では `shift=true` を付与。[03-configuration.md](03-configuration.md) 3.7.2） |
 | idev管理情報 | `user.incus-dev.*` |
 
 idevはconfigキーの意味を解釈しない。

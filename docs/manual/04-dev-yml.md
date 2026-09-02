@@ -267,6 +267,21 @@ mapping as the workspace (see `idmap` in 4.6). You do not need to write `shift`
 yourself — and since the right value depends on the host, not writing it is the
 more portable choice.
 
+A `disk` with a `pool` is a different thing: there `source` names a storage
+volume on that pool, not a path, and idev neither resolves nor checks it as
+one. To have idev create and keep a volume for you, declare it under `volumes`
+(4.10) rather than here.
+
+Names and keys here are checked by `idev validate` before anything is applied:
+
+| | Rule | Why |
+| --- | --- | --- |
+| Device name | must not start with `-` | incus reads it as one of its own flags |
+| Device name | must not contain `,` | idev records which devices are its own as a comma-separated list |
+| Key | must not start with `-`, contain `=` or `,` | the same two reasons |
+
+The same rules apply to the keys of `instance.config`.
+
 ---
 
 ## 4.6 `workspace`

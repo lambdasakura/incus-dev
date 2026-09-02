@@ -182,6 +182,12 @@ Workspace:  /home/user/src/example-project -> /workspace
 - runtime version
 - idev管理下かどうか
 
+`Workspace` が指すのは `workspace` という名前のdevice、すなわち
+複数形式の `main` エントリである。
+複数形式（[03-configuration.md](03-configuration.md) 3.7.2）で追加された
+mountは `devices` の側に現れる。project自身のtreeがどれかは1行で言えたほうがよく、
+追加mountの数だけこの行が増えると、その1行が埋もれる。
+
 `Image` と `Workspace` はinstanceが実際に持っている値を表示する
 （`user.incus-dev.image` と workspace deviceの `source`）。
 `dev.yml` が別のものを宣言している場合は併記する。`up` が作り直さない以上、
