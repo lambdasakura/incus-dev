@@ -1,4 +1,4 @@
-# Ansibleで構成する例
+# Provisioned with Ansible.
 schema: 1
 
 runtime:

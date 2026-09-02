@@ -112,18 +112,18 @@ Provisioning steps are re-run, so write them to be idempotent.
 ## 7.6 Agent Skill
 
 In tools that load Agent Skills, such as Claude Code, this repository's
-[`skills/incus-devkit/`](../../skills/incus-devkit/) works as it is.
+[`skills/incus-dev/`](../../skills/incus-dev/) works as it is.
 
 ```bash
-cp -r skills/incus-devkit ~/.claude/skills/          # for every project
-cp -r skills/incus-devkit <project>/.claude/skills/  # for one project
+cp -r skills/incus-dev ~/.claude/skills/          # for every project
+cp -r skills/incus-dev <project>/.claude/skills/  # for one project
 ```
 
 It covers the principles, a task-to-command table, how to write `dev.yml`, and
 how to work back from an error.
 
 A Japanese version is available as
-[`skills/incus-devkit-ja/`](../../skills/incus-devkit-ja/).
+[`skills/incus-dev-ja/`](../../skills/incus-dev-ja/).
 
 ---
 

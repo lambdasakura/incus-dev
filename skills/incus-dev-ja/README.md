@@ -1,8 +1,8 @@
-# incus-devkit スキル
+# incus-dev スキル
 
 `idev` をAIコーディングエージェントから使うためのAgent Skill。
 
-*[English version](../incus-devkit/README.md)*
+*[English version](../incus-dev/README.md)*
 
 ## 導入
 
@@ -10,16 +10,16 @@
 
 ```bash
 # そのユーザーのすべてのプロジェクトで使う
-cp -r skills/incus-devkit-ja ~/.claude/skills/
+cp -r skills/incus-dev-ja ~/.claude/skills/
 
 # 特定のプロジェクトだけで使う
-cp -r skills/incus-devkit-ja /path/to/project/.claude/skills/
+cp -r skills/incus-dev-ja /path/to/project/.claude/skills/
 ```
 
 ## 構成
 
 ```text
-incus-devkit-ja/
+incus-dev-ja/
 ├── SKILL.md                      # 原則・コマンド・作業手順
 ├── references/
 │   ├── dev-yml.md                # dev.yml の全項目

@@ -306,5 +306,6 @@ incus remote list           # remote の一覧と既定
 incus project list          # project の一覧
 ```
 
-`--incus-remote` / `--incus-project` で指定した名前が、
+idev が操作するのは常に `local` remote であり、`incus remote switch` が
+設定した既定には従わない。`--incus-project` で指定した名前が
 この一覧に存在するかを確認する。

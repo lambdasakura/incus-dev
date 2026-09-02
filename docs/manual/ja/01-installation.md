@@ -53,7 +53,7 @@ Incusへ接続できていれば、instanceがまだ無くても状態が表示�
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
 
@@ -67,8 +67,8 @@ macOS / Windows からremoteのIncusを操作できる。
 ### ソースから導入する
 
 ```bash
-git clone https://github.com/lambdasakura/incus-devkit.git
-cd incus-devkit
+git clone https://github.com/lambdasakura/incus-dev.git
+cd incus-dev
 
 make build          # ./bin/idev を生成
 sudo install -m 0755 bin/idev /usr/local/bin/idev
@@ -83,7 +83,7 @@ make install        # $GOBIN へインストール
 checkoutせずに導入することもできる。
 
 ```bash
-go install github.com/lambdasakura/incus-devkit/cmd/idev@latest
+go install github.com/lambdasakura/incus-dev/cmd/idev@latest
 ```
 
 この方法で入れたバイナリは `idev --version` が `dev` を返す。

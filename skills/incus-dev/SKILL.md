@@ -1,9 +1,9 @@
 ---
-name: incus-devkit
+name: incus-dev
 description: Use when working with a per-project Incus development environment through the idev command and .incus-dev/dev.yml. Covers creating an environment, running builds and tests inside the container, adding tools and dependencies, diagnosing idev failures, and adopting it in an existing project. Reach for it whenever the work touches "idev", ".incus-dev", "dev.yml", or an Incus-based development environment.
 ---
 
-# Using incus-devkit (idev)
+# Using incus-dev (idev)
 
 `idev` is a CLI that builds and manages a per-project development environment
 as an Incus container. Use it to get a reproducible environment per repository

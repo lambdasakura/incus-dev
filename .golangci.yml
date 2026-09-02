@@ -8,23 +8,23 @@ run:
 linters:
   default: standard
   enable:
-    - errorlint      # errors.Is/As を使うべき箇所の検出
-    - gocritic       # 一般的なアンチパターン
-    - gosec          # セキュリティ上の問題
-    - misspell       # 綴り誤り
-    - nilerr         # err が非nilなのに nil を返す
-    - predeclared    # 組み込み識別子の隠蔽
-    - revive         # スタイルと可読性
-    - unconvert      # 不要な型変換
-    - usestdlibvars  # 標準ライブラリの定数を使うべき箇所
-    - wastedassign   # 使われない代入
+    - errorlint      # where errors.Is/As should be used
+    - gocritic       # common anti-patterns
+    - gosec          # security problems
+    - misspell       # misspellings
+    - nilerr         # returning nil where err is non-nil
+    - predeclared    # shadowing a predeclared identifier
+    - revive         # style and readability
+    - unconvert      # needless type conversions
+    - usestdlibvars  # where a standard library constant should be used
+    - wastedassign   # assignments that are never used
 
   settings:
     errcheck:
       check-type-assertions: true
     gosec:
       excludes:
-        - G204  # 外部コマンド実行はこのツールの目的そのもの（internal/runner に集約済み）
+        - G204  # running external commands is what this tool is for (kept in internal/runner)
     revive:
       rules:
         - name: exported
@@ -47,7 +47,7 @@ linters:
 
   exclusions:
     rules:
-      # テストでは長い関数や重複を許容する
+      # Long functions and duplication are fine in tests.
       - path: _test\.go
         linters:
           - gosec
@@ -60,4 +60,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/lambdasakura/incus-devkit
+        - github.com/lambdasakura/incus-dev

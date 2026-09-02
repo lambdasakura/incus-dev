@@ -31,7 +31,6 @@ func (d Device) Type() string { return d["type"] }
 type Instance struct {
 	Name     string            `json:"name"`
 	Status   string            `json:"status"`
-	Type     string            `json:"type"`
 	Profiles []string          `json:"profiles"`
 	Config   map[string]string `json:"config"`
 	Devices  map[string]Device `json:"devices"`
@@ -118,8 +117,6 @@ func (i *Instance) HasIPv4Address() bool {
 type InstanceSpec struct {
 	Name  string
 	Image string
-	// Type is container (the default) or virtual-machine.
-	Type string
 	// Profiles names the profiles to apply.
 	Profiles []string
 	// NoProfiles applies no profile at all, matching profiles: [].

@@ -9,12 +9,16 @@ import (
 	"github.com/lxc/incus/v6/shared/cliconfig"
 )
 
+// localRemote is the only Incus operated on.
+//
+// A remote Incus is out of scope: the workspace is a bind mount of a path on
+// this machine, which does not exist on the other end (spec 05-incus.md
+// 5.7.1). Naming it explicitly also keeps idev clear of what
+// "incus remote switch" left as the default.
+const localRemote = "local"
+
 // Target is the Incus to operate on.
 type Target struct {
-	// Remote is the remote name. Only when it is empty is the incus default
-	// remote used. The CLI default is "local", and it is unaffected by
-	// incus remote switch.
-	Remote string
 	// Project is the Incus project name. Empty means default.
 	Project string
 }
@@ -41,18 +45,13 @@ func Connect(target Target) (*API, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load incus client configuration: %w", err)
 	}
-	return connect(config, config.DefaultRemote, target)
+	return connect(config, target)
 }
 
-func connect(config cliConfig, defaultRemote string, target Target) (*API, error) {
-	remote := target.Remote
-	if remote == "" {
-		remote = defaultRemote
-	}
-
-	server, err := config.GetInstanceServer(remote)
+func connect(config cliConfig, target Target) (*API, error) {
+	server, err := config.GetInstanceServer(localRemote)
 	if err != nil {
-		return nil, fmt.Errorf("connect to incus remote %q: %w", remote, err)
+		return nil, fmt.Errorf("connect to the local incus: %w", err)
 	}
 	if target.Project != "" {
 		server = server.UseProject(target.Project)
@@ -73,10 +72,10 @@ type configImageResolver struct {
 // Resolve turns a reference such as images:ubuntu/24.04 into a source and an
 // image.
 //
-// instanceType is used to resolve the alias: the same alias — images:debian/12,
-// say — points at a different image for a container than for a virtual
-// machine.
-func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error) {
+// An alias points at a different image per instance type, and only containers
+// are supported, so the container image is what is asked for
+// (spec 03-configuration.md 3.4).
+func (r *configImageResolver) Resolve(_ context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
 	remote, name, err := r.config.ParseRemote(ref)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse image reference %q: %w", ref, err)
@@ -94,7 +93,7 @@ func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType strin
 	// does not resolve, take it for a fingerprint given directly.
 	fingerprint := name
 	aliasErr := error(nil)
-	if alias, _, err := server.GetImageAliasType(instanceTypeOrDefault(instanceType), name); err == nil && alias != nil {
+	if alias, _, err := server.GetImageAliasType(string(api.InstanceTypeContainer), name); err == nil && alias != nil {
 		fingerprint = alias.Target
 	} else {
 		aliasErr = err
@@ -109,12 +108,4 @@ func (r *configImageResolver) Resolve(_ context.Context, ref, instanceType strin
 		return nil, nil, fmt.Errorf("resolve image %q: %w", ref, err)
 	}
 	return server, image, nil
-}
-
-// instanceTypeOrDefault treats an empty type as container.
-func instanceTypeOrDefault(instanceType string) string {
-	if instanceType == "" {
-		return "container"
-	}
-	return instanceType
 }

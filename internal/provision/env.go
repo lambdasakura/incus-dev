@@ -11,7 +11,6 @@ type Env struct {
 	Instance        string
 	Workspace       string // inside the container
 	WorkspaceSource string // on the host
-	Remote          string
 	IncusProject    string
 	// Secrets are the values injected from the host. Their values are hidden
 	// when displayed (spec 04-cli.md 4.10).
@@ -25,7 +24,6 @@ func (e Env) EnvVars() map[string]string {
 		"DEVKIT_INSTANCE":         e.Instance,
 		"DEVKIT_WORKSPACE":        e.Workspace,
 		"DEVKIT_WORKSPACE_SOURCE": e.WorkspaceSource,
-		"DEVKIT_INCUS_REMOTE":     e.Remote,
 		"DEVKIT_INCUS_PROJECT":    e.IncusProject,
 	}
 }
@@ -37,7 +35,6 @@ func (e Env) AnsibleVars() map[string]any {
 		"devkit_instance":         e.Instance,
 		"devkit_workspace":        e.Workspace,
 		"devkit_workspace_source": e.WorkspaceSource,
-		"devkit_incus_remote":     e.Remote,
 		"devkit_incus_project":    e.IncusProject,
 	}
 }

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 func TestRunCapturesOutput(t *testing.T) {

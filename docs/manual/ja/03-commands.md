@@ -22,7 +22,6 @@ Gitリポジトリである必要はない。
 | --- | --- | --- |
 | `-v`, `--verbose` | | 実行した外部コマンドなど詳細を出力する |
 | `-C`, `--directory <dir>` | カレントディレクトリ | 探索を開始するディレクトリ |
-| `--incus-remote <name>` | `local` | Incus remote（`incus remote switch` の既定には従わない） |
 | `--incus-project <name>` | `dev.yml` の `incus.project`、無ければ `default` | Incus project |
 
 ### 終了コード
@@ -239,7 +238,6 @@ idev status --json
   "devices": ["workspace(disk)"],
   "provision_steps": 1,
   "runtime": "container",
-  "incus_remote": "local",
   "incus_project": "default"
 }
 ```

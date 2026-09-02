@@ -201,7 +201,6 @@ DEVKIT_PROJECT_NAME       project name
 DEVKIT_INSTANCE           instance name
 DEVKIT_WORKSPACE          workspace path inside the container
 DEVKIT_WORKSPACE_SOURCE   project root path on the host
-DEVKIT_INCUS_REMOTE       Incus remote
 DEVKIT_INCUS_PROJECT      Incus project
 ```
 
@@ -221,7 +220,6 @@ devkit_project_name: my-project
 devkit_instance: dev-my-project
 devkit_workspace: /workspace
 devkit_workspace_source: /home/you/src/my-project
-devkit_incus_remote: local
 devkit_incus_project: default
 ```
 

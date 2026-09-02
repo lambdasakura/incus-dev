@@ -142,9 +142,14 @@ image: images:debian/12
 idev assumes no particular OS. Keeping the image and the provisioning steps
 consistent is the project's responsibility.
 
-### `type`
+### There is no `type`
 
-`container` (default) or `virtual-machine`. Only `container` is verified today.
+An instance is always a container. Writing `type:` fails `idev validate` as an
+unknown key.
+
+A virtual machine cannot bind-mount the workspace, and `raw.idmap` and a disk's
+`shift` are container-only mechanisms, so sharing the workspace would have to
+be designed differently. That is not planned.
 
 ### `profiles`
 

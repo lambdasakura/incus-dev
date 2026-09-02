@@ -24,7 +24,7 @@ The user-facing documentation is available in English and Japanese.
 | --- | --- | --- |
 | Manual | [manual/](manual/README.md) | [manual/ja/](manual/ja/README.md) |
 | Troubleshooting | [troubleshooting.md](troubleshooting.md) | [troubleshooting.ja.md](troubleshooting.ja.md) |
-| Agent Skill | [skills/incus-devkit/](../skills/incus-devkit/) | [skills/incus-devkit-ja/](../skills/incus-devkit-ja/) |
+| Agent Skill | [skills/incus-dev/](../skills/incus-dev/) | [skills/incus-dev-ja/](../skills/incus-dev-ja/) |
 
 The design specification under [spec/](spec/README.md) is written in Japanese
 only. It is the criterion for implementation decisions, not a user document.

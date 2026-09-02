@@ -1,19 +1,70 @@
-# incus-devkit
+# incus-dev
 
 `idev` — a CLI that builds and manages reproducible, per-project development
 environments on [Incus](https://linuxcontainers.org/incus/).
 
 *[日本語版 / Japanese](README.ja.md)*
 
-[![CI](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml)
+[![CI](https://github.com/lambdasakura/incus-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-dev/actions/workflows/ci.yml)
+
+## Quick start
+
+You need [Incus](https://linuxcontainers.org/incus/docs/main/installing/) on the
+host. Nothing else: `idev` is a single static binary with no runtime
+dependencies.
+
+### 1. Install idev
+
+Take the archive for your platform from the
+[latest release](../../releases/latest).
 
 ```bash
-git clone <repository>
-cd <repository>
+VERSION=0.1.0        # the release you want
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/v$VERSION/incus-dev_${VERSION}_linux_amd64.tar.gz
+tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz idev
+sudo install -m 0755 idev /usr/local/bin/idev
 
-idev up
-idev shell
+idev --version
 ```
+
+Other ways to install, including `go install`, are [below](#installing).
+
+### 2. Declare the environment
+
+In the project you want an environment for:
+
+```bash
+cd ~/your-project
+mkdir -p .incus-dev
+
+cat > .incus-dev/dev.yml <<'YAML'
+schema: 1
+
+project:
+  name: your-project
+
+instance:
+  image: images:ubuntu/24.04
+
+provision:
+  - name: tools
+    run: apt-get update && apt-get install -y build-essential git
+YAML
+```
+
+### 3. Bring it up
+
+```bash
+idev validate   # check dev.yml; changes nothing in Incus
+idev up         # create the instance, bootstrap it, run the provisioning
+idev shell      # a shell inside, with the project mounted at /workspace
+```
+
+Commit `.incus-dev/` along with your code. From then on, anyone who clones the
+project reproduces the same environment with `idev up`.
+
+Next: the [tutorial](docs/manual/02-getting-started.md), or
+[examples/](examples/) for worked configurations.
 
 ## What it does
 
@@ -99,25 +150,33 @@ root:<gid>:1
 
 ## Installing
 
-Prebuilt binaries for Linux, macOS and Windows (amd64 and arm64) are attached
-to each [release](../../releases). Download the archive for your platform,
-verify it against `checksums.txt`, and put `idev` on your `PATH`.
+Every [release](../../releases) carries binaries for Linux, macOS and Windows,
+on amd64 and arm64, plus a `checksums.txt` to check them against.
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
 
-`idev` is an API client, so it also runs on macOS and Windows against a remote
-Incus. The Incus daemon itself runs on Linux.
+On Windows, unpack the `.zip` and put `idev.exe` in a directory on `PATH`.
 
-## Building
+With a Go toolchain, no download is needed. A binary built this way reports
+`dev` for `idev --version`, because the version is stamped in at release time.
+
+```bash
+go install github.com/lambdasakura/incus-dev/cmd/idev@latest
+```
+
+From a checkout:
 
 ```bash
 make build     # ./bin/idev
 make install   # into $GOBIN
 ```
+
+The Incus daemon runs on Linux, but `idev` talks to it over the API, so a macOS
+or Windows machine can drive a remote Incus.
 
 ## Development
 
@@ -154,26 +213,31 @@ workspace ownership, a missing profile — are covered in
 
 ## Status
 
-Everything below is implemented, and verified by integration tests against a
-real Incus daemon.
+All of the following is implemented, and verified by integration tests against
+a real Incus daemon.
 
-| Feature | State |
+- `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` /
+  `destroy` / `snapshot`
+- `run` / `ansible` / `galaxy` steps; bootstrap (default, overridden, disabled)
+- `provision --step` / `--from` / `--list` (partial runs)
+- `up --dry-run` / `up --restart`, and `status --json`
+- Pass-through of instance config and devices, including removals
+- Workspace mount and idmap (`auto` / `raw` / `shift` / `none`)
+- `volumes` (persistent volumes) and `secrets` (injected from the host)
+- `shell` (user / command / cwd), `incus.project`
+- `project.scope` (multiple checkouts / per-branch instances)
+- Incus through the Go client library, so the `incus` command is not required
+
+## Not supported
+
+Two things are permanently out of scope, because both would need a different
+way to share the workspace, and that is away from what this tool is for: a
+per-project environment on the machine in front of you.
+
+| | |
 | --- | --- |
-| `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` / `destroy` / `snapshot` | Done |
-| `run` / `ansible` / `galaxy` steps; bootstrap (default, overridden, disabled) | Done |
-| `provision --step` / `--from` / `--list` (partial runs) | Done |
-| `up --dry-run` / `up --restart` | Done |
-| `status --json` | Done |
-| Pass-through of instance config and devices, including removals | Done |
-| Workspace mount and idmap (`auto` / `raw` / `shift` / `none`) | Done |
-| `volumes` (persistent volumes) | Done |
-| `secrets` (injected from host environment variables and files) | Done |
-| `shell` (user / command / cwd), `incus.project` | Done |
-| Incus operations via the Go client library | Done — the `incus` command is not required |
-| `project.scope` (multiple checkouts / per-branch instances) | Done |
-| `--incus-remote` | Flag is wired up but unverified; how to share the workspace is undecided |
-| `instance.type: virtual-machine` | Unverified; workspace sharing assumes a container |
-| `validate --check-host` | Not implemented |
+| A remote Incus | `idev` always talks to the local one, and does not follow `incus remote switch` |
+| Virtual machines | An instance is always a container; there is no `instance.type` |
 
 ## License
 

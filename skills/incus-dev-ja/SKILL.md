@@ -1,9 +1,9 @@
 ---
-name: incus-devkit-ja
+name: incus-dev-ja
 description: idev コマンドと .incus-dev/dev.yml でIncusのプロジェクト専用開発環境を扱うときに使う。環境の新規作成、ビルド・テストのコンテナ内実行、ツールや依存の追加、idev の失敗の切り分け、既存プロジェクトへの導入が対象。「idev」「.incus-dev」「dev.yml」「Incusで開発環境」に触れる作業で参照する。
 ---
 
-# incus-devkit（idev）の使い方
+# incus-dev（idev）の使い方
 
 `idev` はプロジェクト単位の開発環境をIncusコンテナとして構築・管理するCLI。
 ホストを汚さずに、リポジトリごとに再現可能な環境を用意するために使う。

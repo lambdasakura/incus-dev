@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | マニュアル | [manual/](manual/README.md) | [manual/ja/](manual/ja/README.md) |
 | トラブルシューティング | [troubleshooting.md](troubleshooting.md) | [troubleshooting.ja.md](troubleshooting.ja.md) |
-| Agent Skill | [skills/incus-devkit/](../skills/incus-devkit/) | [skills/incus-devkit-ja/](../skills/incus-devkit-ja/) |
+| Agent Skill | [skills/incus-dev/](../skills/incus-dev/) | [skills/incus-dev-ja/](../skills/incus-dev-ja/) |
 
 [spec/](spec/README.md) は日本語のみ。利用者向け文書ではなく、
 実装判断の基準であるため二言語化しない。

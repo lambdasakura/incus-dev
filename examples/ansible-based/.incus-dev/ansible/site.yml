@@ -1,5 +1,5 @@
 ---
-# hosts: dev はdevkitが生成するinventoryの規約に対応する。
+# "hosts: dev" matches the host name in the inventory devkit generates.
 - name: Provision development environment
   hosts: dev
   gather_facts: true

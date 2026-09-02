@@ -105,10 +105,10 @@ A `workspace.idmap` question. The default `auto` falls back to `shift` when
 ## Cannot reach Incus
 
 ```text
-connect to incus remote "local": The incus daemon doesn't appear to be started
+connect to the local incus: The incus daemon doesn't appear to be started
 ```
 
 `idev` reads the same configuration as the `incus` command
-(`~/.config/incus/config.yml`). Check whether `incus info` works first. The
-default for `--incus-remote` is `local`, and it does not follow the default set
-by `incus remote switch`.
+(`~/.config/incus/config.yml`). Check whether `incus info` works first. `idev`
+always talks to the `local` remote, and does not follow the default set by
+`incus remote switch`. A remote Incus is out of scope.

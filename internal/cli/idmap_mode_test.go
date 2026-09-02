@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
 var errNotPermitted = errors.New("subuid is not configured")
@@ -79,13 +79,6 @@ func TestResolveIDMap(t *testing.T) {
 			check:       denied,
 			wantManaged: false,
 			wantWarn:    true,
-		},
-		{
-			// Both raw.idmap and a disk's shift are container-only mechanisms.
-			name:        "stays out of the way outside a container",
-			yaml:        planBase + "  type: virtual-machine\n",
-			check:       denied,
-			wantManaged: false,
 		},
 	}
 

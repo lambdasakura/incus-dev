@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
 // resolveSecrets reads the secrets from the host (spec 03-configuration.md

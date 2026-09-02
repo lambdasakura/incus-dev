@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/provision"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/provision"
 )
 
 // Plan prints what idev up would do, without doing it (spec 04-cli.md 4.8).
@@ -64,10 +64,6 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 
 	if current == nil {
 		out = append(out, fmt.Sprintf("Create instance %s (%s)", name, cfg.Instance.Image))
-		if t := cfg.Instance.TypeOrDefault(); t != "container" {
-			out = append(out, "Instance type: "+t)
-		}
-
 		if profiles := cfg.ProfileNames(); len(profiles) > 0 {
 			out = append(out, "Apply profiles: "+strings.Join(profiles, ", "))
 		} else {

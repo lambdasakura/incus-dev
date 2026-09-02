@@ -93,20 +93,31 @@ Incus Go client library への移行（incus コマンドへの依存を解消�
 
 ```text
 追加のステップ型（必要が生じた場合のみ）
-
-virtual-machine サポート
-Incus remote
 ```
 
-### virtual-machine と Incus remote を保留する理由
+### 対応しないもの
 
-いずれも **workspaceの共有方式を決め直す必要がある** ため、
-実際の要求が出てから設計する。
+以下は **恒久的な非目標** である。「いつか」ではなく、やらない。
+いずれも **workspaceの共有方式を別に設計しないと成立しない** ものであり、
+それは「手元のマシンにプロジェクト単位の開発環境を作る」という
+このツールの目的から外れる。
 
-- virtual-machine では bind mount が使えず、virtiofs / 9p となる。
-  `raw.idmap` や disk の `shift` もコンテナ固有の仕組みで意味を持たない
-- remote では workspace がホスト側のパスを前提とするため成立しない
-  （CLIのフラグ `--incus-remote` は操作層まで通しているが、未検証）
+**remoteのIncus。**
+
+workspaceはホスト側のパスのbind mountであり、そのパスはremoteの向こう側には
+存在しない。操作対象は常にローカルのIncusに固定する
+（[05-incus.md](05-incus.md) 5.6）。フラグも `incus.Target` のフィールドも
+持たない。
+
+**virtual-machine。**
+
+virtual-machine では bind mount が使えず、virtiofs / 9p となる。
+`raw.idmap` や disk の `shift` もコンテナ固有の仕組みで意味を持たない。
+instanceは常にコンテナとし、`instance.type` という設定項目も持たない
+（[03-configuration.md](03-configuration.md) 3.6.2）。
+
+「渡せるが未検証」という中途半端な状態を残さない。
+動くと期待した利用者が分かりにくい形で失敗するだけだからである。
 
 ### 複数workspaceについて
 

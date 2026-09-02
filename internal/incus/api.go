@@ -37,11 +37,8 @@ type server interface {
 }
 
 // imageResolver resolves an image reference such as images:ubuntu/24.04.
-//
-// The instance type comes along because an alias points at a different image
-// for each type.
 type imageResolver interface {
-	Resolve(ctx context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error)
+	Resolve(ctx context.Context, ref string) (incusclient.ImageServer, *api.Image, error)
 }
 
 // API is the Client implementation that calls the Incus HTTP API.
@@ -93,7 +90,6 @@ func convertInstance(full *api.InstanceFull) *Instance {
 	inst := &Instance{
 		Name:            full.Name,
 		Status:          full.Status,
-		Type:            full.Type,
 		Profiles:        full.Profiles,
 		Config:          full.Config,
 		Devices:         convertDevices(full.Devices),
@@ -135,14 +131,14 @@ func toAPIDevices(devices map[string]Device) map[string]map[string]string {
 
 // CreateInstance creates an instance without starting it.
 func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
-	source, image, err := a.Images.Resolve(ctx, spec.Image, spec.Type)
+	source, image, err := a.Images.Resolve(ctx, spec.Image)
 	if err != nil {
 		return err
 	}
 
 	req := api.InstancesPost{
 		Name: spec.Name,
-		Type: api.InstanceType(spec.Type),
+		Type: api.InstanceTypeContainer,
 		InstancePut: api.InstancePut{
 			Config:   spec.Config,
 			Devices:  toAPIDevices(spec.Devices),

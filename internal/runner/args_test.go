@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // Building the arguments and marking them for masking together avoids

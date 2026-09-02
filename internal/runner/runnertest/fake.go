@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // Fake is a Runner that records commands instead of running them.

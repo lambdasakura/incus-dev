@@ -12,18 +12,17 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/project"
-	"github.com/lambdasakura/incus-devkit/internal/provision"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/project"
+	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // globalFlags are the flags every command shares.
 type globalFlags struct {
 	verbose      bool
 	directory    string
-	incusRemote  string
 	incusProject string
 }
 
@@ -38,10 +37,15 @@ type appFactory func(*globalFlags) (*App, error)
 
 // NewRootCommand builds the root command of idev.
 func NewRootCommand(version string) *cobra.Command {
-	return newRootCommand(version, newApp)
+	return newRootCommand(version, newApp, newOfflineApp)
 }
 
-func newRootCommand(version string, factory appFactory) *cobra.Command {
+// newRootCommand wires the commands to the factories building their App.
+//
+// offline is for the commands that make no Incus call. They must keep working
+// where no Incus is reachable (spec 04-cli.md 4.7), so they must not be given
+// a factory that connects.
+func newRootCommand(version string, factory, offline appFactory) *cobra.Command {
 	g := &globalFlags{}
 
 	root := &cobra.Command{
@@ -58,7 +62,6 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 	pf.BoolVarP(&g.verbose, "verbose", "v", false, "print detailed output")
 	pf.StringVarP(&g.directory, "directory", "C", "",
 		"directory to start looking for .incus-dev/dev.yml in (default: current directory)")
-	pf.StringVar(&g.incusRemote, "incus-remote", "local", "Incus remote")
 	pf.StringVar(&g.incusProject, "incus-project", "",
 		"Incus project (defaults to incus.project in dev.yml, then \"default\")")
 
@@ -70,7 +73,7 @@ func newRootCommand(version string, factory appFactory) *cobra.Command {
 		newStatusCommand(g, factory),
 		newDestroyCommand(g, factory),
 		newRebuildCommand(g, factory),
-		newValidateCommand(g, factory),
+		newValidateCommand(g, offline),
 		newSnapshotCommand(g, factory),
 	)
 	return root
@@ -87,11 +90,25 @@ func resolveTarget(g *globalFlags, cfg *config.Config) incus.Target {
 	if project == "" {
 		project = defaultIncusProject
 	}
-	return incus.Target{Remote: g.incusRemote, Project: project}
+	return incus.Target{Project: project}
 }
 
-// newApp discovers the project, loads the configuration and builds the App.
+// newApp discovers the project, loads the configuration, connects to Incus and
+// builds the App.
 func newApp(g *globalFlags) (*App, error) {
+	return buildApp(g, incus.Connect)
+}
+
+// newOfflineApp builds the App without connecting to Incus, for the commands
+// that make no Incus call. `idev validate` is expected to run in a CI job where
+// no Incus is reachable (spec 04-cli.md 4.7).
+func newOfflineApp(g *globalFlags) (*App, error) {
+	return buildApp(g, nil)
+}
+
+// buildApp discovers the project, loads the configuration and builds the App.
+// It connects to Incus when connect is non-nil.
+func buildApp(g *globalFlags, connect func(incus.Target) (*incus.API, error)) (*App, error) {
 	start := g.directory
 	if start == "" {
 		wd, err := os.Getwd()
@@ -115,12 +132,17 @@ func newApp(g *globalFlags) (*App, error) {
 	log := newLogger(os.Stderr, g.verbose)
 	cmdRunner := runner.NewWithLogger(log)
 
-	client, err := incus.Connect(target)
-	if err != nil {
-		return nil, err
+	// Left nil for the commands that never reach Incus.
+	var client incus.Client
+	if connect != nil {
+		api, err := connect(target)
+		if err != nil {
+			return nil, err
+		}
+		// So --verbose can follow what is done to Incus.
+		api.Logger = log
+		client = api
 	}
-	// So --verbose can follow what is done to Incus.
-	client.Logger = log
 
 	return NewAppFor(AppOptions{
 		Config:       cfg,
@@ -133,7 +155,6 @@ func newApp(g *globalFlags) (*App, error) {
 		Verbose:      g.verbose,
 		Interactive:  isTerminal(os.Stdin) && isTerminal(os.Stdout),
 		Term:         os.Getenv("TERM"),
-		Remote:       target.Remote,
 		IncusProject: target.Project,
 	})
 }

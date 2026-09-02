@@ -10,9 +10,9 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/project"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/project"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 const (
@@ -124,9 +124,10 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 // inventoryFor builds the contents of the temporary inventory devkit generates.
 func inventoryFor(env Env) map[string]any {
 	host := map[string]any{
-		"ansible_host":          env.Instance,
-		"ansible_connection":    ConnectionPlugin,
-		"ansible_incus_remote":  orDefault(env.Remote, "local"),
+		"ansible_host":       env.Instance,
+		"ansible_connection": ConnectionPlugin,
+		// The local Incus is the only one operated on (spec 05-incus.md 5.7.1).
+		"ansible_incus_remote":  "local",
 		"ansible_incus_project": orDefault(env.IncusProject, "default"),
 	}
 	return map[string]any{

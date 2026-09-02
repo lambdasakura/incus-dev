@@ -26,7 +26,7 @@
 推奨構成：
 
 ```text
-incus-devkit/
+incus-dev/
 ├── README.md                   # 英語版
 ├── README.ja.md                # 日本語版
 ├── LICENSE
@@ -94,11 +94,11 @@ incus-devkit/
 │   └── spec/                   # 設計仕様。日本語のみ
 │
 ├── skills/                     # AIエージェント向けAgent Skill
-│   ├── incus-devkit/           # 英語版
+│   ├── incus-dev/           # 英語版
 │   │   ├── SKILL.md
 │   │   ├── references/
 │   │   └── templates/
-│   └── incus-devkit-ja/        # 日本語版
+│   └── incus-dev-ja/        # 日本語版
 │
 ├── examples/                   # ドキュメント用サンプル（実行時には使用しない）
 │   ├── minimal/

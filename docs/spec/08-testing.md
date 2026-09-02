@@ -87,6 +87,10 @@ embedされるアセットが schemas/ のみであること
 
 `examples/` 配下がバイナリへ同梱されていないことも確認する。
 
+`examples/` 配下の設定ファイル（Markdownを除く）がASCIIのみであることも
+検査する。サンプルは1組しか無く、言語を問わず読まれるためである。
+英日の二言語を持つのは、隣に置く `README.md` / `README.ja.md` の側である。
+
 ---
 
 ## 8.3 Integration Test
@@ -160,7 +164,18 @@ idev validate           # examples/ 配下の各サンプルに対して
 `examples/` の各サンプルが常に `idev validate` を通ることを保証する
 （`test/examples_test.go` が `go test ./...` の中で行うため、別ジョブは要らない）。
 
-### 8.4.1 プラットフォーム別に実行する範囲
+### 8.4.1 Incusが無い環境で通ること
+
+unit testはIncus daemonが無い環境で全て通らなければならない。
+
+開発機ではIncusが動いていることが多く、daemonを必要とするテストが
+混ざっても気付けない。そのため `make test` / `make cover` は
+`INCUS_SOCKET` を存在しないパスへ向けて実行する。
+CIで初めて発覚する、という状態を作らないためである。
+
+Incusを必要とするテストは統合テスト（8.3）に置く。
+
+### 8.4.2 プラットフォーム別に実行する範囲
 
 配布対象は linux / darwin / windows である（仕様 07-implementation.md 7.7）が、
 全プラットフォームで同じ範囲を実行するわけではない。
@@ -181,7 +196,7 @@ Windows固有のソースが壊れていないことは、vetとビルドで担�
 統合テスト（8.3）はIncusを必要とするため、GitHub Actionsでは実行しない。
 Incusが利用可能なランナーを持つCI（`.gitlab-ci.yml`）側で実行する。
 
-### 8.4.2 リリース
+### 8.4.3 リリース
 
 `v*` のタグをpushすると GoReleaser（`.goreleaser.yaml`）が
 linux / darwin / windows × amd64 / arm64 のアーカイブと

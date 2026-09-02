@@ -1,4 +1,4 @@
-module github.com/lambdasakura/incus-devkit
+module github.com/lambdasakura/incus-dev
 
 go 1.27.0
 

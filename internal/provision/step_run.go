@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // execRun runs a script inside the container (spec 06-provisioning.md 6.4).

@@ -1,8 +1,8 @@
-# incus-devkit skill
+# incus-dev skill
 
 An Agent Skill for driving `idev` from an AI coding agent.
 
-*[日本語版 / Japanese](../incus-devkit-ja/README.md)*
+*[日本語版 / Japanese](../incus-dev-ja/README.md)*
 
 ## Installing
 
@@ -10,16 +10,16 @@ Copy it somewhere the agent reads.
 
 ```bash
 # for every project of this user
-cp -r skills/incus-devkit ~/.claude/skills/
+cp -r skills/incus-dev ~/.claude/skills/
 
 # for one project only
-cp -r skills/incus-devkit /path/to/project/.claude/skills/
+cp -r skills/incus-dev /path/to/project/.claude/skills/
 ```
 
 ## Layout
 
 ```text
-incus-devkit/
+incus-dev/
 ├── SKILL.md                      # principles, commands, workflows
 ├── references/
 │   ├── dev-yml.md                # every dev.yml field

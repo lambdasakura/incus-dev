@@ -196,14 +196,22 @@ Incus側のエラーがそのまま利用者へ届く。
 
 ## 5.6 Incus Remote
 
-`--incus-remote` は `incus.Target` として操作層まで渡り、
-`incus` コマンドと同じ設定（`~/.config/incus/config.yml`）から
-接続先を解決する。省略時はその設定の既定remoteを使う。
+**remoteのIncusは対象外である。対応する予定はない。**
 
-ただし **remoteの利用は未検証である。** workspaceのbind mountは
-ホスト側のパスを前提とするため、remoteでは成立しない。
-共有方式そのものを決め直す必要があり、実際の要求が出てから設計する
-（[09-roadmap.md](09-roadmap.md)）。
+workspaceはホスト側のパスのbind mountであり、そのパスはremoteの向こう側には
+存在しない。remoteを扱うには共有方式そのものを別に設計する必要があるが、
+それはこのツールの目的（手元のマシンにプロジェクト単位の開発環境を作る）から
+外れる。
+
+したがって接続先は常に `local` remote に固定する
+（`internal/incus/connect.go` の `localRemote`）。remoteを選ぶフラグも
+`incus.Target` のフィールドも持たない。`incus remote switch` が設定した
+既定remoteにも従わない。手元のIncusを操作しているつもりで、
+別のマシンのinstanceを壊さないためである。
+
+imageの取得元を示す remote（`images:ubuntu/24.04` の `images:`）は
+これとは別の仕組みであり、従来どおり `incus` コマンドと同じ設定
+（`~/.config/incus/config.yml`）から解決する。
 
 `dev.yml` 側での remote 指定は提供しない。
 
@@ -287,9 +295,13 @@ github.com/lxc/incus/v6/client
 - CLIのバージョン差異や出力形式の変更の影響を受けにくい
 - `incus` コマンドの存在に依存しない
 
-remote・project・imageの解決には `incus` コマンドと同じ設定
+project・imageの解決には `incus` コマンドと同じ設定
 （`~/.config/incus/config.yml`）を読む (`internal/incus/connect.go`)。
 利用者から見た挙動を `incus` コマンドと揃えるためである。
+ただし接続先remoteは常に `local` に固定する（5.6）。
+
+image aliasは instance種別ごとに別のimageを指すため、解決の際は
+常にコンテナ用のimageを要求する（[03-configuration.md](03-configuration.md) 3.6.2）。
 
 ### 5.7.2 端末を伴う実行
 

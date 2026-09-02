@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
 )
 
 var errInjected = errors.New("injected")
@@ -23,7 +23,6 @@ func TestFakeLifecycle(t *testing.T) {
 	spec := incus.InstanceSpec{
 		Name:     "dev-x",
 		Image:    "images:alpine/3.21",
-		Type:     "container",
 		Profiles: []string{"default"},
 		Config:   map[string]string{"limits.cpu": "2"},
 		Devices:  map[string]incus.Device{"root": {"type": "disk", "path": "/"}},

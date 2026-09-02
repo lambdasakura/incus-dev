@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // branchFunc returns the current Git branch name.

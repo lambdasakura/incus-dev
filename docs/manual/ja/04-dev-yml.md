@@ -139,9 +139,14 @@ image: images:debian/12
 
 idev は特定のOSを前提としない。imageと構成手順の整合はプロジェクトの責任である。
 
-### `type`
+### `type` は無い
 
-`container`（既定）または `virtual-machine`。現時点では `container` のみ検証されている。
+instanceは常にコンテナである。`type:` と書くと未知のキーとして
+`idev validate` が失敗する。
+
+virtual-machine では workspace を bind mount できず、`raw.idmap` や
+disk の `shift` もコンテナ固有の仕組みである。workspaceの共有方式を
+別に設計する必要があり、対応する予定は無い。
 
 ### `profiles`
 

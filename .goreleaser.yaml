@@ -4,7 +4,7 @@
 #     goreleaser release --snapshot --clean
 version: 2
 
-project_name: incus-devkit
+project_name: incus-dev
 
 before:
   hooks:

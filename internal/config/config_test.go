@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
 func parse(t *testing.T, yaml string) *config.Config {
@@ -67,9 +67,6 @@ func TestDefaults(t *testing.T) {
 	}
 	if got := c.ProfileNames(); !cmp.Equal(got, []string{"default"}) {
 		t.Errorf("ProfileNames() = %v, want [default]", got)
-	}
-	if c.Instance.TypeOrDefault() != "container" {
-		t.Errorf("TypeOrDefault() = %q, want container", c.Instance.TypeOrDefault())
 	}
 }
 
@@ -330,7 +327,7 @@ func TestParseErrors(t *testing.T) {
 		{
 			name: "reserved config key",
 			yaml: minimal + "  config:\n    user.incus-devkit.project: x\n",
-			want: "user.incus-devkit",
+			want: "user.incus-dev",
 		},
 		{
 			name: "invalid project name",
@@ -341,11 +338,6 @@ func TestParseErrors(t *testing.T) {
 			name: "invalid idmap",
 			yaml: minimal + "workspace:\n  idmap: magic\n",
 			want: "idmap",
-		},
-		{
-			name: "invalid instance.type",
-			yaml: minimal + "  type: pod\n",
-			want: "type",
 		},
 		{
 			name: "an object as a config value",
@@ -655,11 +647,16 @@ func TestParseRejectsNonNumericSchema(t *testing.T) {
 	}
 }
 
-func TestInstanceTypeExplicit(t *testing.T) {
-	c := parse(t, minimal+"  type: virtual-machine\n")
-
-	if got := c.Instance.TypeOrDefault(); got != "virtual-machine" {
-		t.Errorf("TypeOrDefault() = %q", got)
+// Only containers are supported, so instance.type is not a setting at all
+// (spec 03-configuration.md 3.4).
+func TestInstanceTypeIsRejected(t *testing.T) {
+	for _, value := range []string{"virtual-machine", "container"} {
+		t.Run(value, func(t *testing.T) {
+			err := parseErr(t, minimal+"  type: "+value+"\n")
+			if !strings.Contains(err.Error(), "type") {
+				t.Errorf("error = %q, want instance.type to be rejected", err.Error())
+			}
+		})
 	}
 }
 

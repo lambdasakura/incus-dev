@@ -13,12 +13,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
-	"github.com/lambdasakura/incus-devkit/internal/provision"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
-	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
+	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
 )
 
 var errBoom = errors.New("boom")
@@ -895,8 +895,8 @@ func TestStatusShowsAdditionalFields(t *testing.T) {
 	})
 	app := NewApp(AppOptions{
 		Config: cfg, Client: client, Runner: &runnertest.Fake{}, Out: out,
-		Remote: "dev-server", IncusProject: "development",
-		CheckIDMap: func(int, int) error { return nil },
+		IncusProject: "development",
+		CheckIDMap:   func(int, int) error { return nil },
 	})
 
 	if err := app.Status(context.Background(), false); err != nil {
@@ -904,7 +904,7 @@ func TestStatusShowsAdditionalFields(t *testing.T) {
 	}
 
 	text := out.String()
-	for _, want := range []string{"gpu0(gpu), workspace(disk)", "Runtime:", "1.0", "dev-server / development"} {
+	for _, want := range []string{"gpu0(gpu), workspace(disk)", "Runtime:", "1.0", "development"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("status =\n%s\nwant it to contain %q", text, want)
 		}
@@ -1026,15 +1026,6 @@ func TestPlanWarnsOnIDMapFallback(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "shift") {
 		t.Errorf("warning = %q, want it to say it fell back", errOut.String())
-	}
-}
-
-func TestIncusTargetDefaults(t *testing.T) {
-	if got := incusTarget("", ""); got != "" {
-		t.Errorf("incusTarget() = %q, want it empty when nothing is set", got)
-	}
-	if got := incusTarget("", "dev"); got != "local / dev" {
-		t.Errorf("incusTarget() = %q", got)
 	}
 }
 

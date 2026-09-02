@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/lambdasakura/incus-devkit/schemas/dev-v1.schema.json",
-  "title": "incus-devkit development environment definition (schema 1)",
+  "$id": "https://github.com/lambdasakura/incus-dev/schemas/dev-v1.schema.json",
+  "title": "incus-dev development environment definition (schema 1)",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "project", "instance"],
@@ -35,7 +35,6 @@
       "required": ["image"],
       "properties": {
         "image": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["container", "virtual-machine"] },
         "profiles": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }

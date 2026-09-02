@@ -1,18 +1,68 @@
-# incus-devkit
+# incus-dev
 
 Incusを利用して、プロジェクト単位の開発環境を再現可能な形で構築・管理するCLIツール `idev`。
 
 *[English version](README.md)*
 
-[![CI](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-devkit/actions/workflows/ci.yml)
+[![CI](https://github.com/lambdasakura/incus-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/lambdasakura/incus-dev/actions/workflows/ci.yml)
+
+## クイックスタート
+
+必要なのはホストの [Incus](https://linuxcontainers.org/incus/docs/main/installing/) だけ。
+`idev` は単一の静的バイナリで、実行時の依存を持たない。
+
+### 1. idevを導入する
+
+[最新リリース](../../releases/latest)から自分のプラットフォーム向けの
+アーカイブを取得する。
 
 ```bash
-git clone <repository>
-cd <repository>
+VERSION=0.1.0        # 使いたいリリース
+curl -LO https://github.com/lambdasakura/incus-dev/releases/download/v$VERSION/incus-dev_${VERSION}_linux_amd64.tar.gz
+tar -xzf incus-dev_${VERSION}_linux_amd64.tar.gz idev
+sudo install -m 0755 idev /usr/local/bin/idev
 
-idev up
-idev shell
+idev --version
 ```
+
+`go install` を含む他の導入方法は[後述](#導入)。
+
+### 2. 環境を宣言する
+
+環境を用意したいプロジェクトで以下を行う。
+
+```bash
+cd ~/your-project
+mkdir -p .incus-dev
+
+cat > .incus-dev/dev.yml <<'YAML'
+schema: 1
+
+project:
+  name: your-project
+
+instance:
+  image: images:ubuntu/24.04
+
+provision:
+  - name: tools
+    run: apt-get update && apt-get install -y build-essential git
+YAML
+```
+
+### 3. 立ち上げる
+
+```bash
+idev validate   # dev.ymlの検査。Incusへは一切変更を加えない
+idev up         # instanceを作り、bootstrapしてprovisionを実行する
+idev shell      # コンテナ内のシェル。プロジェクトは /workspace にある
+```
+
+`.incus-dev/` はコードと一緒にコミットする。
+以後、このプロジェクトをcloneした人は `idev up` だけで同じ環境を再現できる。
+
+次は[チュートリアル](docs/manual/ja/02-getting-started.md)、
+または構成例の [examples/](examples/README.ja.md) へ。
 
 ## 設計方針
 
@@ -96,26 +146,34 @@ root:<gid>:1
 
 ## 導入
 
-Linux / macOS / Windows（amd64・arm64）のビルド済みバイナリを
-各[リリース](../../releases)に添付している。
-自分のプラットフォーム向けのアーカイブを取得し、`checksums.txt` で検証して
-`idev` を `PATH` の通った場所へ置く。
+各[リリース](../../releases)に Linux / macOS / Windows（amd64・arm64）の
+バイナリと、検証用の `checksums.txt` を添付している。
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
-tar -xzf incus-devkit_<version>_linux_amd64.tar.gz
+tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
 
-`idev` はAPIクライアントであるため、remoteのIncusに対してなら
-macOS / Windows からも使える。Incus daemon自体はLinux上で動く。
+Windowsでは `.zip` を展開し、`idev.exe` を `PATH` の通ったディレクトリへ置く。
 
-## ビルド
+Goツールチェインがあればダウンロードは要らない。
+ただしこの方法で入れたバイナリは `idev --version` が `dev` を返す。
+バージョンはリリース時に埋め込まれるためである。
+
+```bash
+go install github.com/lambdasakura/incus-dev/cmd/idev@latest
+```
+
+checkoutから入れる場合：
 
 ```bash
 make build     # ./bin/idev
 make install   # $GOBIN へインストール
 ```
+
+Incus daemon自体はLinux上で動くが、`idev` はAPI経由で操作するため、
+macOS / Windows からremoteのIncusを操作できる。
 
 ## 開発
 
@@ -146,25 +204,30 @@ make test-integration   # Incus実機に対する統合テスト
 
 ## 実装状況
 
-以下は実装済みで、Incus実機に対する統合テストで動作を確認している。
+以下はすべて実装済みで、Incus実機に対する統合テストで動作を確認している。
 
-| 機能 | 状態 |
+- `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` /
+  `destroy` / `snapshot`
+- run / ansible / galaxy ステップ、bootstrap（既定・上書き・無効化）
+- `provision --step` / `--from` / `--list`（部分実行）
+- `up --dry-run` / `up --restart`、`status --json`
+- instance config / devices の素通しと削除追従
+- workspace mount と idmap（`auto` / `raw` / `shift` / `none`）
+- `volumes`（永続ボリューム）、`secrets`（ホストからの注入）
+- `shell`（user / command / cwd）、`incus.project`
+- `project.scope`（複数checkout / ブランチ別instance）
+- Incus API（Go client library）での操作。`incus` コマンドを必要としない
+
+## 対応しないもの
+
+以下の2つは恒久的に対象外である。どちらも workspace の共有方式を
+別に設計する必要があり、それは「手元のマシンにプロジェクト単位の開発環境を作る」
+というこのツールの目的から外れるためである。
+
+| | |
 | --- | --- |
-| `validate` / `up` / `status` / `shell` / `exec` / `provision` / `rebuild` / `destroy` / `snapshot` | 実装済み |
-| run / ansible / galaxy ステップ、bootstrap（既定・上書き・無効化） | 実装済み |
-| `provision --step` / `--from` / `--list`（部分実行） | 実装済み |
-| `up --dry-run` / `up --restart` | 実装済み |
-| `status --json` | 実装済み |
-| instance config / devices の素通し、削除追従 | 実装済み |
-| workspace mount と idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
-| `volumes`（永続ボリューム） | 実装済み |
-| `secrets`（ホスト環境変数・ファイルからの注入） | 実装済み |
-| `shell`（user / command / cwd）、`incus.project` | 実装済み |
-| Incus API（Go client library）での操作 | 実装済み（`incus` コマンドを必要としない） |
-| `project.scope`（複数checkout / ブランチ別instance） | 実装済み |
-| `--incus-remote` | フラグは通るが未検証（workspaceの共有方式が未定） |
-| `instance.type: virtual-machine` | 未検証（workspaceの共有方式がコンテナ前提） |
-| `validate --check-host` | 未実装 |
+| remoteのIncus | 常にローカルのIncusを操作する。`incus remote switch` の既定にも従わない |
+| 仮想マシン | instanceは常にコンテナであり、`instance.type` という設定は無い |
 
 ## ライセンス
 

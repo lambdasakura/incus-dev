@@ -1,4 +1,4 @@
-# 最小構成: workspaceがマウントされた素のコンテナ
+# Minimal: a bare container with the workspace mounted
 schema: 1
 
 project:

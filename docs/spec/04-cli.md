@@ -28,12 +28,12 @@ idev snapshot
 | --- | --- | --- |
 | `-v`, `--verbose` | | 実行した外部コマンドなどを出力する |
 | `-C`, `--directory` | カレントディレクトリ | プロジェクト探索の起点 |
-| `--incus-remote` | `local` | Incus remote |
 | `--incus-project` | `dev.yml` の `incus.project`、無ければ `default` | Incus project |
 
-`--incus-remote` / `--incus-project` は操作層へそのまま渡す
-（[05-incus.md](05-incus.md) 5.5、5.6）。remoteを指定した場合、
-workspaceのbind mountはホスト側パスを前提とするため成立しない点に注意する。
+`--incus-project` は操作層へそのまま渡す（[05-incus.md](05-incus.md) 5.5）。
+
+remoteを選ぶフラグは持たない。操作対象は常にローカルのIncusである
+（[05-incus.md](05-incus.md) 5.6）。
 
 ---
 
@@ -287,8 +287,10 @@ CIから実行可能なこと。Incusが無い環境でも実行可能とする�
 
 Incus daemonへの問い合わせ（Profileの実在確認など）は行わない。
 
-ホスト側の状態まで検査するオプション（`--check-host` など）は将来の候補とする
-（[09-roadmap.md](09-roadmap.md) 9.2）。
+ホスト側の前提（Incusへ到達できるか、Profileが実在するか、`/etc/subuid`、
+`ansible-playbook` の有無、secretsが解決できるか）まで検査するオプションは
+持たない。`idev up --dry-run` がIncusへ変更を加えずに同じ検査を行うため
+（[4.8](#48-dry-run)）、別のフラグを設ける理由が無い。
 
 ---
 

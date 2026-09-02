@@ -210,13 +210,21 @@ image: images:ubuntu/24.04
 devkitは特定のOSを前提としない。
 image選択と、それに適合するprovisioning手順の整合はプロジェクトの責務とする。
 
-### 3.6.2 type
+### 3.6.2 instance.type は無い
 
-任意。`container`（既定）または `virtual-machine`。
+**instanceは常にコンテナである。`type` という設定は持たない。**
 
-`virtual-machine` はIncusへそのまま渡すが、MVPでは検証していない。
-workspaceのbind mountやidmapの扱いがコンテナと異なるため、
-利用する場合はプロジェクト側で確認すること。
+virtual-machine では workspace の bind mount が使えず virtiofs / 9p となり、
+`raw.idmap` や disk の `shift` もコンテナ固有の仕組みで意味を持たない。
+つまり workspace の共有方式を別に設計しないと成立しないが、対応する予定は無い
+（[09-roadmap.md](09-roadmap.md)）。
+
+「渡せるが検証していない」という状態は、動くと期待して書いた利用者が
+分かりにくい形で失敗するだけなので、設定項目ごと持たない。
+`type` を書いた場合は未知のキーとして validate が失敗する。
+
+image aliasの解決でもコンテナ用のimageのみを要求する
+（[05-incus.md](05-incus.md) 5.7.1）。
 
 ### 3.6.3 profiles
 
@@ -566,7 +574,6 @@ DEVKIT_PROJECT_NAME
 DEVKIT_INSTANCE
 DEVKIT_WORKSPACE            コンテナ内のworkspaceパス
 DEVKIT_WORKSPACE_SOURCE     ホスト側のproject rootパス
-DEVKIT_INCUS_REMOTE
 DEVKIT_INCUS_PROJECT
 ```
 
@@ -579,7 +586,6 @@ devkit_project_name: example-project
 devkit_instance: dev-example-project
 devkit_workspace: /workspace
 devkit_workspace_source: /home/user/src/example-project
-devkit_incus_remote: local
 devkit_incus_project: default
 ```
 

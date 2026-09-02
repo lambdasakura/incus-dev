@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
 )
 
 // The instance config devkit sets for its own bookkeeping (spec 05-incus.md 5.2).
@@ -218,7 +218,6 @@ func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.Instanc
 	return incus.InstanceSpec{
 		Name:       name,
 		Image:      cfg.Instance.Image,
-		Type:       cfg.Instance.TypeOrDefault(),
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
 		Config:     desiredConfig(cfg, plan),

@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
 // idmapPlan is a resolved uid/gid mapping strategy.
@@ -63,11 +63,6 @@ func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) err
 		}
 		return plan, nil
 	}
-	if cfg.Instance.TypeOrDefault() != "container" {
-		// Both raw.idmap and a disk's shift are container-only mechanisms.
-		return plan, nil
-	}
-
 	plan.Managed = true
 	plan.Mode = declared
 

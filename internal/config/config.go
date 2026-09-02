@@ -17,7 +17,6 @@ const (
 	DefaultWorkspaceSource = "."
 	DefaultWorkspaceTarget = "/workspace"
 	DefaultProfile         = "default"
-	DefaultInstanceType    = "container"
 	DefaultShell           = "/bin/sh"
 	DefaultStoragePool     = "default"
 )
@@ -105,20 +104,11 @@ func (p Project) ScopeOrDefault() Scope {
 // through to Incus.
 type Instance struct {
 	Image string `json:"image"`
-	Type  string `json:"type,omitempty"`
 	// Profiles distinguishes omitted (nil) from an explicit empty list
 	// (spec 3.6.3).
 	Profiles *[]string            `json:"profiles,omitempty"`
 	Config   StringMap            `json:"config,omitempty"`
 	Devices  map[string]StringMap `json:"devices,omitempty"`
-}
-
-// TypeOrDefault returns the instance type, defaulting to container.
-func (i Instance) TypeOrDefault() string {
-	if i.Type == "" {
-		return DefaultInstanceType
-	}
-	return i.Type
 }
 
 // Volume is a persistent volume (spec 03-configuration.md 3.16).

@@ -22,7 +22,6 @@ It does not have to be a Git repository.
 | --- | --- | --- |
 | `-v`, `--verbose` | | print detail, including the external commands that were run |
 | `-C`, `--directory <dir>` | current directory | directory to start looking from |
-| `--incus-remote <name>` | `local` | Incus remote (it does not follow `incus remote switch`) |
 | `--incus-project <name>` | `incus.project` in `dev.yml`, else `default` | Incus project |
 
 ### Exit codes
@@ -250,7 +249,6 @@ idev status --json
   "devices": ["workspace(disk)"],
   "provision_steps": 1,
   "runtime": "container",
-  "incus_remote": "local",
   "incus_project": "default"
 }
 ```

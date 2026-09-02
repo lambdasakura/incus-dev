@@ -4,22 +4,27 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 COVER   := cover.out
 
+# Unit tests must pass where no Incus is reachable (spec 08-testing.md 8.4.1).
+# Pointing the client at a socket that does not exist stops a daemon running on
+# the developer's machine from hiding a test that needs one.
+NO_INCUS := INCUS_SOCKET=/nonexistent/incus.socket
+
 .PHONY: build test test-integration cover cover-html lint fmt check clean install tools
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
 test:
-	go test ./...
+	$(NO_INCUS) go test ./...
 
 test-integration:
 	go test -tags integration -count=1 -timeout 20m ./test/integration/...
 
-# カバレッジはパッケージ横断で測る。
-# 例えば internal/incus/incustest は他パッケージのテストからのみ実行されるため、
-# -coverpkg を付けないと0%として集計されてしまう。
+# Coverage is measured across packages. internal/incus/incustest, for one, runs
+# only from the tests of other packages, so without -coverpkg it is counted as
+# 0%.
 cover:
-	go test ./... -coverpkg=./... -coverprofile=$(COVER)
+	$(NO_INCUS) go test ./... -coverpkg=./... -coverprofile=$(COVER)
 	@go tool cover -func=$(COVER) | tail -1
 
 cover-html: cover
@@ -29,7 +34,7 @@ lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run ./...; \
 	else \
-		echo "golangci-lint が無いため gofmt / go vet で代替します（make tools で導入できます）"; \
+		echo "golangci-lint is not installed; falling back to gofmt / go vet (make tools installs it)"; \
 		out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi; \
 		go vet ./...; \
 	fi

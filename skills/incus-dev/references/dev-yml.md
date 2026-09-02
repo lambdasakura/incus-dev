@@ -18,7 +18,6 @@ project:
 
 instance:
   image: images:ubuntu/24.04   # required
-  type: container              # container (default) | virtual-machine (unverified)
   profiles: [default]          # default [default]. [] means no profile at all
   config:                      # passed straight to the Incus instance config
     limits.cpu: "8"
@@ -111,7 +110,6 @@ DEVKIT_PROJECT_NAME       project name
 DEVKIT_INSTANCE           instance name
 DEVKIT_WORKSPACE          workspace path inside the container
 DEVKIT_WORKSPACE_SOURCE   project root on the host
-DEVKIT_INCUS_REMOTE       Incus remote
 DEVKIT_INCUS_PROJECT      Incus project
 ```
 

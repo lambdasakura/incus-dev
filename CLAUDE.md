@@ -1,4 +1,4 @@
-# incus-devkit
+# incus-dev
 
 Incusでプロジェクト単位の開発環境を構築・管理するCLIツール `idev` のリポジトリ。
 
@@ -30,10 +30,7 @@ Incusでプロジェクト単位の開発環境を構築・管理するCLIツー
 | マニュアル | `docs/manual/` | `docs/manual/ja/` |
 | トラブルシューティング | `docs/troubleshooting.md` | `docs/troubleshooting.ja.md` |
 | 構成例 | `examples/README.md` | `examples/README.ja.md` |
-| Agent Skill | `skills/incus-devkit/` | `skills/incus-devkit-ja/` |
-
-`docs/spec/`（設計仕様。実装判断の基準）と `CLAUDE.md` は日本語のみ。
-利用者向け文書ではないため二言語化しない。
+| Agent Skill | `skills/incus-dev/` | `skills/incus-dev-ja/` |
 
 CLIのフラグ・出力・既定値を変更した場合、`03-commands.md` と `04-dev-yml.md`、
 および Agent Skill の該当箇所を **英日そろえて** 更新する。
@@ -42,16 +39,27 @@ CLIのフラグ・出力・既定値を変更した場合、`03-commands.md` と
 スキルは `test/skills_test.go` が雛形の妥当性・コマンド名の実在・
 frontmatterの `name` がディレクトリ名と一致し重複しないことを検査する。
 
-### 利用者が見るテキストは英語
+### 英語で書くもの
 
-CLIのusage（Short / Long / フラグ説明）、確認プロンプト、ログ、エラーは英語。
-`internal/cli` の `TestUserFacingTextIsASCII` が非ASCIIの混入を検査する。
-日本語の説明はマニュアルの日本語版が担う。
+外部のコントリビュータが読むため、**リポジトリに入るテキストは原則として英語**。
 
-### Goのコメント・テスト名も英語
+| 対象 | 補足 |
+| --- | --- |
+| コミットメッセージ | `## コミット` 参照 |
+| `.go` のコメント、`t.Run` のサブテスト名、テストの失敗メッセージ | 仕様書への参照は `spec 04-cli.md 4.10` の形式 |
+| CLIのusage（Short / Long / フラグ説明）、確認プロンプト、ログ、エラー | `internal/cli` の `TestUserFacingTextIsASCII` が非ASCIIの混入を検査する |
+| `examples/` 配下の `dev.yml` やスクリプトのコメント | サンプルは1組しか無く英日に分けられない。`test/examples_test.go` の `TestExamplesAreASCII` が検査する |
+| ビルド・CI設定のコメント | `Makefile`、`.golangci.yml`、`.github/`、`.gitlab-ci.yml`、`.goreleaser.yaml` |
 
-外部のコントリビュータが読めるよう、`.go` 内のコメント、`t.Run` のサブテスト名、
-テストの失敗メッセージは英語で書く。仕様書への参照は `spec 04-cli.md 4.10` の形式。
+CLIの日本語での説明はマニュアルの日本語版が担う。
+
+### 日本語で書くもの
+
+- `docs/spec/`（設計仕様。実装判断の基準）と `CLAUDE.md`。
+  利用者向け文書ではないため二言語化しない
+- 上表の日本語版文書（`ja/` または `.ja.md`）
+
+判断に迷ったら英語で書く。日本語で書いてよいのはここに挙げたものだけである。
 
 ## 仕様書
 
@@ -168,5 +176,10 @@ cmd/idev
 ## コミット
 
 - 1コミット1論点。実装とテストは同じコミットに含める
-- メッセージは日本語。`種別: 要約` 形式（`feat:` `fix:` `docs:` `test:` `refactor:` `chore:`）
+- **メッセージは英語**。`type: summary` 形式
+  （`feat:` `fix:` `docs:` `test:` `refactor:` `chore:`）
+- 要約は命令形で書き、末尾にピリオドを打たない
+  （`fix: stop validate from connecting to Incus`）
+- 本文には「何をしたか」より「なぜそうしたか」を書く。
+  仕様書への参照は `spec 04-cli.md 4.7` の形式
 - コミット前に `make check` を通す

@@ -13,10 +13,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
-	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
+	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
 )
 
 const rootYAML = `
@@ -26,6 +26,16 @@ project:
 instance:
   image: images:ubuntu/24.04
 `
+
+// stub is an appFactory handing out an App the test prepared.
+func stub(app *App) appFactory {
+	return func(*globalFlags) (*App, error) { return app, nil }
+}
+
+// failing is an appFactory that cannot build an App.
+func failing(err error) appFactory {
+	return func(*globalFlags) (*App, error) { return nil, err }
+}
 
 // testProject creates a temporary directory holding a dev.yml.
 func testProject(t *testing.T, body string) string {
@@ -68,7 +78,7 @@ func execRoot(t *testing.T, stdin string, args ...string) (*incustest.Fake, stri
 	out := &bytes.Buffer{}
 	app, client := fakeApp(t, out)
 
-	root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	root := newRootCommand("test", stub(app), stub(app))
 	root.SetArgs(args)
 	root.SetIn(strings.NewReader(stdin))
 	root.SetOut(out)
@@ -140,7 +150,7 @@ func TestShellCommandPassesArguments(t *testing.T) {
 		Config: map[string]string{"user.incus-devkit.project": "example-project"},
 	})
 
-	root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	root := newRootCommand("test", stub(app), stub(app))
 	root.SetArgs([]string{"shell", "--", "make", "test"})
 	root.SetOut(out)
 
@@ -184,7 +194,7 @@ func TestDestructiveCommandsConfirm(t *testing.T) {
 				Config: map[string]string{"user.incus-devkit.project": "example-project"},
 			})
 
-			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root := newRootCommand("test", stub(app), stub(app))
 			root.SetArgs(tt.args)
 			root.SetIn(strings.NewReader(tt.stdin))
 			root.SetOut(out)
@@ -214,7 +224,7 @@ func TestCommandsPropagateFactoryError(t *testing.T) {
 		{"destroy", "--force"}, {"rebuild", "--force"}, {"validate"},
 	} {
 		t.Run(args[0], func(t *testing.T) {
-			root := newRootCommand("test", func(*globalFlags) (*App, error) { return nil, wantErr })
+			root := newRootCommand("test", failing(wantErr), failing(wantErr))
 			root.SetArgs(args)
 			root.SetOut(&bytes.Buffer{})
 			root.SetErr(&bytes.Buffer{})
@@ -250,12 +260,19 @@ func TestExecuteReportsUnknownCommand(t *testing.T) {
 
 // --- newApp ---
 
+// noIncus points the client at a socket that does not exist, so connecting
+// fails whether or not a daemon is running on the machine running the tests.
+func noIncus(t *testing.T) {
+	t.Helper()
+	t.Setenv("INCUS_SOCKET", filepath.Join(t.TempDir(), "does-not-exist.socket"))
+}
+
 func TestNewAppDiscoversProject(t *testing.T) {
 	root := testProject(t, rootYAML)
 
-	app, err := newApp(&globalFlags{directory: root, incusRemote: "local", incusProject: "default"})
+	app, err := newOfflineApp(&globalFlags{directory: root, incusProject: "default"})
 	if err != nil {
-		t.Fatalf("newApp() error = %v", err)
+		t.Fatalf("newOfflineApp() error = %v", err)
 	}
 	if got := app.InstanceName(); got != "dev-example-project" {
 		t.Errorf("InstanceName() = %q", got)
@@ -265,21 +282,45 @@ func TestNewAppDiscoversProject(t *testing.T) {
 func TestNewAppUsesWorkingDirectoryByDefault(t *testing.T) {
 	t.Chdir(testProject(t, rootYAML))
 
-	if _, err := newApp(&globalFlags{}); err != nil {
-		t.Errorf("newApp() error = %v", err)
+	if _, err := newOfflineApp(&globalFlags{}); err != nil {
+		t.Errorf("newOfflineApp() error = %v", err)
+	}
+}
+
+// Commands that make no Incus call must not connect. Otherwise `idev validate`
+// stops working where no Incus is reachable (spec 04-cli.md 4.7).
+func TestNewOfflineAppDoesNotConnect(t *testing.T) {
+	root := testProject(t, rootYAML)
+
+	noIncus(t)
+
+	if _, err := newOfflineApp(&globalFlags{directory: root}); err != nil {
+		t.Errorf("newOfflineApp() error = %v, want no attempt to connect", err)
+	}
+}
+
+// The other commands do connect, and report it when they cannot.
+func TestNewAppConnects(t *testing.T) {
+	root := testProject(t, rootYAML)
+
+	noIncus(t)
+
+	_, err := newApp(&globalFlags{directory: root})
+	if err == nil || !strings.Contains(err.Error(), "incus") {
+		t.Errorf("error = %v, want the unreachable daemon reported", err)
 	}
 }
 
 func TestNewAppErrors(t *testing.T) {
 	t.Run("no project", func(t *testing.T) {
-		if _, err := newApp(&globalFlags{directory: t.TempDir()}); err == nil {
+		if _, err := newOfflineApp(&globalFlags{directory: t.TempDir()}); err == nil {
 			t.Error("error = nil, want error")
 		}
 	})
 
 	t.Run("invalid configuration", func(t *testing.T) {
 		root := testProject(t, "schema: 1\nfeatures: {}\n")
-		_, err := newApp(&globalFlags{directory: root})
+		_, err := newOfflineApp(&globalFlags{directory: root})
 		if err == nil || !strings.Contains(err.Error(), "features") {
 			t.Errorf("error = %v, want the configuration problem reported", err)
 		}
@@ -367,8 +408,8 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target := resolveTarget(&globalFlags{incusRemote: "dev-server", incusProject: "development"}, cfg)
-	if target.Remote != "dev-server" || target.Project != "development" {
+	target := resolveTarget(&globalFlags{incusProject: "development"}, cfg)
+	if target.Project != "development" {
 		t.Errorf("target = %+v", target)
 	}
 
@@ -377,7 +418,6 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 		Config:       cfg,
 		Client:       incustest.New(),
 		Runner:       &runnertest.Fake{},
-		Remote:       target.Remote,
 		IncusProject: target.Project,
 		CheckIDMap:   func(int, int) error { return nil },
 	})
@@ -386,8 +426,8 @@ func TestNewAppWiresIncusFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env.Remote != "dev-server" || env.IncusProject != "development" {
-		t.Errorf("env = %+v, the remote and project do not match", env)
+	if env.IncusProject != "development" {
+		t.Errorf("env = %+v, the project does not match", env)
 	}
 }
 
@@ -432,7 +472,7 @@ provision:
 				Out: out, CheckIDMap: func(int, int) error { return nil },
 			})
 
-			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root := newRootCommand("test", stub(app), stub(app))
 			root.SetArgs(tt.args)
 			root.SetOut(out)
 			root.SetErr(out)
@@ -481,7 +521,7 @@ provision:
 		Out: out, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	cmd := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	cmd := newRootCommand("test", stub(app), stub(app))
 	cmd.SetArgs([]string{"provision", "--list"})
 	cmd.SetOut(out)
 
@@ -507,10 +547,11 @@ func TestProvisionFlagsAreMutuallyExclusive(t *testing.T) {
 		{"provision", "--from", "a", "--list"},
 	} {
 		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
-			root := newRootCommand("test", func(*globalFlags) (*App, error) {
+			never := func(*globalFlags) (*App, error) {
 				t.Fatal("built the App before the flags were checked")
 				return nil, nil
-			})
+			}
+			root := newRootCommand("test", never, never)
 			root.SetArgs(args)
 			root.SetOut(&bytes.Buffer{})
 			root.SetErr(&bytes.Buffer{})
@@ -526,7 +567,7 @@ func TestUpDryRunFlag(t *testing.T) {
 	out := &bytes.Buffer{}
 	app, client := fakeApp(t, out)
 
-	root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	root := newRootCommand("test", stub(app), stub(app))
 	root.SetArgs([]string{"up", "--dry-run"})
 	root.SetOut(out)
 
@@ -562,7 +603,7 @@ func TestIncusProjectPrecedence(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			got := resolveTarget(&globalFlags{incusRemote: "local", incusProject: tt.flag}, cfg)
+			got := resolveTarget(&globalFlags{incusProject: tt.flag}, cfg)
 			if got.Project != tt.want {
 				t.Errorf("Project = %q, want %q", got.Project, tt.want)
 			}
@@ -597,7 +638,7 @@ func TestExecAndSnapshotCommands(t *testing.T) {
 				Config: map[string]string{managedProjectKey: "example-project"},
 			})
 
-			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root := newRootCommand("test", stub(app), stub(app))
 			root.SetArgs(tt.args)
 			root.SetIn(strings.NewReader(tt.stdin))
 			root.SetOut(out)
@@ -628,7 +669,7 @@ func TestSnapshotDestructiveCommandsConfirm(t *testing.T) {
 				Config: map[string]string{managedProjectKey: "example-project"},
 			})
 
-			root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+			root := newRootCommand("test", stub(app), stub(app))
 			root.SetArgs(args)
 			root.SetIn(strings.NewReader("n\n"))
 			root.SetOut(out)
@@ -665,7 +706,7 @@ func TestDestroyVolumesFlag(t *testing.T) {
 		Out: out, CheckIDMap: func(int, int) error { return nil },
 	})
 
-	root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+	root := newRootCommand("test", stub(app), stub(app))
 	root.SetArgs([]string{"destroy", "--force", "--volumes"})
 	root.SetOut(out)
 
@@ -689,7 +730,7 @@ func TestSnapshotCommandsPropagateFactoryError(t *testing.T) {
 		{"snapshot", "delete", "s", "--force"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			root := newRootCommand("test", func(*globalFlags) (*App, error) { return nil, wantErr })
+			root := newRootCommand("test", failing(wantErr), failing(wantErr))
 			root.SetArgs(args)
 			root.SetOut(&bytes.Buffer{})
 			root.SetErr(&bytes.Buffer{})
@@ -748,7 +789,7 @@ func TestUserFacingTextIsASCII(t *testing.T) {
 					Config: map[string]string{managedProjectKey: "example-project"},
 				})
 
-				root := newRootCommand("test", func(*globalFlags) (*App, error) { return app, nil })
+				root := newRootCommand("test", stub(app), stub(app))
 				root.SetArgs(args)
 				root.SetIn(strings.NewReader("n\n"))
 				root.SetOut(out)

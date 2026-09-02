@@ -18,7 +18,6 @@ project:
 
 instance:
   image: images:ubuntu/24.04   # 必須
-  type: container              # container（既定） | virtual-machine（未検証）
   profiles: [default]          # 既定は [default]。[] はProfileを使わない
   config:                      # Incusのinstance configをそのまま渡す
     limits.cpu: "8"
@@ -110,7 +109,6 @@ DEVKIT_PROJECT_NAME       プロジェクト名
 DEVKIT_INSTANCE           instance名
 DEVKIT_WORKSPACE          コンテナ内のworkspaceパス
 DEVKIT_WORKSPACE_SOURCE   ホスト側のプロジェクトルート
-DEVKIT_INCUS_REMOTE       Incus remote
 DEVKIT_INCUS_PROJECT      Incus project
 ```
 

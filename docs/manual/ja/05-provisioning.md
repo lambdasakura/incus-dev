@@ -199,7 +199,6 @@ DEVKIT_PROJECT_NAME       プロジェクト名
 DEVKIT_INSTANCE           instance名
 DEVKIT_WORKSPACE          コンテナ内のworkspaceパス
 DEVKIT_WORKSPACE_SOURCE   ホスト側のproject rootパス
-DEVKIT_INCUS_REMOTE       Incus remote
 DEVKIT_INCUS_PROJECT      Incus project
 ```
 
@@ -219,7 +218,6 @@ devkit_project_name: my-project
 devkit_instance: dev-my-project
 devkit_workspace: /workspace
 devkit_workspace_source: /home/you/src/my-project
-devkit_incus_remote: local
 devkit_incus_project: default
 ```
 

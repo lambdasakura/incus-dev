@@ -1,4 +1,5 @@
-# lint と unit test はIncus不要。統合テストはIncusが使えるランナーで実行する。
+# lint and the unit tests need no Incus. The integration tests run on a runner
+# that has one.
 stages:
   - check
   - integration
@@ -18,8 +19,8 @@ test:
     - make cover
   coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
 
-# Incusが利用可能なランナーで実行する。
-# tags は環境に合わせて設定すること。incus が無い場合、テストはskipされる。
+# Runs on a runner where Incus is available. Set tags to match your own
+# environment. Without incus the tests skip themselves.
 integration:
   stage: integration
   image: golang:1.27

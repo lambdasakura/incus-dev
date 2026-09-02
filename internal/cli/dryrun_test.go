@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
 )
 
 const dryRunYAML = planBase + `
@@ -124,15 +124,6 @@ func TestPlanActionsNoProfiles(t *testing.T) {
 	got := strings.Join(planActions(cfg, "dev-x", nil, idmapPlan{}), "\n")
 
 	if !strings.Contains(got, "Apply no profiles") {
-		t.Errorf("plan =\n%s", got)
-	}
-}
-
-func TestPlanActionsShowsInstanceType(t *testing.T) {
-	cfg := mustParse(t, planBase+"  type: virtual-machine\n")
-
-	got := strings.Join(planActions(cfg, "dev-x", nil, idmapPlan{}), "\n")
-	if !strings.Contains(got, "Instance type: virtual-machine") {
 		t.Errorf("plan =\n%s", got)
 	}
 }

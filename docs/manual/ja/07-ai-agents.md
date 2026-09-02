@@ -109,11 +109,11 @@ provisionステップは再実行される前提で、冪等に書くこと。
 ## 7.6 Agent Skill
 
 Claude Code のようにAgent Skillを読み込むツールでは、
-リポジトリの [`skills/incus-devkit-ja/`](../../../skills/incus-devkit-ja/) をそのまま使える。
+リポジトリの [`skills/incus-dev-ja/`](../../../skills/incus-dev-ja/) をそのまま使える。
 
 ```bash
-cp -r skills/incus-devkit-ja ~/.claude/skills/          # 全プロジェクトで使う
-cp -r skills/incus-devkit-ja <project>/.claude/skills/  # そのプロジェクトだけ
+cp -r skills/incus-dev-ja ~/.claude/skills/          # 全プロジェクトで使う
+cp -r skills/incus-dev-ja <project>/.claude/skills/  # そのプロジェクトだけ
 ```
 
 原則・コマンドの対応表・`dev.yml` の書き方・エラーからの切り分けが入っている。

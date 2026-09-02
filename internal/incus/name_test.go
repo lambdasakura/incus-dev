@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus"
 )
 
 func TestInstanceName(t *testing.T) {

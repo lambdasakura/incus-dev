@@ -337,16 +337,14 @@ func (f *fakeServer) DeleteInstanceSnapshot(name, snapshot string) (incusclient.
 // fakeImages fakes resolving an image reference.
 type fakeImages struct {
 	err error
-	// ref and instanceType are what it was asked to resolve.
-	ref          string
-	instanceType string
+	// ref is what it was asked to resolve.
+	ref string
 	// server is the source it returns.
 	server incusclient.ImageServer
 }
 
-func (f *fakeImages) Resolve(_ context.Context, ref, instanceType string) (incusclient.ImageServer, *api.Image, error) {
+func (f *fakeImages) Resolve(_ context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
 	f.ref = ref
-	f.instanceType = instanceType
 	if f.err != nil {
 		return nil, nil, f.err
 	}
@@ -417,7 +415,6 @@ func TestAPICreateInstance(t *testing.T) {
 	err := a.CreateInstance(context.Background(), InstanceSpec{
 		Name:     "dev-x",
 		Image:    "images:alpine/3.21",
-		Type:     "container",
 		Profiles: []string{"default"},
 		Config:   map[string]string{"limits.cpu": "2"},
 		Devices:  map[string]Device{"workspace": {"type": "disk"}},
@@ -426,8 +423,8 @@ func TestAPICreateInstance(t *testing.T) {
 		t.Fatalf("CreateInstance() error = %v", err)
 	}
 
-	if images.ref != "images:alpine/3.21" || images.instanceType != "container" {
-		t.Errorf("image resolution = %q / %q", images.ref, images.instanceType)
+	if images.ref != "images:alpine/3.21" {
+		t.Errorf("image resolution = %q", images.ref)
 	}
 	// What was resolved goes to Incus as it is: a different fingerprint is a
 	// different image.

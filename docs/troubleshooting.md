@@ -318,5 +318,6 @@ incus remote list           # remotes, and which is the default
 incus project list          # projects
 ```
 
-Confirm that the names you passed to `--incus-remote` / `--incus-project`
-appear in those lists.
+idev always talks to the `local` remote, and never follows the default
+`incus remote switch` sets. Confirm that the name you passed to
+`--incus-project` appears in that list.

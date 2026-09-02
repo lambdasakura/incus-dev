@@ -117,15 +117,17 @@ func serverProject(t *testing.T, client *API) string {
 	return server.project
 }
 
-func TestConnectUsesDefaultRemote(t *testing.T) {
+// Only the local Incus is operated on, whatever "incus remote switch" left as
+// the default (spec 05-incus.md 5.7.1).
+func TestConnectAlwaysUsesTheLocalRemote(t *testing.T) {
 	config := newFakeCLIConfig()
 
-	client, err := connect(config, "local", Target{})
+	client, err := connect(config, Target{})
 	if err != nil {
 		t.Fatalf("connect() error = %v", err)
 	}
 	if config.requestedRemote != "local" {
-		t.Errorf("remote = %q, want the default remote used", config.requestedRemote)
+		t.Errorf("remote = %q, want the local remote", config.requestedRemote)
 	}
 	if got := serverProject(t, client); got != "" {
 		t.Errorf("project = %q, want no switch when none was asked for", got)
@@ -135,12 +137,9 @@ func TestConnectUsesDefaultRemote(t *testing.T) {
 func TestConnectUsesTarget(t *testing.T) {
 	config := newFakeCLIConfig()
 
-	client, err := connect(config, "local", Target{Remote: "lab", Project: "dev"})
+	client, err := connect(config, Target{Project: "dev"})
 	if err != nil {
 		t.Fatalf("connect() error = %v", err)
-	}
-	if config.requestedRemote != "lab" {
-		t.Errorf("remote = %q", config.requestedRemote)
 	}
 	if got := serverProject(t, client); got != "dev" {
 		t.Errorf("project = %q, want dev", got)
@@ -151,19 +150,23 @@ func TestConnectError(t *testing.T) {
 	config := newFakeCLIConfig()
 	config.instanceErr = errAPI
 
-	_, err := connect(config, "local", Target{Remote: "lab"})
-	if !errors.Is(err, errAPI) || !strings.Contains(err.Error(), "lab") {
+	_, err := connect(config, Target{})
+	if !errors.Is(err, errAPI) || !strings.Contains(err.Error(), "local") {
 		t.Errorf("error = %v, want an error that names what it tried to reach", err)
 	}
 }
 
 // Connect works on the defaults with no configuration, leaving them to
-// LoadConfig.
+// LoadConfig. It gets as far as the local socket, whether or not a daemon is
+// listening on it.
 func TestConnectLoadsCLIConfig(t *testing.T) {
 	t.Setenv("INCUS_CONF", t.TempDir())
+	socket := filepath.Join(t.TempDir(), "does-not-exist.socket")
+	t.Setenv("INCUS_SOCKET", socket)
 
-	if _, err := Connect(Target{Remote: "does-not-exist"}); err == nil {
-		t.Error("want an unknown remote to be an error")
+	_, err := Connect(Target{})
+	if err == nil || !strings.Contains(err.Error(), socket) {
+		t.Errorf("error = %v, want it to have reached the local socket", err)
 	}
 }
 
@@ -185,7 +188,7 @@ func TestResolveImage(t *testing.T) {
 	config := newFakeCLIConfig()
 	r := &configImageResolver{config: config}
 
-	server, image, err := r.Resolve(context.Background(), "images:alpine/3.21", "container")
+	server, image, err := r.Resolve(context.Background(), "images:alpine/3.21")
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -203,7 +206,7 @@ func TestResolveImageByFingerprint(t *testing.T) {
 	config.imageServer.images["deadbeef"] = &api.Image{Fingerprint: "deadbeef"}
 	r := &configImageResolver{config: config}
 
-	_, image, err := r.Resolve(context.Background(), "images:deadbeef", "container")
+	_, image, err := r.Resolve(context.Background(), "images:deadbeef")
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -212,29 +215,17 @@ func TestResolveImageByFingerprint(t *testing.T) {
 	}
 }
 
-// The same alias points at a different image per instance type.
-func TestResolveImageByInstanceType(t *testing.T) {
-	tests := []struct {
-		instanceType string
-		want         string
-	}{
-		{"container", "abc123"},
-		{"virtual-machine", "vm456"},
-		{"", "abc123"}, // unspecified means container
+// The same alias points at a different image per instance type, and only the
+// container one is ever asked for (spec 03-configuration.md 3.4).
+func TestResolveImageAsksForTheContainerImage(t *testing.T) {
+	r := &configImageResolver{config: newFakeCLIConfig()}
+
+	_, image, err := r.Resolve(context.Background(), "images:alpine/3.21")
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.instanceType, func(t *testing.T) {
-			r := &configImageResolver{config: newFakeCLIConfig()}
-
-			_, image, err := r.Resolve(context.Background(), "images:alpine/3.21", tt.instanceType)
-			if err != nil {
-				t.Fatalf("Resolve() error = %v", err)
-			}
-			if image.Fingerprint != tt.want {
-				t.Errorf("image = %q, want %q", image.Fingerprint, tt.want)
-			}
-		})
+	if image.Fingerprint != "abc123" {
+		t.Errorf("image = %q, want the container image abc123", image.Fingerprint)
 	}
 }
 
@@ -244,7 +235,7 @@ func TestResolveImageKeepsAliasError(t *testing.T) {
 	config.imageServer.aliases = nil
 
 	_, _, err := (&configImageResolver{config: config}).Resolve(
-		context.Background(), "images:alpine/3.21", "container")
+		context.Background(), "images:alpine/3.21")
 
 	if err == nil || !strings.Contains(err.Error(), "alias lookup") {
 		t.Errorf("error = %v, want the alias failure shown as well", err)
@@ -290,7 +281,7 @@ func TestResolveImageErrors(t *testing.T) {
 				tt.setup(config)
 			}
 
-			_, _, err := (&configImageResolver{config: config}).Resolve(context.Background(), tt.ref, "container")
+			_, _, err := (&configImageResolver{config: config}).Resolve(context.Background(), tt.ref)
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 				t.Errorf("error = %v, want %q", err, tt.wantMsg)
 			}

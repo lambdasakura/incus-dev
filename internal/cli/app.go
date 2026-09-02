@@ -15,10 +15,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/provision"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // AppOptions configures an App.
@@ -40,7 +40,6 @@ type AppOptions struct {
 	// pseudo-terminal is allocated.
 	Term string
 
-	Remote       string
 	IncusProject string
 
 	// CheckIDMap is the up-front check for workspace.idmap: auto. nil uses the
@@ -74,7 +73,6 @@ type App struct {
 	interactive bool
 	term        string
 
-	remote       string
 	incusProject string
 
 	checkIDMap func(uid, gid int) error
@@ -146,7 +144,6 @@ func NewAppFor(opt AppOptions) (*App, error) {
 		interactive:  opt.Interactive,
 		term:         opt.Term,
 		instance:     name,
-		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
 		host:         *host,
@@ -170,7 +167,6 @@ func (a *App) env() (provision.Env, error) {
 		Instance:        a.instance,
 		Workspace:       ws.Target,
 		WorkspaceSource: a.cfg.WorkspaceSourcePath(),
-		Remote:          a.remote,
 		IncusProject:    a.incusProject,
 		Secrets:         secrets,
 	}, nil
@@ -491,7 +487,6 @@ type statusReport struct {
 	Devices      []string          `json:"devices,omitempty"`
 	Steps        int               `json:"provision_steps"`
 	Runtime      string            `json:"runtime,omitempty"`
-	Remote       string            `json:"incus_remote"`
 	IncusProject string            `json:"incus_project"`
 }
 
@@ -506,7 +501,6 @@ func (a *App) Status(ctx context.Context, asJSON bool) error {
 		Workspace:    ws.Target,
 		Source:       a.cfg.WorkspaceSourcePath(),
 		Steps:        len(a.cfg.Provision),
-		Remote:       a.remote,
 		IncusProject: a.incusProject,
 	}
 	if a.cfg.Runtime != nil {
@@ -555,7 +549,7 @@ func (a *App) printStatus(r statusReport) error {
 	rows = append(rows,
 		[2]string{"Provision", fmt.Sprintf("%d step(s)", r.Steps)},
 		[2]string{"Runtime", r.Runtime},
-		[2]string{"Incus", incusTarget(r.Remote, r.IncusProject)},
+		[2]string{"Incus", orDefault(r.IncusProject, defaultIncusProject)},
 	)
 
 	for _, row := range rows {
@@ -752,14 +746,6 @@ func deviceSummary(devices map[string]incus.Device) []string {
 		out = append(out, fmt.Sprintf("%s(%s)", name, devices[name].Type()))
 	}
 	return out
-}
-
-// incusTarget names the remote and project being operated on.
-func incusTarget(remote, project string) string {
-	if remote == "" && project == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s / %s", orDefault(remote, "local"), orDefault(project, "default"))
 }
 
 func orDefault(v, fallback string) string {

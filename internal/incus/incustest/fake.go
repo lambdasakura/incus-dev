@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lambdasakura/incus-devkit/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus"
 )
 
 // Fake is an incus.Client implementation that needs no Incus daemon.
@@ -104,8 +104,8 @@ func (f *Fake) Instance(_ context.Context, name string) (*incus.Instance, error)
 
 // CreateInstance registers an instance, in the Stopped state.
 func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error {
-	if err := f.record("create %s image=%s type=%s profiles=%v noprofiles=%v config=%v devices=%v",
-		spec.Name, spec.Image, spec.Type, spec.Profiles, spec.NoProfiles,
+	if err := f.record("create %s image=%s profiles=%v noprofiles=%v config=%v devices=%v",
+		spec.Name, spec.Image, spec.Profiles, spec.NoProfiles,
 		sortedPairs(spec.Config), sortedDeviceNames(spec.Devices)); err != nil {
 		return err
 	}
@@ -120,7 +120,6 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 	f.Instances[spec.Name] = &incus.Instance{
 		Name:     spec.Name,
 		Status:   "Stopped",
-		Type:     spec.Type,
 		Profiles: spec.Profiles,
 		Config:   config,
 		Devices:  devices,

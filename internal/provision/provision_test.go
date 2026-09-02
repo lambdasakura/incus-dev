@@ -11,12 +11,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
-	"github.com/lambdasakura/incus-devkit/internal/provision"
-	"github.com/lambdasakura/incus-devkit/internal/runner"
-	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
+	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
 )
 
 func testEnv() provision.Env {
@@ -26,7 +26,6 @@ func testEnv() provision.Env {
 		Instance:        "dev-example-project",
 		Workspace:       "/workspace",
 		WorkspaceSource: "/home/u/src/example",
-		Remote:          "local",
 		IncusProject:    "default",
 	}
 }
@@ -214,7 +213,6 @@ provision:
 		"DEVKIT_WORKSPACE":        "/workspace",
 		"DEVKIT_WORKSPACE_SOURCE": "/home/u/src/example",
 		"DEVKIT_INCUS_PROJECT":    "default",
-		"DEVKIT_INCUS_REMOTE":     "local",
 	}
 	if diff := cmp.Diff(want, client.last(t).Opt.PublicEnv); diff != "" {
 		t.Errorf("environment mismatch (-want +got):\n%s", diff)
@@ -546,7 +544,6 @@ func TestAnsibleDevkitVars(t *testing.T) {
 		"devkit_instance":         "dev-example-project",
 		"devkit_workspace":        "/workspace",
 		"devkit_workspace_source": root,
-		"devkit_incus_remote":     "local",
 		"devkit_incus_project":    "default",
 	}
 	// workspace_source takes its value from env.
@@ -650,7 +647,6 @@ func TestEnvVars(t *testing.T) {
 		"DEVKIT_INSTANCE":         "dev-example-project",
 		"DEVKIT_WORKSPACE":        "/workspace",
 		"DEVKIT_WORKSPACE_SOURCE": "/home/u/src/example",
-		"DEVKIT_INCUS_REMOTE":     "local",
 		"DEVKIT_INCUS_PROJECT":    "default",
 	}
 	if diff := cmp.Diff(want, testEnv().EnvVars()); diff != "" {

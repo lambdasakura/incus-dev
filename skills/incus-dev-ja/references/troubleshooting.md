@@ -99,9 +99,9 @@ idev provision --step 3        # そのステップだけ流し直す
 ## Incusへ接続できない
 
 ```text
-connect to incus remote "local": The incus daemon doesn't appear to be started
+connect to the local incus: The incus daemon doesn't appear to be started
 ```
 
 `idev` は `incus` コマンドと同じ設定（`~/.config/incus/config.yml`）を読む。
-`incus info` が通るかをまず確認する。`--incus-remote` の既定は `local` で、
-`incus remote switch` の既定には従わない。
+`incus info` が通るかをまず確認する。操作対象は常に `local` remote であり、
+`incus remote switch` の既定には従わない。remoteのIncusは対象外である。

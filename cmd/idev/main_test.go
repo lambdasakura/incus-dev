@@ -40,8 +40,13 @@ func TestRunValidatesProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// With no Incus reachable: validate must not need one at all
+	// (spec 04-cli.md 4.7).
+	t.Setenv("INCUS_SOCKET", filepath.Join(t.TempDir(), "does-not-exist.socket"))
+
 	var stderr bytes.Buffer
-	if code := run([]string{"validate", "-C", root}, &stderr); code != 0 {
+	args := []string{"validate", "-C", root}
+	if code := run(args, &stderr); code != 0 {
 		t.Errorf("run() = %d, want 0 (%s)", code, stderr.String())
 	}
 }

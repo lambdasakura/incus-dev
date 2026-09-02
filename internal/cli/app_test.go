@@ -12,12 +12,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/lambdasakura/incus-devkit/internal/cli"
-	"github.com/lambdasakura/incus-devkit/internal/config"
-	"github.com/lambdasakura/incus-devkit/internal/incus"
-	"github.com/lambdasakura/incus-devkit/internal/incus/incustest"
-	"github.com/lambdasakura/incus-devkit/internal/provision"
-	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-dev/internal/cli"
+	"github.com/lambdasakura/incus-dev/internal/config"
+	"github.com/lambdasakura/incus-dev/internal/incus"
+	"github.com/lambdasakura/incus-dev/internal/incus/incustest"
+	"github.com/lambdasakura/incus-dev/internal/provision"
+	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
 )
 
 const baseYAML = `
@@ -56,7 +56,6 @@ func newApp(t *testing.T, yamlBody string) (*cli.App, *incustest.Fake, *bytes.Bu
 		Verbose: false,
 		// Do not depend on the host's /etc/subuid.
 		CheckIDMap:   func(int, int) error { return nil },
-		Remote:       "local",
 		IncusProject: "default",
 	})
 	return app, client, out
@@ -218,7 +217,7 @@ func TestUpAppliesNoProfiles(t *testing.T) {
 	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
 		t.Fatalf("Up() error = %v", err)
 	}
-	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=container profiles=[] noprofiles=true") {
+	if !client.Called("create dev-example-project image=images:ubuntu/24.04 profiles=[] noprofiles=true") {
 		t.Errorf("calls = %v, want profiles: [] to mean no profiles at all", client.Calls)
 	}
 }
@@ -744,7 +743,6 @@ provision:
 		"config":           map[string]any{"limits.cpu": "8"},
 		"devices":          []any{"workspace(disk)"},
 		"provision_steps":  float64(2),
-		"incus_remote":     "local",
 		"incus_project":    "default",
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
@@ -804,18 +802,6 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 	}
 }
 
-// instance.type reaches what is passed at creation time.
-func TestUpPassesInstanceType(t *testing.T) {
-	app, client, _ := newApp(t, baseYAML+"  type: virtual-machine\n")
-
-	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
-		t.Fatalf("Up() error = %v", err)
-	}
-	if !client.Called("create dev-example-project image=images:ubuntu/24.04 type=virtual-machine") {
-		t.Errorf("calls = %v, want instance.type passed", client.Calls)
-	}
-}
-
 // The context devkit hands to a step is assembled correctly (spec 3.10).
 func TestProvisionEnvIsPopulated(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+"provision:\n  - run: echo hi\n")
@@ -844,9 +830,6 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 	src := gotEnv["DEVKIT_WORKSPACE_SOURCE"]
 	if src == "/workspace" || !filepath.IsAbs(src) {
 		t.Errorf("DEVKIT_WORKSPACE_SOURCE = %q, want a path on the host", src)
-	}
-	if got := gotEnv["DEVKIT_INCUS_REMOTE"]; got != "local" {
-		t.Errorf("DEVKIT_INCUS_REMOTE = %q, want local", got)
 	}
 	if got := gotEnv["DEVKIT_INCUS_PROJECT"]; got != "default" {
 		t.Errorf("DEVKIT_INCUS_PROJECT = %q, want default", got)

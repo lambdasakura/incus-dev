@@ -1,4 +1,4 @@
-# シェルスクリプトだけで構成する例（Ansibleを必要としない）
+# Provisioned with shell scripts alone. Ansible is not needed.
 schema: 1
 
 runtime:

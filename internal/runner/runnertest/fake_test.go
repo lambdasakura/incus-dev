@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambdasakura/incus-devkit/internal/runner"
-	"github.com/lambdasakura/incus-devkit/internal/runner/runnertest"
+	"github.com/lambdasakura/incus-dev/internal/runner"
+	"github.com/lambdasakura/incus-dev/internal/runner/runnertest"
 )
 
 func TestFakeRecordsCommands(t *testing.T) {

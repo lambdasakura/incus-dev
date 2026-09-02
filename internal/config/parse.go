@@ -17,7 +17,7 @@ import (
 	"golang.org/x/text/message"
 	"sigs.k8s.io/yaml"
 
-	"github.com/lambdasakura/incus-devkit/schemas"
+	"github.com/lambdasakura/incus-dev/schemas"
 )
 
 // Options controls how Parse behaves.
@@ -130,14 +130,14 @@ func checkSchemaVersion(raw map[string]any) error {
 var devSchema = sync.OnceValue(func() *jsonschema.Schema {
 	sch, err := compileSchema(schemas.DevV1)
 	if err != nil {
-		panic("incus-devkit: embedded schema is broken: " + err.Error())
+		panic("incus-dev: embedded schema is broken: " + err.Error())
 	}
 	return sch
 })
 
 // compileSchema compiles a JSON Schema.
 func compileSchema(raw []byte) (*jsonschema.Schema, error) {
-	const url = "https://github.com/lambdasakura/incus-devkit/schemas/dev-v1.schema.json"
+	const url = "https://github.com/lambdasakura/incus-dev/schemas/dev-v1.schema.json"
 
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
