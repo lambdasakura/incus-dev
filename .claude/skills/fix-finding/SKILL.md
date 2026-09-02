@@ -1,15 +1,34 @@
 ---
 name: fix-finding
-description: Use when acting on a review finding, a bug report, or a failing behaviour in the incus-dev repository - anything of the form "X is wrong, fix it". Covers reproducing before fixing, where the regression test has to go, checking every caller of a shared helper, verifying by exit code, and what belongs in one commit. Reach for it whenever a fix is about to be written.
+description: Use when acting on a review finding, a bug report, or a failing behaviour in the incus-dev repository - anything of the form "X is wrong, fix it". Covers deriving the property a finding is about rather than following its wording, reproducing before fixing, where the regression test has to go, checking every caller of a shared helper, verifying by exit code, and what belongs in one commit. Reach for it whenever a fix is about to be written.
 ---
 
 # Fixing a finding in incus-dev
 
-Two dozen rounds of review of this repository have produced upwards of thirty
-fixes. In almost every round, the previous round's fix introduced a new defect. This is what those
-failures had in common, and what stops them.
+Thirty-six rounds of review of this repository have produced upwards of forty
+fixes. In almost every round, the previous round's fix introduced a new defect.
+This is what those failures had in common, and what stops them.
 
-## 1. Reproduce it first, in this repository
+## 1. Fix the property, not the sentence
+
+The most expensive mistakes in this history were made *in response to a
+review finding*, by acting on how it was worded instead of re-deriving what
+it was about. Three, all of which made things worse than the defect:
+
+| The finding said | What was done | What it cost |
+| --- | --- | --- |
+| a secret containing `{{ }}` is templated | tagged the values `!unsafe` | `!unsafe` re-reads the scalar's type: `"0123456"` became `42798`, `""` became null -- a wider corruption than the one being fixed |
+| these three subtests prove nothing | skipped them | they were the only ones covering a run that *succeeds* while the record is lost, the case with no output at all |
+| the marker and the mount can disagree | moved the device write after the config write | that hazard was never in that order; the move made a stale device permanently unremovable |
+
+The finding is evidence, not a specification. Before changing anything, say in
+your own words what property is supposed to hold, and check the fix against
+that. If the property cannot be stated, the finding is not understood yet.
+
+Watch for the shape: a finding says a check is weak, and the fix removes the
+check. Weak is not the same as wrong.
+
+## 2. Reproduce it first, in this repository
 
 Do not fix from a description. A report can be wrong about the cause, right
 about the symptom, or describe something that no longer happens.
@@ -17,7 +36,7 @@ about the symptom, or describe something that no longer happens.
 Write the failing test, run it, and read the failure. If it passes, the finding
 is not real as stated — say so and stop.
 
-## 2. Put the regression test where the mistake lives
+## 3. Put the regression test where the mistake lives
 
 This is the rule that matters most, and the one that was missed for fifteen
 rounds.
@@ -45,7 +64,7 @@ The integration test also runs the real CLI, so it catches what a unit test
 that calls a method directly cannot — `idev snapshot create -wip` is refused by
 the flag parser regardless of what the name rule allows.
 
-## 3. Before changing a shared helper, list its callers
+## 4. Before changing a shared helper, list its callers
 
 Three separate defects came from changing something with more than one caller
 and thinking about one of them:
@@ -62,7 +81,7 @@ Run `grep -rn '<name>(' --include='*.go'` and write down, per caller, what it
 needs. If two callers need different things, that is two functions, or one
 parameter that says which.
 
-## 4. State what the change could break, then test that
+## 5. State what the change could break, then test that
 
 For anything that is not purely additive, name the paths that behave
 differently now — cleanup, cancellation, an error path, a second run, an
@@ -70,7 +89,7 @@ existing instance, an instance made by an older version. One fix in this
 history refused Incus mutations after cancellation, which read as safety and
 in fact stranded volumes permanently; it was reverted a round later.
 
-## 5. If the check reads a file another tool owns, ask the tool
+## 6. If the check reads a file another tool owns, ask the tool
 
 Four rounds running, the defect was in the test machinery rather than in the
 code it guards: a hand-written parser for the Makefile and for the workflows,
@@ -96,7 +115,7 @@ pointed at a fixture — `-n` echoes the default goal's recipe *before* `-p`
 prints the database, and that was undetectable while the helper could only read
 this repository.
 
-## 6. Check the test can fail
+## 7. Check the test can fail
 
 A test that passes before the fix asserts nothing. Revert the fix, watch the
 test fail, restore it:
@@ -112,7 +131,7 @@ Do this for integration tests too. It is the single most effective check in
 this repository's history: a sweep of it across the suite found 24 behaviours
 that were executed but never asserted, at 99% line coverage.
 
-## 7. Verify by exit code, never by reading output
+## 8. Verify by exit code, never by reading output
 
 ```bash
 make check   >/dev/null 2>&1; echo "check exit=$?"      # 0 or it failed
@@ -128,12 +147,19 @@ Run `make test-integration` when the change touches Incus behaviour, and read
 its exit code the same way. Save the full log — a failure two hundred lines up
 is gone if the command ended in `| tail -3`.
 
-Two ways a mutation check lies, both hit in one round: passing
+Three ways a mutation check lies, all hit in this history: passing
 `INCUS_SOCKET=/nonexistent` to the integration run skips every test and reports
-every mutation as surviving; and a script that re-copies its backup each
-iteration will, after one crash mid-mutation, save the mutated file as the
-backup and restore *that*. Take the pristine copy once, before the first
-mutation, and diff against it at the end.
+every mutation as surviving; a script that re-copies its backup each iteration
+will, after one crash mid-mutation, save the mutated file as the backup and
+restore *that*; and a string substitution can land in a different function
+that happens to contain the same line, so the mutation is applied somewhere
+harmless and reported as survived.
+
+Take the pristine copy once, before the first mutation, and diff against it at
+the end. Anchor the substitution on something unique -- a line number, or
+enough surrounding context to be unambiguous -- and assert it matched. A
+"survived" result is a claim about the test; check the mutation landed before
+believing it.
 
 **Use the make target, not `go test -tags integration` by hand.** That package
 shells out to a binary it builds, so it has no compile-time dependency on
@@ -143,7 +169,7 @@ survived, which reads as "the tests are blind" and is really "the tests never
 ran". `make test-integration` passes `-count=1`; an ad-hoc invocation must
 too.
 
-## 8. One topic per commit, staged explicitly
+## 9. One topic per commit, staged explicitly
 
 `git add -A` swept unrelated work into one commit three times in this history,
 each needing a `reset --soft` to split. Stage the files for the topic:
@@ -155,7 +181,7 @@ git add internal/cli/app.go internal/cli/app_test.go && git commit
 The message says **why**, not what. Reference the spec as `spec 04-cli.md 4.7`.
 See `## コミット` in CLAUDE.md.
 
-## 9. Say what you did not fix
+## 10. Say what you did not fix
 
 If part of a finding is genuinely not fixable, say what information is missing
 and where it would have to come from. Three things were called unknowable in

@@ -119,7 +119,7 @@ make check >/dev/null 2>&1; echo "check exit=$?"
 | スキル | 使う場面 |
 | --- | --- |
 | [fix-finding](.claude/skills/fix-finding/SKILL.md) | 指摘・バグ報告を受けて修正するとき |
-| [review-round](.claude/skills/review-round/SKILL.md) | コードレビューを実施するとき |
+| [review-round](.claude/skills/review-round/SKILL.md) | コードレビューを実施するとき、レビューと修正を繰り返すとき |
 
 どちらも、このリポジトリで**実際に起きた失敗**から書かれている。
 一般論ではないので、手順を省くときは何が起きたかを読んでから決めること。
