@@ -132,7 +132,7 @@ type ExecOptions struct {
 	// Env holds user-supplied environment variables. They may be secrets, so
 	// their values are hidden when displayed.
 	Env map[string]string
-	// PublicEnv holds the environment variables devkit injects. They help with
+	// PublicEnv holds the environment variables idev injects. They help with
 	// diagnosis, so they are shown.
 	PublicEnv map[string]string
 	Cwd       string

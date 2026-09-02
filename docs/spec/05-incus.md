@@ -1,9 +1,9 @@
 # 5. Incus層
 
-devkitがIncusに対して行うのは、instanceのライフサイクル管理と、
+idevがIncusに対して行うのは、instanceのライフサイクル管理と、
 `dev.yml` に宣言された設定の適用のみである。
 
-devkitはIncus Profileを同梱・作成しない（REQ-007）。
+idevはIncus Profileを同梱・作成しない（REQ-007）。
 
 ---
 
@@ -42,14 +42,14 @@ Incusのinstance名制約（長さ、使用可能文字）に適合するよう�
 
 ---
 
-## 5.2 devkitが管理するinstanceの識別
+## 5.2 idevが管理するinstanceの識別
 
-devkitは自身が作成したinstanceを、instance configで印付けする。
+idevは自身が作成したinstanceを、instance configで印付けする。
 
 ```text
-user.incus-devkit.project = example-project
-user.incus-devkit.root    = /home/user/src/example-project
-user.incus-devkit.schema  = 1
+user.incus-dev.project = example-project
+user.incus-dev.root    = /home/user/src/example-project
+user.incus-dev.schema  = 1
 ```
 
 目的：
@@ -58,9 +58,9 @@ user.incus-devkit.schema  = 1
 - 名前衝突時に、無関係なinstanceを破壊しないようにする
 
 `idev destroy` および `idev rebuild` は、対象instanceが
-devkit管理下でない場合、明示的に失敗する。
+idev管理下でない場合、明示的に失敗する。
 
-`user.incus-devkit.*` 名前空間はdevkitの予約とする。
+`user.incus-dev.*` 名前空間はidevの予約とする。
 
 ---
 
@@ -68,8 +68,8 @@ devkit管理下でない場合、明示的に失敗する。
 
 `instance.profiles` は **ホスト側に既に存在するProfileの名前参照のみ** を表す。
 
-- devkitはProfileを同梱しない
-- devkitはProfileを作成・更新・削除しない
+- idevはProfileを同梱しない
+- idevはProfileを作成・更新・削除しない
 - 指定されたProfileが存在しない場合、`idev up` は明示的に失敗する
   - エラーには不足しているProfile名を含める
 
@@ -96,9 +96,9 @@ devkit管理下でない場合、明示的に失敗する。
 | `instance.config` | 宣言されたkey-valueをそのまま設定 |
 | `instance.devices` | 宣言されたdeviceをそのまま設定 |
 | `workspace` | `workspace` という名前のdisk deviceとして設定（`shift` 方式では `shift=true` を付与） |
-| devkit管理情報 | `user.incus-devkit.*` |
+| idev管理情報 | `user.incus-dev.*` |
 
-devkitはconfigキーの意味を解釈しない。
+idevはconfigキーの意味を解釈しない。
 CPUやメモリも `limits.cpu` / `limits.memory` として素通しする。
 
 ### 5.4.2 作成時の適用
@@ -129,20 +129,20 @@ req := api.InstancesPost{
 
 ### 5.4.4 削除の扱い
 
-`dev.yml` から削除された設定は、**devkitが適用したものに限り** 取り消す。
+`dev.yml` から削除された設定は、**idevが適用したものに限り** 取り消す。
 
-devkitは適用したconfigキーとdevice名を、instance自身へ記録する。
+idevは適用したconfigキーとdevice名を、instance自身へ記録する。
 
 ```text
-user.incus-devkit.managed  = limits.cpu,limits.memory,raw.idmap
-user.incus-devkit.devices  = extdata,workspace
+user.incus-dev.managed  = limits.cpu,limits.memory,raw.idmap
+user.incus-dev.devices  = extdata,workspace
 ```
 
 `idev up` のたびに記録と宣言を突き合わせ、記録にあって宣言に無いものを
 取り消す。記録に無いもの（利用者が `incus config set` で手動追加した設定や
 device）には一切触れない。
 
-記録を持たない古いinstanceに対しては、devkit自身が設定したidmapキー
+記録を持たない古いinstanceに対しては、idev自身が設定したidmapキー
 （`raw.idmap`）のみを対象とする。
 
 完全にクリーンな状態が必要な場合は `idev rebuild` を使用する。
@@ -159,7 +159,7 @@ security.privileged
 
 `limits.*` は含めない。コンテナでは増減とも実行中に反映されるためである。
 
-devkitは再起動が必要な変更を検出した場合、既定では警告のみを表示する。
+idevは再起動が必要な変更を検出した場合、既定では警告のみを表示する。
 
 ```bash
 idev up --restart
@@ -175,7 +175,7 @@ idev up --restart
 `idev destroy` / `idev rebuild` のように破棄が前提の場合はこの限りではなく、
 最初から強制停止してよい。
 
-対象は devkit が実際に変更・取り消したキーに限る。
+対象は idev が実際に変更・取り消したキーに限る。
 触れていないキーを含めると、何もしていないのに警告が出続けてしまう。
 
 ---
@@ -189,7 +189,7 @@ idev up --restart
 決定した値は `incus.Target` として操作層へ渡し、接続時に
 `UseProject` で固定する。個々の操作でproject名を組み立てない。
 
-devkitはIncus projectを作成しない。存在しないprojectを指定した場合、
+idevはIncus projectを作成しない。存在しないprojectを指定した場合、
 Incus側のエラーがそのまま利用者へ届く。
 
 ---
@@ -259,7 +259,7 @@ type Client interface {
 type ExecOptions struct {
     // Env は利用者が指定した値。Secretを含みうるため表示しない。
     Env map[string]string
-    // PublicEnv はdevkitが注入する値。診断に役立つため表示してよい。
+    // PublicEnv はidevが注入する値。診断に役立つため表示してよい。
     PublicEnv map[string]string
 
     Cwd    string
@@ -312,8 +312,6 @@ image aliasは instance種別ごとに別のimageを指すため、解決の際�
   **失敗しても必ず元へ戻す**（戻さないとシェルが壊れる）
 - 端末サイズを `InstanceExecPost.Width` / `Height` で渡す
 - SIGWINCH を受けたら、制御用websocketへ `window-resize` を送る
-  （Windowsには SIGWINCH が無いため、購読はビルドタグで分離し、
-  そちらでは開始時のサイズのみを送る。仕様 07-implementation.md 7.7）
 - ホストの `TERM` をコンテナへ渡す。Incusは既定値を補わないため、
   渡さないと `vim` や `less` が端末を判別できない
 

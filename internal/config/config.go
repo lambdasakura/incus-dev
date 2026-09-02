@@ -21,9 +21,13 @@ const (
 	DefaultStoragePool     = "default"
 )
 
-// ReservedConfigPrefix is the instance-config namespace devkit reserves for
+// ReservedConfigPrefix is the instance-config namespace idev reserves for
 // its own bookkeeping.
-const ReservedConfigPrefix = "user.incus-devkit."
+//
+// An instance created before the project was renamed carries
+// user.incus-devkit.* instead, and is therefore not recognised as managed.
+// There is no migration: nothing was ever released under the old name.
+const ReservedConfigPrefix = "user.incus-dev."
 
 // WorkspaceDeviceName is the reserved name of the workspace disk device.
 const WorkspaceDeviceName = "workspace"

@@ -10,15 +10,15 @@
 `provision` / `shell` / `exec` / `status` を、環境を作る前に呼んでいる。
 `idev up` を先に実行する。暗黙に作りにいくことはない（意図しない構築を避けるため）。
 
-### `instance <名前> exists but is not managed by devkit for project "<name>"`
+### `instance <名前> exists but is not managed by idev for project "<name>"`
 
-同名のinstanceが手動で作られている。devkitは印（`user.incus-devkit.project`）の
+同名のinstanceが手動で作られている。idevは印（`user.incus-dev.project`）の
 無いinstanceを破壊しない。既存を消すか、`project.name` を変えて名前をずらす。
 
 ### `incus profile(s) not found on this host: <名前>`
 
 `instance.profiles` はホストに **既にあるProfileの名前参照** であって、
-devkitはProfileを作らない。対処は次のいずれか。
+idevはProfileを作らない。対処は次のいずれか。
 
 - ホスト側でProfileを作る
 - `instance.profiles` から外し、必要な設定を `instance.config` /
@@ -36,7 +36,7 @@ devkitはProfileを作らない。対処は次のいずれか。
 
 - 参照先のファイルが無い（playbook、vars、device の source）
 - ステップが `run` / `ansible` / `galaxy` のどれも持たない、または複数持つ
-- 予約キー（`user.incus-devkit.*`）を使っている
+- 予約キー（`user.incus-dev.*`）を使っている
 
 ## 実行時
 
@@ -62,7 +62,7 @@ sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLIS
 
 ### `network address not assigned` の警告のあとステップが失敗する
 
-IPv4が付く前にprovisionが始まっている。devkitはIPv4を待つので通常は出ない。
+IPv4が付く前にprovisionが始まっている。idevはIPv4を待つので通常は出ない。
 出る場合はネットワーク構成側（上のDocker競合を含む）を疑う。
 
 ### `<ステップ名>: exited with code N`

@@ -1,14 +1,14 @@
-# Incus Development Environment Toolkit 仕様書
+# incus-dev 仕様書
 
 Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理する
-CLIツール（`idev` / devkit）の仕様書。
+CLIツール `idev` の仕様書。
 
 ## 基本方針
 
-devkitは **Incusコンテナの構築・bootstrap・`.incus-dev/` 配下の実行** に特化する。
+idevは **Incusコンテナの構築・bootstrap・`.incus-dev/` 配下の実行** に特化する。
 
 Ansible Role、Incus Profile、言語ランタイムの導入手順といった環境固有の内容は
-devkitに含めず、すべてプロジェクトの `.incus-dev/` が所有する（REQ-007）。
+idevに含めず、すべてプロジェクトの `.incus-dev/` が所有する（REQ-007）。
 
 **「開発環境を再現するために必要な情報が、すべて `.incus-dev/` の中にある」**
 状態を維持することが、本仕様の中核である。
@@ -20,7 +20,6 @@ devkitに含めず、すべてプロジェクトの `.incus-dev/` が所有す�
 | 用語 | 意味 |
 | --- | --- |
 | incus-dev | 本プロジェクトの名称。リポジトリ名でもある |
-| devkit | 仕様書と実装コメントで本ツール自身を指す内部呼称。利用者向け文書では使わない |
 | `idev` | コマンド名（**i**ncus + **dev**） |
 | `.incus-dev/` | プロジェクト側の設定ディレクトリ |
 | `dev.yml` | 開発環境定義ファイル（`.incus-dev/dev.yml`） |
@@ -34,7 +33,7 @@ devkitに含めず、すべてプロジェクトの `.incus-dev/` が所有す�
 | # | ドキュメント | 内容 |
 | --- | --- | --- |
 | 1 | [01-overview.md](01-overview.md) | 概要、必須要件(REQ-001〜007)、非目標、全体アーキテクチャ、設計原則 |
-| 2 | [02-repository-layout.md](02-repository-layout.md) | 実装言語、devkit側／プロジェクト側の構成、devkitに置かないもの、配布 |
+| 2 | [02-repository-layout.md](02-repository-layout.md) | 実装言語、idev側／プロジェクト側の構成、idevに置かないもの、配布 |
 | 3 | [03-configuration.md](03-configuration.md) | `.incus-dev/dev.yml` の全設定項目 |
 | 4 | [04-cli.md](04-cli.md) | 各コマンドの仕様、ログ、エラー、exit code、AI利用 |
 | 5 | [05-incus.md](05-incus.md) | instance命名、管理情報、Profile、config/device適用、Incus操作層 |

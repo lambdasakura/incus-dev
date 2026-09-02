@@ -79,7 +79,7 @@ provision:
 # .incus-dev/scripts/setup.sh
 set -eu
 
-echo "setting up ${DEVKIT_PROJECT_NAME}"
+echo "setting up ${IDEV_PROJECT_NAME}"
 command -v jq >/dev/null 2>&1 || apt-get install -y jq
 ```
 
@@ -133,7 +133,7 @@ The generated inventory is equivalent to this.
 ```yaml
 all:
   children:
-    devkit:
+    idev:
       hosts:
         dev:
           ansible_host: dev-my-project
@@ -197,17 +197,17 @@ is passed to every step.
 ### `run` steps (environment variables)
 
 ```text
-DEVKIT_PROJECT_NAME       project name
-DEVKIT_INSTANCE           instance name
-DEVKIT_WORKSPACE          workspace path inside the container
-DEVKIT_WORKSPACE_SOURCE   project root path on the host
-DEVKIT_INCUS_PROJECT      Incus project
+IDEV_PROJECT_NAME       project name
+IDEV_INSTANCE           instance name
+IDEV_WORKSPACE          workspace path inside the container
+IDEV_WORKSPACE_SOURCE   project root path on the host
+IDEV_INCUS_PROJECT      Incus project
 ```
 
 ```yaml
 provision:
   - run: |
-      cd "$DEVKIT_WORKSPACE"
+      cd "$IDEV_WORKSPACE"
       make setup
 ```
 
@@ -216,17 +216,17 @@ A step's own `env` wins if it sets the same name.
 ### `ansible` steps (variables)
 
 ```yaml
-devkit_project_name: my-project
-devkit_instance: dev-my-project
-devkit_workspace: /workspace
-devkit_workspace_source: /home/you/src/my-project
-devkit_incus_project: default
+idev_project_name: my-project
+idev_instance: dev-my-project
+idev_workspace: /workspace
+idev_workspace_source: /home/you/src/my-project
+idev_incus_project: default
 ```
 
 ```yaml
 - name: Configure shell to start in the workspace
   ansible.builtin.copy:
-    content: "cd {{ devkit_workspace }}\n"
+    content: "cd {{ idev_workspace }}\n"
     dest: /etc/profile.d/workspace.sh
     mode: "0644"
 ```
@@ -250,7 +250,7 @@ command -v jq >/dev/null 2>&1 || apt-get install -y jq
 
 # generate, do not append
 cat > /etc/profile.d/workspace.sh <<EOS
-cd ${DEVKIT_WORKSPACE}
+cd ${IDEV_WORKSPACE}
 EOS
 
 # check before creating

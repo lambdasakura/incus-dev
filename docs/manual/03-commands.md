@@ -73,7 +73,7 @@ What it checks:
   exclusive, and so on)
 - That referenced files exist (playbook, vars, inventory, workspace source)
 - That a root disk device is declared when `profiles: []`
-- That no reserved key (`user.incus-devkit.*`) is used
+- That no reserved key (`user.incus-dev.*`) is used
 
 It does not check whether the profiles exist on the host, because it does not
 talk to Incus.

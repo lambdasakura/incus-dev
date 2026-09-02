@@ -15,7 +15,7 @@ instance:
   #   images:ubuntu/24.04 / images:debian/12 / images:alpine/3.21
   image: images:ubuntu/24.04
 
-  # A reference by name to profiles that exist on the host. devkit creates none.
+  # A reference by name to profiles that exist on the host. idev creates none.
   # profiles: [default]
 
   # Passed straight to the Incus instance config. Quoting values is the safest

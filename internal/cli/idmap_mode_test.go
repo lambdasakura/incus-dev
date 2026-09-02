@@ -180,7 +180,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 		}
 	})
 
-	// When the user manages it, devkit touches neither the config nor the devices.
+	// When the user manages it, idev touches neither the config nor the devices.
 	t.Run("managed by the user", func(t *testing.T) {
 		plan := idmapPlan{Managed: false}
 
@@ -193,7 +193,7 @@ func TestPlanUsesResolvedIDMap(t *testing.T) {
 	})
 }
 
-// Switching idmap strategies leaves no key devkit set behind.
+// Switching idmap strategies leaves no key idev set behind.
 func TestStaleIDMapKeys(t *testing.T) {
 	withRaw := map[string]string{idmapConfigKey: "uid 1000 0"}
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// devkit carries no environment-specific assets (REQ-007, spec 08-testing.md
+// idev carries no environment-specific assets (REQ-007, spec 08-testing.md
 // 8.2).
 //
 // It walks the whole repository. examples/ and test/ are out of scope, being
@@ -41,7 +41,7 @@ func TestNoEnvironmentSpecificAssets(t *testing.T) {
 
 		if reason, bad := forbidden[d.Name()]; bad {
 			t.Errorf("%s exists (%s). Under REQ-007, environment-specific content "+
-				"belongs in a project's .incus-dev/, not in devkit", rel, reason)
+				"belongs in a project's .incus-dev/, not in idev", rel, reason)
 		}
 		return nil
 	})
@@ -91,7 +91,7 @@ func TestNoOSSpecificCommandsInImplementation(t *testing.T) {
 				continue
 			}
 			t.Errorf("%s contains %q. Under REQ-007, OS-specific steps belong in "+
-				"a project's .incus-dev/, not in devkit", rel, m)
+				"a project's .incus-dev/, not in idev", rel, m)
 		}
 		return nil
 	})
@@ -135,6 +135,6 @@ func TestOnlySchemasAreEmbedded(t *testing.T) {
 	want := []string{"../schemas/embed.go"}
 	if len(files) != len(want) || files[0] != want[0] {
 		t.Errorf("files using go:embed = %v, want %v\n"+
-			"the JSON Schema is the only thing devkit may embed (REQ-007)", files, want)
+			"the JSON Schema is the only thing idev may embed (REQ-007)", files, want)
 	}
 }

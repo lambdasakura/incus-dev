@@ -88,11 +88,11 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
 	if got["limits.cpu"] != "8" {
 		t.Errorf("limits.cpu = %q", got["limits.cpu"])
 	}
-	if got["user.incus-devkit.project"] != "example-project" {
-		t.Errorf("user.incus-devkit.project = %q", got["user.incus-devkit.project"])
+	if got["user.incus-dev.project"] != "example-project" {
+		t.Errorf("user.incus-dev.project = %q", got["user.incus-dev.project"])
 	}
-	if got["user.incus-devkit.root"] != "/home/u/src/example" {
-		t.Errorf("user.incus-devkit.root = %q", got["user.incus-devkit.root"])
+	if got["user.incus-dev.root"] != "/home/u/src/example" {
+		t.Errorf("user.incus-dev.root = %q", got["user.incus-dev.root"])
 	}
 }
 
@@ -118,9 +118,9 @@ func TestIsManagedBy(t *testing.T) {
 		config map[string]string
 		want   bool
 	}{
-		{"managed", map[string]string{"user.incus-devkit.project": "example-project"}, true},
+		{"managed", map[string]string{"user.incus-dev.project": "example-project"}, true},
 		{"unmarked", map[string]string{}, false},
-		{"a different project", map[string]string{"user.incus-devkit.project": "other"}, false},
+		{"a different project", map[string]string{"user.incus-dev.project": "other"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestIsManagedBy(t *testing.T) {
 	}
 }
 
-// The keys devkit applied are recorded, so a removal can be followed
+// The keys idev applied are recorded, so a removal can be followed
 // (spec 05-incus.md 5.4.4).
 func TestDesiredConfigRecordsManagedKeys(t *testing.T) {
 	cfg := mustParse(t, planBase+`
@@ -167,7 +167,7 @@ func TestStaleConfigKeys(t *testing.T) {
 			name: "leaves a key the user added by hand alone",
 			current: map[string]string{
 				managedKeysKey:     "limits.cpu,raw.idmap",
-				"security.nesting": "true", // not managed by devkit
+				"security.nesting": "true", // not managed by idev
 			},
 			yaml: planBase + "  config:\n    limits.cpu: \"8\"\n",
 			want: nil,
@@ -202,7 +202,7 @@ func TestStaleConfigKeys(t *testing.T) {
 	}
 }
 
-// For devices too, only what devkit created is followed on removal.
+// For devices too, only what idev created is followed on removal.
 func TestStaleDevices(t *testing.T) {
 	cfg := mustParse(t, planBase+`
   devices:

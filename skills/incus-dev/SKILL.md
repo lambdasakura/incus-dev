@@ -20,7 +20,7 @@ idev exec -- make test
 
 **2. Express every environment change inside `.incus-dev/`.**
 Do not change settings by calling `incus` directly. A setting changed by hand
-is either reverted by the next `idev up` (for the keys devkit manages) or never
+is either reverted by the next `idev up` (for the keys idev manages) or never
 recorded at all. Wanting to reach for `incus` is a sign that something is not
 expressible in `dev.yml` yet.
 
@@ -109,7 +109,7 @@ everything done inside the container.
 
 ```bash
 idev validate          # 1. dev.yml syntax and referenced paths
-idev status            # 2. instance state; is it managed by devkit?
+idev status            # 2. instance state; is it managed by idev?
 idev up --dry-run      # 3. what would be applied
 idev provision         # 4. re-run provisioning only
 idev up                # 5. re-run including re-applying the configuration

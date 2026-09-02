@@ -54,7 +54,7 @@ idev up
 7. instance存在確認
 8. 存在しなければ作成（image / profiles）
 9. instance config・devices・workspace mountを適用
-10. devkit管理情報 (`user.incus-devkit.*`) を設定
+10. idev管理情報 (`user.incus-dev.*`) を設定
 11. instance起動
 12. instance ready待ち
 13. bootstrap実行
@@ -64,10 +64,10 @@ idev up
 ### 制約
 
 - すでにinstanceが存在する場合は破壊してはならない
-- 既存instanceがdevkit管理下でない場合は明示的に失敗する
+- 既存instanceがidev管理下でない場合は明示的に失敗する
 - 既存instanceに対しても、`dev.yml` の宣言内容は再適用する
   （[05-incus.md](05-incus.md) 参照）
-- 宣言から消えた設定・deviceは、devkitが適用したものに限り取り消す
+- 宣言から消えた設定・deviceは、idevが適用したものに限り取り消す
 
 ```bash
 idev up --restart
@@ -180,7 +180,7 @@ Workspace:  /home/user/src/example-project -> /workspace
 - provisionステップ数
 - Incus remote / project
 - runtime version
-- devkit管理下かどうか
+- idev管理下かどうか
 
 これらは実装済みである。
 
@@ -197,7 +197,7 @@ idev destroy
 ### 制約
 
 - ソースコードはbind mountされたホスト側ディレクトリなので削除してはならない
-- devkit管理下でないinstanceは削除してはならない
+- idev管理下でないinstanceは削除してはならない
 - 破壊操作のため、既定では確認を求める
 - **永続ボリューム（`volumes`）は削除しない**
 
@@ -250,7 +250,7 @@ idev snapshot restore <name>    # 破壊的。確認を求める（--force で�
 idev snapshot delete <name>     # 同上
 ```
 
-- 対象はdevkit管理下のinstanceに限る
+- 対象はidev管理下のinstanceに限る
 - 復元してもホスト側のworkspaceには影響しない
   （bind mountであり、instanceの状態ではないため）
 
@@ -281,7 +281,7 @@ idev validate
 - `instance.config` / `instance.devices` のキーが `-` で始まらないこと
   （Incusが受け付けないキー形式であり、誤記を早期に知らせるため）
 - `instance.config` の値がスカラであること
-- `user.incus-devkit.*` を使用していないこと
+- `user.incus-dev.*` を使用していないこと
 
 CIから実行可能なこと。Incusが無い環境でも実行可能とする。
 
@@ -318,7 +318,7 @@ Provision step 2/2: main playbook (ansible .incus-dev/ansible/site.yml)
   `idev up` と同じように確認する。preflightとして使えるようにするため
 - Incusへの読み取りは行うが、変更は一切行わない
 - 既存instanceに対しては、現状との差分だけを表示する
-- devkitの管理用キー（`user.incus-devkit.*`）は常に設定されるため
+- idevの管理用キー（`user.incus-dev.*`）は常に設定されるため
   1行にまとめる
 
 実行予定の算出は、実際に適用する経路と同じ関数

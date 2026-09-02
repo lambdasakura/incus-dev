@@ -758,7 +758,7 @@ func TestAPIExec(t *testing.T) {
 	code, err := a.Exec(context.Background(), "dev-x", []string{"sh", "-c", "exit 7"}, ExecOptions{
 		Cwd:       "/workspace",
 		User:      "1000",
-		PublicEnv: map[string]string{"DEVKIT_INSTANCE": "dev-x"},
+		PublicEnv: map[string]string{"IDEV_INSTANCE": "dev-x"},
 		Env:       map[string]string{"TOKEN": "s3cret"},
 	})
 	if err != nil {
@@ -775,7 +775,7 @@ func TestAPIExec(t *testing.T) {
 	if req.Cwd != "/workspace" || req.User != 1000 {
 		t.Errorf("request = %+v", req)
 	}
-	want := map[string]string{"DEVKIT_INSTANCE": "dev-x", "TOKEN": "s3cret"}
+	want := map[string]string{"IDEV_INSTANCE": "dev-x", "TOKEN": "s3cret"}
 	if diff := cmp.Diff(want, maps.Clone(req.Environment)); diff != "" {
 		t.Errorf("Environment mismatch (-want +got):\n%s", diff)
 	}
@@ -796,13 +796,13 @@ func TestAPIExecEnvPrecedence(t *testing.T) {
 	a, _ := newAPI(f)
 
 	if _, err := a.Exec(context.Background(), "dev-x", []string{"true"}, ExecOptions{
-		PublicEnv: map[string]string{"DEVKIT_WORKSPACE": "/workspace"},
-		Env:       map[string]string{"DEVKIT_WORKSPACE": "/elsewhere"},
+		PublicEnv: map[string]string{"IDEV_WORKSPACE": "/workspace"},
+		Env:       map[string]string{"IDEV_WORKSPACE": "/elsewhere"},
 	}); err != nil {
 		t.Fatalf("Exec() error = %v", err)
 	}
-	if got := f.lastExec.Environment["DEVKIT_WORKSPACE"]; got != "/elsewhere" {
-		t.Errorf("DEVKIT_WORKSPACE = %q, want what the project set to win", got)
+	if got := f.lastExec.Environment["IDEV_WORKSPACE"]; got != "/elsewhere" {
+		t.Errorf("IDEV_WORKSPACE = %q, want what the project set to win", got)
 	}
 }
 

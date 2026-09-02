@@ -16,10 +16,10 @@ builds:
     binary: idev
     env:
       - CGO_ENABLED=0
+    # Linux only: idev talks to a local Incus, and the client refuses a local
+    # connection anywhere else (spec 07-implementation.md 7.7).
     goos:
       - linux
-      - darwin
-      - windows
     goarch:
       - amd64
       - arm64
@@ -34,10 +34,6 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
     files:
       - README.md
       - README.ja.md

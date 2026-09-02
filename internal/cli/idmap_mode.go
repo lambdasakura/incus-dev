@@ -8,12 +8,12 @@ import (
 
 // idmapPlan is a resolved uid/gid mapping strategy.
 //
-// Holding "which strategy" and "does devkit manage this at all" in one value is
+// Holding "which strategy" and "does idev manage this at all" in one value is
 // what lets planning (plan.go) and applying (app.go) share the same decision.
 type idmapPlan struct {
 	// Mode is the strategy to apply. It is meaningless when Managed is false.
 	Mode config.IDMapMode
-	// Managed reports whether devkit manages the mapping. It is false when the
+	// Managed reports whether idev manages the mapping. It is false when the
 	// user set raw.idmap in instance.config, and for instances that are not
 	// containers.
 	Managed bool

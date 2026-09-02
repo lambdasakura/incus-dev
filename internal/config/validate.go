@@ -148,8 +148,8 @@ func validateSecrets(c *Config, ps *problems) {
 		case secret.Env == "" && secret.File == "":
 			ps.add(path, "must specify either env or file")
 		}
-		if strings.HasPrefix(name, devkitEnvPrefix) {
-			ps.add(path, "%s* is reserved for devkit", devkitEnvPrefix)
+		if strings.HasPrefix(name, reservedEnvPrefix) {
+			ps.add(path, "%s* is reserved for idev", reservedEnvPrefix)
 		}
 	}
 }
@@ -250,8 +250,8 @@ func validateSteps(raw map[string]any, key string, allowAnsible bool, ps *proble
 	}
 }
 
-// devkitEnvPrefix is the prefix of the environment variables devkit injects.
-const devkitEnvPrefix = "DEVKIT_"
+// reservedEnvPrefix is the prefix of the environment variables idev injects.
+const reservedEnvPrefix = "IDEV_"
 
 // profileNamePattern is the shape of a valid Incus profile name.
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -308,7 +308,7 @@ func validateInstance(c *Config, ps *problems) {
 
 	for _, k := range sortedKeys(c.Instance.Config) {
 		if strings.HasPrefix(k, ReservedConfigPrefix) {
-			ps.add("instance.config."+k, "%s* is reserved for devkit", ReservedConfigPrefix)
+			ps.add("instance.config."+k, "%s* is reserved for idev", ReservedConfigPrefix)
 		}
 	}
 	if _, ok := c.Instance.Devices[WorkspaceDeviceName]; ok {

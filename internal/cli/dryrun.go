@@ -87,7 +87,7 @@ func planActions(cfg *config.Config, name string, current *incus.Instance, idmap
 
 // configActions lists the changes to the instance config.
 //
-// devkit's bookkeeping keys (user.incus-devkit.*) are not something the user
+// idev's bookkeeping keys (user.incus-dev.*) are not something the user
 // wrote and are always set, so they collapse into one line.
 func configActions(current, desired map[string]string, stale []string) []string {
 	var out []string
@@ -107,7 +107,7 @@ func configActions(current, desired map[string]string, stale []string) []string 
 		out = append(out, fmt.Sprintf("Set config %s=%s", k, singleLine(desired[k])))
 	}
 	if markers {
-		out = append(out, "Set devkit markers ("+config.ReservedConfigPrefix+"*)")
+		out = append(out, "Set idev markers ("+config.ReservedConfigPrefix+"*)")
 	}
 	return out
 }

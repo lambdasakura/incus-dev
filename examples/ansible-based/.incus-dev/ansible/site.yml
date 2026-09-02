@@ -1,5 +1,5 @@
 ---
-# "hosts: dev" matches the host name in the inventory devkit generates.
+# "hosts: dev" matches the host name in the inventory idev generates.
 - name: Provision development environment
   hosts: dev
   gather_facts: true
@@ -14,6 +14,6 @@
 
     - name: Configure shell to start in the workspace
       ansible.builtin.copy:
-        content: "cd {{ devkit_workspace }}\n"
+        content: "cd {{ idev_workspace }}\n"
         dest: /etc/profile.d/workspace.sh
         mode: "0644"

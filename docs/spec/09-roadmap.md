@@ -26,7 +26,7 @@ container のみ
 既存 profile の名前参照
 instance.config / instance.devices の素通し
 workspace bind mount（idmap: auto）
-devkit管理情報 user.incus-devkit.*
+idev管理情報 user.incus-dev.*
 ```
 
 ### CLI補助
@@ -44,7 +44,7 @@ instance ready 待ち（ネットワークの割り当てを含む）
 bootstrap（既定 + 上書き + 無効化）
 run ステップ（コンテナ内実行）
 ansible ステップ（community.general.incus / 一時inventory）
-devkit変数の注入
+idev変数の注入
 部分実行（--step / --from / --list）
 ```
 
@@ -64,7 +64,7 @@ provision (run / ansible)
 
 ```text
 packages / features に相当する高水準フィールド（恒久的な非目標）
-devkit同梱の Role / Profile（恒久的な非目標）
+idev同梱の Role / Profile（恒久的な非目標）
 requirements.yml の自動適用
 ```
 
@@ -85,7 +85,7 @@ dev.yml の volumes（永続ボリューム）
 dev.yml の secrets（ホストからの注入）
 project.scope（複数checkout / ブランチ別instance）
 galaxy ステップ型（ansible-galaxy install）
-設定・deviceの削除追従（user.incus-devkit.managed / .devices）
+設定・deviceの削除追従（user.incus-dev.managed / .devices）
 Incus Go client library への移行（incus コマンドへの依存を解消）
 ```
 
@@ -178,7 +178,7 @@ create / start / stop / delete
 profile 存在確認
 config / devices の適用
 workspace mount（idmap）
-devkit管理情報
+idev管理情報
 ```
 
 以下を成立させる。
@@ -194,7 +194,7 @@ idev destroy
 
 ### Phase 3
 
-実行機構（devkitの中核）。
+実行機構（idevの中核）。
 
 ```text
 instance ready 待ち
@@ -214,7 +214,7 @@ ansibleステップ。
 
 ```text
 一時inventory生成
-devkit変数の注入
+idev変数の注入
 ansible.cfg の扱い
 ```
 
@@ -330,9 +330,9 @@ source files
 
 以下がすべて成立すること。
 
-1. devkitリポジトリに Ansible Role / Incus Profile が存在しない
-2. devkitバイナリが同梱するアセットは JSON Schema のみである
+1. idevリポジトリに Ansible Role / Incus Profile が存在しない
+2. idevバイナリが同梱するアセットは JSON Schema のみである
 3. あるプロジェクトの `.incus-dev/` を別の空リポジトリへコピーし、
    `idev up` を実行すると同じ環境が再現される
-4. devkitを新しいバージョンへ更新しても、既存プロジェクトの
+4. idevを新しいバージョンへ更新しても、既存プロジェクトの
    構築内容（導入されるパッケージやツール）が変化しない

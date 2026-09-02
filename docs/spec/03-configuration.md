@@ -22,7 +22,7 @@ my-project/
 └── ...
 ```
 
-`dev.yml` 以外の構成は自由であり、devkitは特定のディレクトリ名を要求しない。
+`dev.yml` 以外の構成は自由であり、idevは特定のディレクトリ名を要求しない。
 `dev.yml` から参照されたパスだけを使用する。
 
 ---
@@ -135,7 +135,7 @@ runtime:
 
 `idev` が要求を満たさない場合は明示的なエラーとする。
 
-devkitはAnsible RoleやProfileを同梱しないため（REQ-007）、
+idevはAnsible RoleやProfileを同梱しないため（REQ-007）、
 このバージョンが示すのは **CLIの挙動と設定フォーマットの互換性のみ** である。
 
 provisioning内容のバージョン管理はプロジェクト側のGit履歴が担う。
@@ -207,7 +207,7 @@ instance:
 image: images:ubuntu/24.04
 ```
 
-devkitは特定のOSを前提としない。
+idevは特定のOSを前提としない。
 image選択と、それに適合するprovisioning手順の整合はプロジェクトの責務とする。
 
 ### 3.6.2 instance.type は無い
@@ -235,8 +235,8 @@ profiles:
   - default
 ```
 
-- devkitはProfileを同梱しない（REQ-007）
-- devkitはProfileを作成・更新しない
+- idevはProfileを同梱しない（REQ-007）
+- idevはProfileを作成・更新しない
 - 指定されたProfileが存在しない場合は明示的に失敗する
 
 省略時は `["default"]` として扱う（Incusの既定挙動と一致させるため）。
@@ -281,7 +281,7 @@ config:
   environment.TZ: Asia/Tokyo
 ```
 
-devkitはキーの意味を解釈しない。未知のキーを拒否してはならない。
+idevはキーの意味を解釈しない。未知のキーを拒否してはならない。
 
 Incusのconfig値は文字列であるため、YAML上のスカラ値（数値・真偽値）は
 文字列へ変換して渡す。
@@ -290,7 +290,7 @@ Incusのconfig値は文字列であるため、YAML上のスカラ値（数値�
 limits.cpu: 8         # "8" として渡される
 ```
 
-`user.incus-devkit.*` 名前空間はdevkitが管理用に予約する。
+`user.incus-dev.*` 名前空間はidevが管理用に予約する。
 プロジェクトから指定してはならない。
 
 ### 3.6.5 devices
@@ -316,9 +316,9 @@ devices:
 - deviceの `source` に相対パスを指定した場合、project rootを基準に解決する
 - ただし `pool` を伴う `disk` の `source` はストレージボリューム名であり、
   パスとして解決も検査もしない
-- ホストのディレクトリをマウントする `disk` には、devkitが `workspace` と
+- ホストのディレクトリをマウントする `disk` には、idevが `workspace` と
   同じidmap方式を適用する（3.7.3参照）。`shift` を明示した場合はそちらを尊重する
-- `workspace` という名前のdeviceはdevkitが予約する（3.7参照）
+- `workspace` という名前のdeviceはidevが予約する（3.7参照）
 - device名およびキーは `-` で始められない（incusのフラグと衝突するため）
 
 ---
@@ -426,7 +426,7 @@ workspaceだけを対象にすると、`shift` 方式のホストで
 ただし最適な値はホストに依存するため、**通常は書かないほうがよい**。
 
 なお `instance.config` に `raw.idmap` が明示されている場合、
-devkitは対応付けに一切介入しない。
+idevは対応付けに一切介入しない。
 
 ### 3.7.4 mount方式
 
@@ -458,7 +458,7 @@ bootstrap:
 任意。provision実行前に、コンテナ内で実行する準備処理。
 
 - ステップは `run` のみ使用できる（`ansible` は使用できない）
-- 指定した場合、devkitの既定bootstrapを **完全に置き換える**
+- 指定した場合、idevの既定bootstrapを **完全に置き換える**
 - 空リスト `bootstrap: []` を指定すると、bootstrapを行わない
 
 既定動作および詳細は [06-provisioning.md](06-provisioning.md) を参照。
@@ -551,30 +551,30 @@ provision:
 | --- | --- | --- |
 | `playbook` | ○ | playbookのパス（project root相対） |
 | `vars` | | 追加varsファイル。`--extra-vars @<file>` として渡す |
-| `inventory` | | 追加inventory。devkit生成のinventoryに加えて渡す |
+| `inventory` | | 追加inventory。idev生成のinventoryに加えて渡す |
 | `tags` / `skip_tags` | | `--tags` / `--skip-tags` |
 | `extra_args` | | `ansible-playbook` へそのまま渡す引数 |
 
-devkitは接続用の一時inventoryを生成する。
+idevは接続用の一時inventoryを生成する。
 Role解決やcollectionの導入はプロジェクトの責務とする。
 
 詳細は [06-provisioning.md](06-provisioning.md) を参照。
 
 ---
 
-## 3.10 devkitが提供する変数
+## 3.10 idevが提供する変数
 
-devkitはprovisioningの実行対象を各ステップへ通知する。
+idevはprovisioningの実行対象を各ステップへ通知する。
 プロジェクトはこれによりinstance名等をハードコードせずに済む。
 
 ### 3.10.1 `run` ステップの環境変数
 
 ```text
-DEVKIT_PROJECT_NAME
-DEVKIT_INSTANCE
-DEVKIT_WORKSPACE            コンテナ内のworkspaceパス
-DEVKIT_WORKSPACE_SOURCE     ホスト側のproject rootパス
-DEVKIT_INCUS_PROJECT
+IDEV_PROJECT_NAME
+IDEV_INSTANCE
+IDEV_WORKSPACE            コンテナ内のworkspaceパス
+IDEV_WORKSPACE_SOURCE     ホスト側のproject rootパス
+IDEV_INCUS_PROJECT
 ```
 
 ### 3.10.2 `ansible` ステップの変数
@@ -582,14 +582,14 @@ DEVKIT_INCUS_PROJECT
 同じ情報を `--extra-vars` として渡す。
 
 ```yaml
-devkit_project_name: example-project
-devkit_instance: dev-example-project
-devkit_workspace: /workspace
-devkit_workspace_source: /home/user/src/example-project
-devkit_incus_project: default
+idev_project_name: example-project
+idev_instance: dev-example-project
+idev_workspace: /workspace
+idev_workspace_source: /home/user/src/example-project
+idev_incus_project: default
 ```
 
-`devkit_` および `DEVKIT_` プレフィックスはdevkitが予約する。
+`idev_` および `IDEV_` プレフィックスはidevが予約する。
 
 ---
 
@@ -629,7 +629,7 @@ secrets:
 ```
 
 - `env` と `file` は排他。どちらか一方を指定する
-- `DEVKIT_` で始まる名前は使えない（devkitの予約）
+- `IDEV_` で始まる名前は使えない（idevの予約）
 - 取得できないものがあれば、**instanceへ触れる前に** どれが足りないかを
   まとめて報告する
 

@@ -72,11 +72,11 @@ make cover
 
 ## 8.2 構造の検証
 
-REQ-007（devkitが環境固有の資産を持たないこと）は仕様の中核であり、
+REQ-007（idevが環境固有の資産を持たないこと）は仕様の中核であり、
 テストで機械的に検証する。
 
 ```text
-devkitリポジトリに以下が存在しないこと
+idevリポジトリに以下が存在しないこと
 
   ansible/roles/
   profiles/*.yaml
@@ -175,23 +175,16 @@ CIで初めて発覚する、という状態を作らないためである。
 
 Incusを必要とするテストは統合テスト（8.3）に置く。
 
-### 8.4.2 プラットフォーム別に実行する範囲
+### 8.4.2 実行するプラットフォーム
 
-配布対象は linux / darwin / windows である（仕様 07-implementation.md 7.7）が、
-全プラットフォームで同じ範囲を実行するわけではない。
+Linuxのみで実行する。配布対象がLinuxだけであり
+（仕様 07-implementation.md 7.7）、他のプラットフォームで
+検査する対象が無いためである。
 
-| プラットフォーム | 実行する範囲 |
-| --- | --- |
-| Linux | lint、`go test ./...`、カバレッジ |
-| macOS | `go test ./...`、カバレッジ |
-| Windows | `go vet ./...`、ビルド、`idev --version` / `--help` |
-
-Windowsでunit testを実行しないのは、`internal/runner` のテストが
-`sh` / `sleep` のようなUnixのコマンドを実際に起動し、
-`internal/project` のテストがPOSIXのパーミッション（`chmod 0o000`）に
-依存しているためである。
-**カバレッジのためにこれらの検査を弱めない**（8.1「カバレッジ」参照）。
-Windows固有のソースが壊れていないことは、vetとビルドで担保する。
+テスト自体もLinuxを前提にしてよい。`internal/runner` のテストは
+`sh` / `sleep` を実際に起動し、`internal/project` のテストは
+POSIXのパーミッション（`chmod 0o000`）に依存する。
+**移植性のためにこれらの検査を弱めない**（8.1「カバレッジ」参照）。
 
 統合テスト（8.3）はIncusを必要とするため、GitHub Actionsでは実行しない。
 Incusが利用可能なランナーを持つCI（`.gitlab-ci.yml`）側で実行する。
@@ -199,7 +192,7 @@ Incusが利用可能なランナーを持つCI（`.gitlab-ci.yml`）側で実行
 ### 8.4.3 リリース
 
 `v*` のタグをpushすると GoReleaser（`.goreleaser.yaml`）が
-linux / darwin / windows × amd64 / arm64 のアーカイブと
+linux の amd64 / arm64 のアーカイブと
 `checksums.txt` を作り、GitHub Releaseへ公開する。
 
 リリース設定が壊れていないことは、通常のCIで

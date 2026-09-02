@@ -10,14 +10,14 @@ import (
 	"github.com/lambdasakura/incus-dev/internal/incus"
 )
 
-// The instance config devkit sets for its own bookkeeping (spec 05-incus.md 5.2).
+// The instance config idev sets for its own bookkeeping (spec 05-incus.md 5.2).
 const (
 	managedProjectKey = config.ReservedConfigPrefix + "project"
 	managedRootKey    = config.ReservedConfigPrefix + "root"
 	managedSchemaKey  = config.ReservedConfigPrefix + "schema"
-	// managedKeysKey records which instance config keys devkit applied.
+	// managedKeysKey records which instance config keys idev applied.
 	managedKeysKey = config.ReservedConfigPrefix + "managed"
-	// managedDevicesKey records which devices devkit created.
+	// managedDevicesKey records which devices idev created.
 	managedDevicesKey = config.ReservedConfigPrefix + "devices"
 )
 
@@ -50,7 +50,7 @@ func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	return out
 }
 
-// managedDeviceNames returns the devices devkit creates.
+// managedDeviceNames returns the devices idev creates.
 func managedDeviceNames(cfg *config.Config) []string {
 	names := []string{config.WorkspaceDeviceName}
 	names = append(names, slices.Collect(maps.Keys(cfg.Instance.Devices))...)
@@ -60,7 +60,7 @@ func managedDeviceNames(cfg *config.Config) []string {
 	return names
 }
 
-// managedNames returns the config keys to record, excluding devkit's own
+// managedNames returns the config keys to record, excluding idev's own
 // bookkeeping keys.
 func managedNames(desired map[string]string) []string {
 	out := make([]string, 0, len(desired))
@@ -72,11 +72,11 @@ func managedNames(desired map[string]string) []string {
 	return out
 }
 
-// staleConfigKeys returns the devkit-applied config keys the declaration
+// staleConfigKeys returns the idev-applied config keys the declaration
 // dropped.
 //
-// On an older instance with no record (user.incus-devkit.managed), only the
-// idmap key devkit set itself is in scope.
+// On an older instance with no record (user.incus-dev.managed), only the
+// idmap key idev set itself is in scope.
 func staleConfigKeys(current, desired map[string]string, plan idmapPlan) []string {
 	recorded, ok := current[managedKeysKey]
 	if !ok {
@@ -94,7 +94,7 @@ func staleConfigKeys(current, desired map[string]string, plan idmapPlan) []strin
 	return out
 }
 
-// staleDevices returns the devkit-created devices the declaration dropped.
+// staleDevices returns the idev-created devices the declaration dropped.
 func staleDevices(current *incus.Instance, desired map[string]incus.Device) []string {
 	var out []string
 	for _, name := range splitList(current.Config[managedDevicesKey]) {
@@ -199,7 +199,7 @@ func isVolumeSource(dev incus.Device) bool {
 	return dev.Type() == "disk" && dev["pool"] != ""
 }
 
-// staleIDMapKeys returns the devkit-set config keys the current strategy no
+// staleIDMapKeys returns the idev-set config keys the current strategy no
 // longer needs.
 func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
 	if !plan.Managed || plan.Mode == config.IDMapRaw {
@@ -225,7 +225,7 @@ func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.Instanc
 	}
 }
 
-// isManagedBy reports whether devkit manages the instance for this project.
+// isManagedBy reports whether idev manages the instance for this project.
 func isManagedBy(instanceConfig map[string]string, projectName string) bool {
 	return instanceConfig[managedProjectKey] == projectName
 }

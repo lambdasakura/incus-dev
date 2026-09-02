@@ -69,7 +69,7 @@ idev validate
 - provisionステップの構造（`run` と `ansible` の排他など）
 - 参照先ファイルの存在（playbook、vars、inventory、workspace source）
 - `profiles: []` の場合に root disk device が宣言されているか
-- 予約キー（`user.incus-devkit.*`）を使っていないか
+- 予約キー（`user.incus-dev.*`）を使っていないか
 
 Profileがホストに実在するかどうかは確認しない（Incusへ問い合わせないため）。
 

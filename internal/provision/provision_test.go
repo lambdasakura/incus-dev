@@ -196,7 +196,7 @@ provision:
 	}
 }
 
-func TestRunStepInjectsDevkitEnv(t *testing.T) {
+func TestRunStepInjectsIdevEnv(t *testing.T) {
 	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
@@ -208,24 +208,24 @@ provision:
 	}
 
 	want := map[string]string{
-		"DEVKIT_INSTANCE":         "dev-example-project",
-		"DEVKIT_PROJECT_NAME":     "example-project",
-		"DEVKIT_WORKSPACE":        "/workspace",
-		"DEVKIT_WORKSPACE_SOURCE": "/home/u/src/example",
-		"DEVKIT_INCUS_PROJECT":    "default",
+		"IDEV_INSTANCE":         "dev-example-project",
+		"IDEV_PROJECT_NAME":     "example-project",
+		"IDEV_WORKSPACE":        "/workspace",
+		"IDEV_WORKSPACE_SOURCE": "/home/u/src/example",
+		"IDEV_INCUS_PROJECT":    "default",
 	}
 	if diff := cmp.Diff(want, client.last(t).Opt.PublicEnv); diff != "" {
 		t.Errorf("environment mismatch (-want +got):\n%s", diff)
 	}
 }
 
-func TestRunStepEnvOverridesDevkitEnv(t *testing.T) {
+func TestRunStepEnvOverridesIdevEnv(t *testing.T) {
 	client := newIncus()
 	cfg := parseConfig(t, base+`
 provision:
   - run: echo hi
     env:
-      DEVKIT_WORKSPACE: /elsewhere
+      IDEV_WORKSPACE: /elsewhere
       EXTRA: value
 `)
 	if err := newExecutorWith(&runnertest.Fake{}, client).Provision(
@@ -234,10 +234,10 @@ provision:
 	}
 
 	got := client.last(t)
-	if got.Opt.Env["DEVKIT_WORKSPACE"] != "/elsewhere" {
+	if got.Opt.Env["IDEV_WORKSPACE"] != "/elsewhere" {
 		t.Errorf("env = %v, want the step's env to win", got.Opt.Env)
 	}
-	if _, ok := got.Opt.PublicEnv["DEVKIT_WORKSPACE"]; ok {
+	if _, ok := got.Opt.PublicEnv["IDEV_WORKSPACE"]; ok {
 		t.Errorf("env = %v, the overridden value is still there", got.Opt.PublicEnv)
 	}
 	if got.Opt.Env["EXTRA"] != "value" {
@@ -520,7 +520,7 @@ func TestAnsibleInventoryContent(t *testing.T) {
 		"ansible_connection: community.general.incus",
 		"ansible_incus_remote: local",
 		"ansible_incus_project: default",
-		"devkit:",
+		"idev:",
 	} {
 		if !strings.Contains(call.inventory, want) {
 			t.Errorf("inventory =\n%s\nwant it to contain %q", call.inventory, want)
@@ -528,7 +528,7 @@ func TestAnsibleInventoryContent(t *testing.T) {
 	}
 }
 
-func TestAnsibleDevkitVars(t *testing.T) {
+func TestAnsibleIdevVars(t *testing.T) {
 	root, cfg := ansibleProject(t)
 	f := &runnertest.Fake{}
 	call := captureAnsible(t, f)
@@ -540,16 +540,16 @@ func TestAnsibleDevkitVars(t *testing.T) {
 	}
 
 	want := map[string]any{
-		"devkit_project_name":     "example-project",
-		"devkit_instance":         "dev-example-project",
-		"devkit_workspace":        "/workspace",
-		"devkit_workspace_source": root,
-		"devkit_incus_project":    "default",
+		"idev_project_name":     "example-project",
+		"idev_instance":         "dev-example-project",
+		"idev_workspace":        "/workspace",
+		"idev_workspace_source": root,
+		"idev_incus_project":    "default",
 	}
 	// workspace_source takes its value from env.
-	want["devkit_workspace_source"] = env.WorkspaceSource
+	want["idev_workspace_source"] = env.WorkspaceSource
 	if diff := cmp.Diff(want, call.vars); diff != "" {
-		t.Errorf("devkit vars mismatch (-want +got):\n%s", diff)
+		t.Errorf("idev vars mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -643,11 +643,11 @@ func TestAnsibleTempFilesAreRemoved(t *testing.T) {
 
 func TestEnvVars(t *testing.T) {
 	want := map[string]string{
-		"DEVKIT_PROJECT_NAME":     "example-project",
-		"DEVKIT_INSTANCE":         "dev-example-project",
-		"DEVKIT_WORKSPACE":        "/workspace",
-		"DEVKIT_WORKSPACE_SOURCE": "/home/u/src/example",
-		"DEVKIT_INCUS_PROJECT":    "default",
+		"IDEV_PROJECT_NAME":     "example-project",
+		"IDEV_INSTANCE":         "dev-example-project",
+		"IDEV_WORKSPACE":        "/workspace",
+		"IDEV_WORKSPACE_SOURCE": "/home/u/src/example",
+		"IDEV_INCUS_PROJECT":    "default",
 	}
 	if diff := cmp.Diff(want, testEnv().EnvVars()); diff != "" {
 		t.Errorf("EnvVars() mismatch (-want +got):\n%s", diff)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"syscall"
 
@@ -45,7 +46,8 @@ func (c *osConsole) MakeRaw() (func(), error) {
 }
 
 func (c *osConsole) Resized() (<-chan struct{}, func()) {
-	signals, unsubscribe := notifyResize()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGWINCH)
 
 	resized := make(chan struct{}, 1)
 	done := make(chan struct{})
@@ -67,7 +69,7 @@ func (c *osConsole) Resized() (<-chan struct{}, func()) {
 	}()
 
 	return resized, func() {
-		unsubscribe()
+		signal.Stop(signals)
 		close(done)
 	}
 }

@@ -4,7 +4,7 @@
 
 | Where | What you need |
 | --- | --- |
-| Host | Incus (tested against the 6.0 series), and the `idev` binary |
+| Host | Linux, with Incus (tested against the 6.0 series), and the `idev` binary |
 | Host, only for `ansible` steps | `ansible-playbook`, the `community.general` collection |
 | Container | Nothing. Do not install an SSH server |
 
@@ -45,9 +45,9 @@ If it cannot, it says so
 
 ### From a release (recommended)
 
-Every release ships archives for Linux, macOS and Windows, on amd64 and arm64,
-plus a `checksums.txt`. Download the one for your platform, check it, and put
-the binary on your `PATH`.
+Every release ships a Linux archive for amd64 and arm64, plus a
+`checksums.txt`. Download the one for your architecture, check it, and put the
+binary on your `PATH`.
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
@@ -55,11 +55,9 @@ tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
 
-On Windows, unpack the `.zip` and put `idev.exe` in a directory on `PATH`.
-
-The Incus daemon runs on Linux, but `idev` talks to it over the API, so a macOS
-or Windows machine can drive a remote Incus. `idev shell` there does not follow
-window-size changes, because Windows has no SIGWINCH.
+**idev is for Linux.** It operates the Incus on the machine it runs on, and the
+Incus client refuses a local connection on any other platform, so nothing that
+reaches Incus works on macOS or Windows. No binaries are released for them.
 
 ### From source
 

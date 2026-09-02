@@ -10,7 +10,7 @@ path is resolved from. `idev` walks up the directory tree looking for
 schema: 1                      # required. currently 1 is the only value
 
 runtime:
-  version: "1.0"               # optional. the devkit version this project expects
+  version: "1.0"               # optional. the idev version this project expects
 
 project:
   name: my-project             # required. the instance is named dev-<name>
@@ -106,11 +106,11 @@ playbook.
 ## Environment variables passed to `run` steps
 
 ```text
-DEVKIT_PROJECT_NAME       project name
-DEVKIT_INSTANCE           instance name
-DEVKIT_WORKSPACE          workspace path inside the container
-DEVKIT_WORKSPACE_SOURCE   project root on the host
-DEVKIT_INCUS_PROJECT      Incus project
+IDEV_PROJECT_NAME       project name
+IDEV_INSTANCE           instance name
+IDEV_WORKSPACE          workspace path inside the container
+IDEV_WORKSPACE_SOURCE   project root on the host
+IDEV_INCUS_PROJECT      Incus project
 ```
 
 Setting the same name in `env:` overrides it. Values from `secrets:` arrive as
@@ -154,7 +154,7 @@ environments into different ones.
 
 - Values in `instance.config` may be written as numbers or booleans; they are
   converted to strings
-- `user.incus-devkit.*` is used by devkit for bookkeeping — do not write it
+- `user.incus-dev.*` is used by idev for bookkeeping — do not write it
 - Keys starting with `-`, and keys containing `=`, are not allowed
 - With `profiles: []`, declare the root disk and the network yourself
 - Relative paths (`workspace.source`, a device's `source`, playbooks, …) are

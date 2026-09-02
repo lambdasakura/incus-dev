@@ -19,7 +19,7 @@ idev exec -- make test
 
 **2. 環境の変更は `.incus-dev/` の中だけで表現する。**
 `incus` コマンドを直接叩いて設定を変えない。手で変えた設定は次の
-`idev up` で戻される（devkitが管理するキーのみ）か、そもそも記録に残らない。
+`idev up` で戻される（idevが管理するキーのみ）か、そもそも記録に残らない。
 `incus` を直接使いたくなったら、それは `dev.yml` で表現できていない合図。
 
 **3. provisionステップは冪等に書く。**
@@ -99,7 +99,7 @@ provision:
 
 ```bash
 idev validate          # 1. dev.yml の書式・参照パス
-idev status            # 2. instanceの状態、devkit管理下か
+idev status            # 2. instanceの状態、idev管理下か
 idev up --dry-run      # 3. 何が適用されるのか
 idev provision         # 4. provisionだけやり直す
 idev up                # 5. 設定の再適用も含めてやり直す

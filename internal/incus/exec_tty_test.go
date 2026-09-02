@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/gorilla/websocket"
@@ -214,20 +215,41 @@ func TestControlStopsWhenExecFinishes(t *testing.T) {
 }
 
 // The handler keeps watching for an interruption after the subscription ends.
+//
+// The context is cancelled only once the closed subscription is the one thing
+// the handler can act on. Cancelling it up front left select free to take
+// either case, so the test passed without ever ending the subscription.
 func TestControlSurvivesClosedResize(t *testing.T) {
 	resized := make(chan struct{})
 	close(resized)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
 
 	calls := 0
-	control{ctx: ctx, done: make(chan struct{}), console: newFakeConsole(), resized: resized}.handle(
-		func(any) error {
-			calls++
-			return nil
-		})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		control{ctx: ctx, done: make(chan struct{}), console: newFakeConsole(), resized: resized}.handle(
+			func(any) error {
+				calls++
+				return nil
+			})
+	}()
 
+	select {
+	case <-finished:
+		t.Fatal("the handler ended along with the subscription")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the handler did not follow the interruption")
+	}
 	if calls != 1 {
 		t.Errorf("sends = %d, want the interruption alone", calls)
 	}
@@ -281,6 +303,34 @@ func TestOSConsoleRequiresTerminal(t *testing.T) {
 	}
 	if _, _, err := console.Size(); err == nil {
 		t.Error("a pipe has no terminal size to read")
+	}
+}
+
+// SIGWINCH is turned into a window-size notification.
+func TestOSConsoleResized(t *testing.T) {
+	console := &osConsole{In: os.Stdin, Out: os.Stdout}
+
+	resized, stop := console.Resized()
+
+	if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-resized:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SIGWINCH was never notified")
+	}
+
+	stop()
+
+	// Ending the subscription closes the channel and ends the sending loop.
+	select {
+	case _, ok := <-resized:
+		if ok {
+			t.Error("a notification arrived after stopping")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the channel never closed after stopping")
 	}
 }
 

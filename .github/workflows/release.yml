@@ -1,4 +1,4 @@
-# Publishes a GitHub Release with binaries for Linux, macOS and Windows.
+# Publishes a GitHub Release with the Linux binaries.
 #
 #     git tag -a v0.1.0 -m 'v0.1.0' && git push origin v0.1.0
 name: Release

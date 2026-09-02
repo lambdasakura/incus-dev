@@ -14,7 +14,7 @@ import (
 	"github.com/lxc/incus/v6/shared/api"
 )
 
-// server lists just the Incus API calls devkit uses.
+// server lists just the Incus API calls idev uses.
 //
 // incus.InstanceServer satisfies it as it is. Tests replace it with a fake.
 type server interface {
@@ -85,7 +85,7 @@ func (a *API) Instance(_ context.Context, name string) (*Instance, error) {
 	return convertInstance(full), nil
 }
 
-// convertInstance turns the API's representation into devkit's.
+// convertInstance turns the API's representation into idev's.
 func convertInstance(full *api.InstanceFull) *Instance {
 	inst := &Instance{
 		Name:            full.Name,
@@ -346,7 +346,7 @@ func (a *API) updateInstance(ctx context.Context, name string, change func(*api.
 	return nil
 }
 
-// ProfileExists reports whether a profile exists. devkit never creates one
+// ProfileExists reports whether a profile exists. idev never creates one
 // (REQ-007).
 func (a *API) ProfileExists(_ context.Context, name string) (bool, error) {
 	names, err := a.Server.GetProfileNames()
@@ -369,7 +369,7 @@ func (a *API) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	}
 }
 
-// storageVolumeType is the kind of storage volume devkit deals in.
+// storageVolumeType is the kind of storage volume idev deals in.
 const storageVolumeType = "custom"
 
 // CreateVolume creates a storage volume.

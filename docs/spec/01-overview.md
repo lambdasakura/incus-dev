@@ -2,7 +2,7 @@
 
 ## 1.1 概要
 
-本プロジェクトは、Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理するためのCLIツール（`idev` / devkit）を提供する。
+本プロジェクトは、Incusを利用してプロジェクト単位の開発環境を再現可能な形で構築・管理するためのCLIツール `idev` を提供する。
 
 各ソフトウェアプロジェクトは、自身のGitリポジトリ内に開発環境定義を保持する。
 
@@ -23,7 +23,7 @@ idev shell
 - プロジェクトリポジトリ (`.incus-dev/`)
   - **どのようなコンテナを作るか** を宣言する
   - **コンテナ内部をどう構成するか** の手順を保持する
-- `idev`（devkit CLI）
+- `idev`（idev CLI）
   - Incus instanceのライフサイクルを管理する
   - workspaceをコンテナへマウントする
   - コンテナをbootstrapする
@@ -31,9 +31,9 @@ idev shell
 - Incus
   - コンテナ、リソース、デバイス、マウント、ネットワークなどを実行する
 
-**devkitは環境固有の内容を一切持たない。**
+**idevは環境固有の内容を一切持たない。**
 
-devkitはAnsible Role、Incus Profile、言語ランタイムの定義などを同梱しない。
+idevはAnsible Role、Incus Profile、言語ランタイムの定義などを同梱しない。
 それらはすべてプロジェクト側の `.incus-dev/` に存在する。
 
 `idev` はGoで実装し、単一バイナリとして配布する。詳細は [07-implementation.md](07-implementation.md) を参照。
@@ -146,7 +146,7 @@ idev provision
 idev provision
 ```
 
-devkitが保証するのは「同じ手順を同じ順序で再実行すること」までである。
+idevが保証するのは「同じ手順を同じ順序で再実行すること」までである。
 
 **個々の手順が冪等であることはプロジェクト側の責務とする。**
 
@@ -165,9 +165,9 @@ Goで実装し、静的リンクされた単一バイナリとして配布する
 
 ---
 
-### REQ-007: devkitは環境固有の資産を持たないこと
+### REQ-007: idevは環境固有の資産を持たないこと
 
-devkitは以下を同梱してはならない。
+idevは以下を同梱してはならない。
 
 - Ansible Role
 - Incus Profile
@@ -176,11 +176,11 @@ devkitは以下を同梱してはならない。
 
 理由：
 
-- devkitが用意したProfileやRoleに依存すると、それが存在しない環境で再現できない
+- idevが用意したProfileやRoleに依存すると、それが存在しない環境で再現できない
 - プロジェクトによっては不要なものまで導入されてしまう
-- devkitの更新がプロジェクトの環境を意図せず変化させてしまう
+- idevの更新がプロジェクトの環境を意図せず変化させてしまう
 
-devkitが持ってよいのは以下に限る。
+idevが持ってよいのは以下に限る。
 
 - Incus instanceのライフサイクル操作
 - workspaceのマウント
@@ -212,11 +212,11 @@ devkitが持ってよいのは以下に限る。
 
 また、以下は **恒久的に非目標** とする（REQ-007）。
 
-- devkitによる共通Ansible Roleの提供
-- devkitによる共通Incus Profileの提供
-- `features:` のような、devkit側の実装に紐づく高水準の環境記述
+- idevによる共通Ansible Roleの提供
+- idevによる共通Incus Profileの提供
+- `features:` のような、idev側の実装に紐づく高水準の環境記述
 
-再利用可能なprovisioning資産が必要な場合は、devkitとは独立した
+再利用可能なprovisioning資産が必要な場合は、idevとは独立した
 Ansible CollectionやGitリポジトリとして配布し、プロジェクトが明示的に取り込む。
 
 ただし、将来の拡張を妨げる設計にはしない。

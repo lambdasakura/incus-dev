@@ -12,16 +12,16 @@ You called `provision` / `shell` / `exec` / `status` before the environment
 existed. Run `idev up` first. It never creates one implicitly, so that nothing
 gets built by accident.
 
-### `instance <name> exists but is not managed by devkit for project "<name>"`
+### `instance <name> exists but is not managed by idev for project "<name>"`
 
-An instance of the same name was created by hand. devkit does not destroy an
-instance without its mark (`user.incus-devkit.project`). Either delete the
+An instance of the same name was created by hand. idev does not destroy an
+instance without its mark (`user.incus-dev.project`). Either delete the
 existing one, or change `project.name` so the names no longer collide.
 
 ### `incus profile(s) not found on this host: <name>`
 
 `instance.profiles` is a **reference by name to profiles that already exist on
-the host**; devkit does not create them. Either:
+the host**; idev does not create them. Either:
 
 - create the profile on the host, or
 - drop it from `instance.profiles` and write what you need directly into
@@ -39,7 +39,7 @@ The output of `idev validate` names the path inside `dev.yml`. Common causes:
 
 - A referenced file does not exist (playbook, vars, a device's source)
 - A step has none of `run` / `ansible` / `galaxy`, or more than one
-- A reserved key (`user.incus-devkit.*`) was used
+- A reserved key (`user.incus-dev.*`) was used
 
 ## At run time
 
@@ -66,7 +66,7 @@ trailing exit code or error points at the cause. Suspect a broken image, or an
 
 ### A step fails after a `network address not assigned` warning
 
-Provisioning started before an IPv4 address was assigned. devkit waits for
+Provisioning started before an IPv4 address was assigned. idev waits for
 IPv4, so this is unusual; when it appears, suspect the network configuration
 (including the Docker conflict above).
 

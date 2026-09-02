@@ -113,7 +113,7 @@ func TestUpDoesNotRecreateExistingInstance(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Stopped",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Up(context.Background(), cli.UpOptions{}); err != nil {
@@ -139,8 +139,8 @@ func TestUpReappliesConfigToExistingInstance(t *testing.T) {
 		Name:   "dev-example-project",
 		Status: "Running",
 		Config: map[string]string{
-			"user.incus-devkit.project": "example-project",
-			"limits.cpu":                "4",
+			"user.incus-dev.project": "example-project",
+			"limits.cpu":             "4",
 		},
 	})
 
@@ -152,7 +152,7 @@ func TestUpReappliesConfigToExistingInstance(t *testing.T) {
 	}
 }
 
-// An instance devkit does not manage is left alone (spec 05-incus.md 5.2).
+// An instance idev does not manage is left alone (spec 05-incus.md 5.2).
 func TestUpRefusesUnmanagedInstance(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML)
 	client.AddInstance(&incus.Instance{Name: "dev-example-project", Status: "Running"})
@@ -173,14 +173,14 @@ func TestUpSetsManagedMarkers(t *testing.T) {
 		t.Fatalf("Up() error = %v", err)
 	}
 	cfg := client.Instances["dev-example-project"].Config
-	if got := cfg["user.incus-devkit.project"]; got != "example-project" {
-		t.Errorf("user.incus-devkit.project = %q", got)
+	if got := cfg["user.incus-dev.project"]; got != "example-project" {
+		t.Errorf("user.incus-dev.project = %q", got)
 	}
-	if cfg["user.incus-devkit.root"] == "" {
-		t.Errorf("user.incus-devkit.root is empty")
+	if cfg["user.incus-dev.root"] == "" {
+		t.Errorf("user.incus-dev.root is empty")
 	}
-	if got := cfg["user.incus-devkit.schema"]; got != "1" {
-		t.Errorf("user.incus-devkit.schema = %q, want 1", got)
+	if got := cfg["user.incus-dev.schema"]; got != "1" {
+		t.Errorf("user.incus-dev.schema = %q, want 1", got)
 	}
 }
 
@@ -274,7 +274,7 @@ provision:
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Provision(context.Background(), provision.Selection{}); err != nil {
@@ -293,7 +293,7 @@ provision:
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Stopped",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Provision(context.Background(), provision.Selection{}); err != nil {
@@ -311,7 +311,7 @@ func TestDestroyDeletesManagedInstance(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Destroy(context.Background(), cli.DestroyOptions{}); err != nil {
@@ -351,9 +351,9 @@ func TestStatusOutput(t *testing.T) {
 		Status:   "Running",
 		Profiles: []string{"default"},
 		Config: map[string]string{
-			"user.incus-devkit.project": "example-project",
-			"image.description":         "ubuntu 24.04",
-			"limits.cpu":                "8",
+			"user.incus-dev.project": "example-project",
+			"image.description":      "ubuntu 24.04",
+			"limits.cpu":             "8",
 		},
 	})
 
@@ -379,7 +379,7 @@ func TestStatusJSON(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Status(context.Background(), true); err != nil {
@@ -424,7 +424,7 @@ func TestRebuildRecreatesInstance(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Rebuild(context.Background()); err != nil {
@@ -464,7 +464,7 @@ func TestShellExecutesInteractiveShell(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Shell(context.Background(), nil); err != nil {
@@ -483,7 +483,7 @@ func TestShellRunsGivenCommand(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	if err := app.Shell(context.Background(), []string{"make", "test"}); err != nil {
@@ -597,7 +597,7 @@ func TestShellPropagatesExitCode(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 	client.ExecFunc = func(string, []string, incus.ExecOptions) (int, error) {
 		return 42, nil
@@ -633,7 +633,7 @@ func TestShellAllocatesTTYOnlyWhenInteractive(t *testing.T) {
 			client.AddInstance(&incus.Instance{
 				Name:   "dev-example-project",
 				Status: "Running",
-				Config: map[string]string{"user.incus-devkit.project": "example-project"},
+				Config: map[string]string{"user.incus-dev.project": "example-project"},
 			})
 
 			var got incus.ExecOptions
@@ -675,7 +675,7 @@ func TestShellStreamsOutputWhenNotInteractive(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	var gotStdout bool
@@ -715,8 +715,8 @@ provision:
 		Status:   "Running",
 		Profiles: []string{"default"},
 		Config: map[string]string{
-			"user.incus-devkit.project": "example-project",
-			"limits.cpu":                "8",
+			"user.incus-dev.project": "example-project",
+			"limits.cpu":             "8",
 		},
 		Devices: map[string]incus.Device{"workspace": {"type": "disk"}},
 	})
@@ -781,7 +781,7 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	var gotCwd string
@@ -802,7 +802,7 @@ func TestShellUsesDefaultShellAndWorkspace(t *testing.T) {
 	}
 }
 
-// The context devkit hands to a step is assembled correctly (spec 3.10).
+// The context idev hands to a step is assembled correctly (spec 3.10).
 func TestProvisionEnvIsPopulated(t *testing.T) {
 	app, client, _ := newApp(t, baseYAML+"provision:\n  - run: echo hi\n")
 
@@ -816,23 +816,23 @@ func TestProvisionEnvIsPopulated(t *testing.T) {
 		t.Fatalf("Up() error = %v", err)
 	}
 
-	if got := gotEnv["DEVKIT_PROJECT_NAME"]; got != "example-project" {
-		t.Errorf("DEVKIT_PROJECT_NAME = %q", got)
+	if got := gotEnv["IDEV_PROJECT_NAME"]; got != "example-project" {
+		t.Errorf("IDEV_PROJECT_NAME = %q", got)
 	}
-	if got := gotEnv["DEVKIT_INSTANCE"]; got != "dev-example-project" {
-		t.Errorf("DEVKIT_INSTANCE = %q", got)
+	if got := gotEnv["IDEV_INSTANCE"]; got != "dev-example-project" {
+		t.Errorf("IDEV_INSTANCE = %q", got)
 	}
-	if got := gotEnv["DEVKIT_WORKSPACE"]; got != "/workspace" {
-		t.Errorf("DEVKIT_WORKSPACE = %q", got)
+	if got := gotEnv["IDEV_WORKSPACE"]; got != "/workspace" {
+		t.Errorf("IDEV_WORKSPACE = %q", got)
 	}
 	// workspace (inside the container) and workspace_source (on the host) are
 	// not mixed up.
-	src := gotEnv["DEVKIT_WORKSPACE_SOURCE"]
+	src := gotEnv["IDEV_WORKSPACE_SOURCE"]
 	if src == "/workspace" || !filepath.IsAbs(src) {
-		t.Errorf("DEVKIT_WORKSPACE_SOURCE = %q, want a path on the host", src)
+		t.Errorf("IDEV_WORKSPACE_SOURCE = %q, want a path on the host", src)
 	}
-	if got := gotEnv["DEVKIT_INCUS_PROJECT"]; got != "default" {
-		t.Errorf("DEVKIT_INCUS_PROJECT = %q, want default", got)
+	if got := gotEnv["IDEV_INCUS_PROJECT"]; got != "default" {
+		t.Errorf("IDEV_INCUS_PROJECT = %q, want default", got)
 	}
 }
 
@@ -844,7 +844,7 @@ func TestShellPassesTerm(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	var got incus.ExecOptions

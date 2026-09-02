@@ -30,7 +30,7 @@ func TestPlanActionsForNewInstance(t *testing.T) {
 		"Apply profiles: default",
 		"Set config limits.cpu=8",
 		"Add device workspace (disk /home/u/src/example -> /workspace)",
-		"Set devkit markers (user.incus-devkit.*)",
+		"Set idev markers (user.incus-dev.*)",
 		"Start instance",
 		"Bootstrap: 1 step (default)",
 		"Provision step 1/2: prepare (run)",

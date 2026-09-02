@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	// InstanceNamePrefix is the prefix of the instance names devkit creates.
+	// InstanceNamePrefix is the prefix of the instance names idev creates.
 	// It is independent of the command name idev, and means "an instance for
 	// development".
 	InstanceNamePrefix = "dev-"

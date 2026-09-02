@@ -14,7 +14,7 @@
 - **It does not work** → [troubleshooting.md](troubleshooting.md)
 - **I am looking up a setting** → [manual/04-dev-yml.md](manual/04-dev-yml.md)
 - **I want to know why it is designed this way** → [spec/01-overview.md](spec/01-overview.md)
-- **I am working on devkit itself** → [../CLAUDE.md](../CLAUDE.md) → [spec/07-implementation.md](spec/07-implementation.md)
+- **I am working on idev itself** → [../CLAUDE.md](../CLAUDE.md) → [spec/07-implementation.md](spec/07-implementation.md)
 
 ## Languages
 

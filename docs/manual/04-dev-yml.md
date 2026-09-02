@@ -207,7 +207,7 @@ this environment's allocation rather than to the whole host.
 Changes to `limits.*` apply to a running container as they are, so no restart is
 needed.
 
-`user.incus-devkit.*` is reserved for idev's own bookkeeping and cannot be
+`user.incus-dev.*` is reserved for idev's own bookkeeping and cannot be
 used.
 
 ### `devices`

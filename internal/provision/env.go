@@ -1,10 +1,10 @@
 // Package provision runs the bootstrap and provision steps.
 //
-// devkit holds no opinion on what to run. It runs the steps declared in
+// idev holds no opinion on what to run. It runs the steps declared in
 // dev.yml, in the order they are declared (spec 06-provisioning.md).
 package provision
 
-// Env is the run-time context devkit passes to every step.
+// Env is the run-time context idev passes to every step.
 type Env struct {
 	ProjectName     string
 	ProjectRoot     string // on the host
@@ -20,21 +20,21 @@ type Env struct {
 // EnvVars returns the environment variables given to a run step (spec 3.10.1).
 func (e Env) EnvVars() map[string]string {
 	return map[string]string{
-		"DEVKIT_PROJECT_NAME":     e.ProjectName,
-		"DEVKIT_INSTANCE":         e.Instance,
-		"DEVKIT_WORKSPACE":        e.Workspace,
-		"DEVKIT_WORKSPACE_SOURCE": e.WorkspaceSource,
-		"DEVKIT_INCUS_PROJECT":    e.IncusProject,
+		"IDEV_PROJECT_NAME":     e.ProjectName,
+		"IDEV_INSTANCE":         e.Instance,
+		"IDEV_WORKSPACE":        e.Workspace,
+		"IDEV_WORKSPACE_SOURCE": e.WorkspaceSource,
+		"IDEV_INCUS_PROJECT":    e.IncusProject,
 	}
 }
 
 // AnsibleVars returns the variables given to an ansible step (spec 3.10.2).
 func (e Env) AnsibleVars() map[string]any {
 	return map[string]any{
-		"devkit_project_name":     e.ProjectName,
-		"devkit_instance":         e.Instance,
-		"devkit_workspace":        e.Workspace,
-		"devkit_workspace_source": e.WorkspaceSource,
-		"devkit_incus_project":    e.IncusProject,
+		"idev_project_name":     e.ProjectName,
+		"idev_instance":         e.Instance,
+		"idev_workspace":        e.Workspace,
+		"idev_workspace_source": e.WorkspaceSource,
+		"idev_incus_project":    e.IncusProject,
 	}
 }

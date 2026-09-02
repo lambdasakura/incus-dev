@@ -13,7 +13,7 @@ None of these are about how you wrote `dev.yml`. They are all about
 | `apt-get` / `apk` fails during a provisioning step; the container cannot resolve names or download anything | [1](#1-no-network-access-from-the-container) |
 | Cannot write to the workspace; files end up owned by root on the host | [2](#2-workspace-is-owned-by-the-wrong-user--not-writable) |
 | `incus profile(s) not found on this host` | [3](#3-profile-not-found) |
-| `is not managed by devkit` | [4](#4-instance-is-said-to-be-unmanaged) |
+| `is not managed by idev` | [4](#4-instance-is-said-to-be-unmanaged) |
 | An `ansible` step fails | [5](#5-an-ansible-step-fails) |
 | Cannot reach Incus; API calls fail | [6](#6-incus-api-calls-fail) |
 
@@ -212,7 +212,7 @@ the container creates are owned by root on the host.
 
 ```text
 incus profile(s) not found on this host: gpu-nvidia
-devkit does not create profiles; create them or remove them from instance.profiles
+idev does not create profiles; create them or remove them from instance.profiles
 ```
 
 `idev` neither ships nor creates Incus profiles. `instance.profiles` is a
@@ -249,14 +249,14 @@ profile is the more portable choice.
 ## 4. Instance is said to be unmanaged
 
 ```text
-instance dev-example exists but is not managed by devkit for project "example"
+instance dev-example exists but is not managed by idev for project "example"
 ```
 
 `idev` marks the instances it creates, and refuses to touch unmarked ones so it
 cannot destroy something it did not make.
 
 ```bash
-incus config get dev-<project> user.incus-devkit.project
+incus config get dev-<project> user.incus-dev.project
 ```
 
 If you created an instance of the same name by hand, either delete it or change

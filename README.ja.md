@@ -8,8 +8,8 @@ Incusを利用して、プロジェクト単位の開発環境を再現可能な
 
 ## クイックスタート
 
-必要なのはホストの [Incus](https://linuxcontainers.org/incus/docs/main/installing/) だけ。
-`idev` は単一の静的バイナリで、実行時の依存を持たない。
+必要なのは [Incus](https://linuxcontainers.org/incus/docs/main/installing/) を入れた
+Linuxホストだけ。`idev` は単一の静的バイナリで、実行時の依存を持たない。
 
 ### 1. idevを導入する
 
@@ -126,7 +126,7 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 
 | 対象 | 必要なもの |
 | --- | --- |
-| ホスト | Incus、`idev` バイナリ |
+| ホスト | Linux、Incus、`idev` バイナリ |
 | ホスト（ansibleステップを使う場合） | `ansible-playbook`、`community.general` collection |
 | コンテナ | なし（SSH Serverは不要） |
 
@@ -146,16 +146,14 @@ root:<gid>:1
 
 ## 導入
 
-各[リリース](../../releases)に Linux / macOS / Windows（amd64・arm64）の
-バイナリと、検証用の `checksums.txt` を添付している。
+各[リリース](../../releases)に Linux の amd64・arm64 バイナリと、
+検証用の `checksums.txt` を添付している。
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
 tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
-
-Windowsでは `.zip` を展開し、`idev.exe` を `PATH` の通ったディレクトリへ置く。
 
 Goツールチェインがあればダウンロードは要らない。
 ただしこの方法で入れたバイナリは `idev --version` が `dev` を返す。
@@ -171,9 +169,6 @@ checkoutから入れる場合：
 make build     # ./bin/idev
 make install   # $GOBIN へインストール
 ```
-
-Incus daemon自体はLinux上で動くが、`idev` はAPI経由で操作するため、
-macOS / Windows からremoteのIncusを操作できる。
 
 ## 開発
 
@@ -220,14 +215,15 @@ make test-integration   # Incus実機に対する統合テスト
 
 ## 対応しないもの
 
-以下の2つは恒久的に対象外である。どちらも workspace の共有方式を
-別に設計する必要があり、それは「手元のマシンにプロジェクト単位の開発環境を作る」
-というこのツールの目的から外れるためである。
+remoteのIncusと仮想マシンは恒久的に対象外である。どちらも workspace の
+共有方式を別に設計する必要があり、それは「手元のマシンにプロジェクト単位の
+開発環境を作る」というこのツールの目的から外れるためである。
 
 | | |
 | --- | --- |
 | remoteのIncus | 常にローカルのIncusを操作する。`incus remote switch` の既定にも従わない |
 | 仮想マシン | instanceは常にコンテナであり、`instance.type` という設定は無い |
+| macOS / Windows | ローカルのIncusを操作するのが `idev` であり、client libraryはLinux以外でローカル接続を拒否する。リリースするのはLinuxバイナリのみ |
 
 ## ライセンス
 

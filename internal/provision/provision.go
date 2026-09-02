@@ -15,7 +15,7 @@ import (
 // defaultBootstrapScript is the bootstrap used when provision has an ansible
 // step.
 //
-// Ansible modules need Python in the container, which is why devkit carries
+// Ansible modules need Python in the container, which is why idev carries
 // this one thing. It assumes a Debian-family image; on any other OS the
 // project must declare bootstrap itself (spec 06-provisioning.md 6.3.2 — the
 // sole exception to REQ-007).

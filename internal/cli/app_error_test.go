@@ -47,7 +47,7 @@ func appWith(t *testing.T, body string, client *incustest.Fake) *App {
 	})
 }
 
-// managed registers an instance devkit manages for this project.
+// managed registers an instance idev manages for this project.
 func managed(client *incustest.Fake, status string) *incustest.Fake {
 	return client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
@@ -303,7 +303,7 @@ func TestStatusShowsInstanceDetails(t *testing.T) {
 	}
 }
 
-// With raw.idmap set in instance.config, devkit stays out of the mapping.
+// With raw.idmap set in instance.config, idev stays out of the mapping.
 func TestIDMapModeRespectsExplicitRawIDMap(t *testing.T) {
 	client := incustest.New()
 	body := rootYAML + "  config:\n    raw.idmap: \"both 1234 0\"\n"
@@ -569,7 +569,7 @@ func TestUpDoesNotWarnWithoutRestartRequiredChanges(t *testing.T) {
 	}
 }
 
-// Unsetting a raw.idmap devkit set needs a restart too.
+// Unsetting a raw.idmap idev set needs a restart too.
 func TestUpWarnsWhenIDMapRemoved(t *testing.T) {
 	client := incustest.New()
 	client.AddInstance(&incus.Instance{
@@ -735,7 +735,7 @@ func TestNoWarningForKeysRemovedFromConfig(t *testing.T) {
 			managedProjectKey:     "example-project",
 			"security.nesting":    "true",
 			"security.privileged": "true",
-			// The same value devkit sets, so nothing changes.
+			// The same value idev sets, so nothing changes.
 			idmapConfigKey: fmt.Sprintf("uid %d 0\ngid %d 0", os.Getuid(), os.Getgid()),
 		},
 	})
@@ -1110,7 +1110,7 @@ func TestExecRequiresCommand(t *testing.T) {
 	}
 }
 
-// Of the settings and devices the declaration dropped, only what devkit created
+// Of the settings and devices the declaration dropped, only what idev created
 // is undone (spec 05-incus.md 5.4.4).
 func TestUpRemovesUndeclaredManagedConfig(t *testing.T) {
 	client := incustest.New()
@@ -1304,7 +1304,7 @@ func TestSnapshotOperations(t *testing.T) {
 	}
 }
 
-// The snapshot operations are limited to instances devkit manages too.
+// The snapshot operations are limited to instances idev manages too.
 func TestSnapshotRequiresManagedInstance(t *testing.T) {
 	ctx := context.Background()
 

@@ -443,7 +443,7 @@ func (a *App) execInContainer(ctx context.Context, argv []string, tty bool) erro
 	code, err := a.client.Exec(ctx, a.instance, argv, opt)
 	if err != nil {
 		// A command that merely exited non-zero has its exit code propagated;
-		// it is not devkit's own error.
+		// it is not idev's own error.
 		var exitErr *runner.ExitError
 		if errors.As(err, &exitErr) {
 			return &ExitCodeError{Code: exitErr.ExitCode}
@@ -576,7 +576,7 @@ func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan id
 	// Keep the state from before applying; afterwards the difference is gone.
 	before := maps.Clone(inst.Config)
 
-	// Undo the devkit-applied keys and devices that the declaration dropped.
+	// Undo the idev-applied keys and devices that the declaration dropped.
 	stale := staleConfigKeys(inst.Config, desired, plan)
 	if len(stale) > 0 {
 		a.log.Info("Removing config no longer declared: " + strings.Join(stale, ", "))
@@ -631,7 +631,7 @@ var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security
 // restartRequiredChanges returns the changes that need a restart to take
 // effect.
 //
-// Only keys devkit actually changed or unset count. Including untouched keys
+// Only keys idev actually changed or unset count. Including untouched keys
 // would warn on every run even when nothing happened.
 func restartRequiredChanges(running bool, before, desired map[string]string, unset []string) []string {
 	if !running {
@@ -659,7 +659,7 @@ func (a *App) idmapPlan() (idmapPlan, error) {
 	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap)
 }
 
-// checkProfiles verifies the named profiles exist. devkit never creates one.
+// checkProfiles verifies the named profiles exist. idev never creates one.
 func (a *App) checkProfiles(ctx context.Context) error {
 	var missing []string
 	for _, name := range a.cfg.ProfileNames() {
@@ -675,11 +675,11 @@ func (a *App) checkProfiles(ctx context.Context) error {
 		return nil
 	}
 	return fmt.Errorf("incus profile(s) not found on this host: %s\n"+
-		"devkit does not create profiles; create them or remove them from instance.profiles",
+		"idev does not create profiles; create them or remove them from instance.profiles",
 		strings.Join(missing, ", "))
 }
 
-// managedInstance fetches the instance and confirms devkit manages it.
+// managedInstance fetches the instance and confirms idev manages it.
 func (a *App) managedInstance(ctx context.Context) (*incus.Instance, error) {
 	inst, err := a.client.Instance(ctx, a.instance)
 	if errors.Is(err, incus.ErrInstanceNotFound) {
@@ -695,7 +695,7 @@ func (a *App) managedInstance(ctx context.Context) (*incus.Instance, error) {
 }
 
 func (a *App) unmanagedError(inst *incus.Instance) error {
-	return fmt.Errorf("instance %s exists but is not managed by devkit for project %q\n"+
+	return fmt.Errorf("instance %s exists but is not managed by idev for project %q\n"+
 		"refusing to touch it; rename the project or remove the instance manually",
 		inst.Name, a.cfg.Project.Name)
 }

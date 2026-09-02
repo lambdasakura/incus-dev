@@ -12,7 +12,7 @@ import (
 
 // execRun runs a script inside the container (spec 06-provisioning.md 6.4).
 func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) error {
-	// The variables devkit injects help with diagnosis and are safe to show.
+	// The variables idev injects help with diagnosis and are safe to show.
 	// Values the project supplied may be secrets, so they are hidden.
 	public := env.EnvVars()
 	secret := make(map[string]string, len(step.Env)+len(env.Secrets))

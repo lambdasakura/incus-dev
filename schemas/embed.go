@@ -1,6 +1,6 @@
 // Package schemas embeds the JSON Schema for dev.yml into the binary.
 //
-// This schema is the only asset devkit embeds (spec 02-repository-layout.md 2.4).
+// This schema is the only asset idev embeds (spec 02-repository-layout.md 2.4).
 package schemas
 
 import _ "embed"

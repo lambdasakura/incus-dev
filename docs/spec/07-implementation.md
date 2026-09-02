@@ -132,7 +132,7 @@ type Instance struct {
 ```
 
 `instance.config` / `devices` はIncusへの素通しであるため、
-devkit側で意味を持つ型に変換しない。未知キーを拒否しない。
+idev側で意味を持つ型に変換しない。未知キーを拒否しない。
 
 ### 7.3.2 「省略」と「明示的な空」の区別
 
@@ -209,7 +209,7 @@ sigs.k8s.io/yaml
    - ステップの排他性（`run` / `ansible`）
    - bootstrapに `ansible` ステップが無いこと
    - 参照パスの存在
-   - `user.incus-devkit.*` の使用禁止
+   - `user.incus-dev.*` の使用禁止
 
 「形」はSchema、「意味」はコード、という分担を基本とする。
 
@@ -299,15 +299,17 @@ project root検出にGitを利用してもよい。
 
 ## 7.7 対応プラットフォーム
 
-配布するのは linux / darwin / windows の amd64・arm64 バイナリである。
-いずれも `CGO_ENABLED=0` の静的バイナリとする。
+**Linux専用である。** 配布するのは linux の amd64・arm64 バイナリのみ
+（`CGO_ENABLED=0` の静的バイナリ）。
 
-Incus daemon自体はLinux上で動くが、`idev` はAPIクライアントであるため、
-remoteのIncusへ接続する用途で macOS / Windows からも利用できる。
+`idev` が操作するのは常にローカルのIncusである（[05-incus.md](05-incus.md) 5.6）が、
+Incusのclient libraryは非Linuxで `local` remoteへの接続を無条件に拒否する
+（`cliconfig` の `ErrNotLinux`）。したがって macOS / Windows では
+Incusへ触れるコマンドが1つも動かない。
 
-プラットフォーム依存の処理はビルドタグで分離したファイルに置く
-（例: `internal/incus/exec_tty_unix.go` と `exec_tty_windows.go`）。
-`runtime.GOOS` による実行時分岐は使わない。
+`idev validate` だけはIncusを必要としない（[04-cli.md](04-cli.md) 4.7）が、
+そのために他プラットフォーム向けのバイナリを配ると、
+動くと期待した利用者が導入後に失敗する。配布しない。
 
 ---
 
@@ -332,14 +334,14 @@ remoteのIncusへ接続する用途で macOS / Windows からも利用できる�
 
 - 本仕様を実装判断の基準とする。
 - 不必要な機能を追加しない。
-- **devkitへ環境固有の資産（Role / Profile / パッケージ導入手順）を追加しない（REQ-007）。**
+- **idevへ環境固有の資産（Role / Profile / パッケージ導入手順）を追加しない（REQ-007）。**
   - 「便利だから」という理由での共通Role追加は仕様違反である。
 - CLI / Incus / Provision / Configurationの責務を分離する。
 - 外部コマンド失敗を無視しない。
 - どのステップが失敗したかを特定できるエラーを返す。
 - `idev provision` で既存instanceを破壊しない。
 - `idev destroy` でhost側source treeを削除しない。
-- devkit管理外のinstanceを破壊しない。
+- idev管理外のinstanceを破壊しない。
 - Git repositoryへSecretを書き込まない。
 - 実装変更には可能な限りテストを追加する。
 - `gofmt` および `go vet` を通す。
@@ -357,4 +359,4 @@ remoteのIncusへ接続する用途で macOS / Windows からも利用できる�
 
 「この処理は、あるプロジェクト固有の事情に依存していないか？」を問う。
 
-依存している場合、それはdevkitではなく `.incus-dev/` に属する。
+依存している場合、それはidevではなく `.incus-dev/` に属する。

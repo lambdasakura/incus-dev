@@ -1,4 +1,4 @@
-# Lint, unit tests and cross-platform builds. None of this needs Incus.
+# Lint, unit tests and the release build. None of this needs Incus.
 # The integration tests under test/integration/ do, and are not run here.
 name: CI
 
@@ -35,14 +35,8 @@ jobs:
           version: v2.13.2
 
   test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+    name: test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -53,34 +47,10 @@ jobs:
       - name: Test with coverage
         run: make cover
 
-  # The test suite runs Unix commands (sh, sleep) and relies on POSIX file
-  # permissions, so it is not run on Windows. The build and vet must pass,
-  # which is what keeps the Windows-specific sources compiling.
-  windows:
-    name: build (windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: go build -o idev.exe ./cmd/idev
-
-      - name: Smoke test
-        run: |
-          ./idev.exe --version
-          ./idev.exe --help
-
-  # Builds every release target and exercises .goreleaser.yaml, so a broken
-  # release configuration is caught here rather than on a tag.
-  cross-build:
-    name: cross-build
+  # Builds the release and exercises .goreleaser.yaml, so a broken release
+  # configuration is caught here rather than on a tag.
+  release-config:
+    name: release-config
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -101,6 +71,5 @@ jobs:
           name: idev-snapshot
           path: |
             dist/*.tar.gz
-            dist/*.zip
             dist/checksums.txt
           retention-days: 7

@@ -1,6 +1,6 @@
 # 6. Bootstrap と Provisioning
 
-devkitは「何を実行するか」を持たない。
+idevは「何を実行するか」を持たない。
 `.incus-dev/dev.yml` に宣言されたステップを、定義された順序で実行するだけである。
 
 本章はその実行機構を規定する。
@@ -35,7 +35,7 @@ bootstrapは軽量かつ冪等であることを前提とし、毎回実行さ�
 
 コンテナ起動直後はプロセスの初期化が完了していない場合がある。
 
-devkitはbootstrapを開始する前に、以下の2つを待機する。
+idevはbootstrapを開始する前に、以下の2つを待機する。
 
 **1. コマンドを実行できること**
 
@@ -137,9 +137,9 @@ incus exec <instance> --env KEY=VALUE ... -- <shell> -c '<script>'
 
 - 既定シェルは `/bin/sh`。`shell` フィールドで変更可能
 - 終了コードが0以外の場合は失敗とする
-- stdout / stderrはdevkitの出力へそのまま中継する
+- stdout / stderrはidevの出力へそのまま中継する
   （[04-cli.md](04-cli.md) 4.9。長時間かかる処理の進行が見えなくなるため要約しない）
-- `env` は 3.10.1 のdevkit変数に追記される（プロジェクト指定が優先）
+- `env` は 3.10.1 のidev変数に追記される（プロジェクト指定が優先）
 - `env` の値はSecretを含みうるため、ログやエラーへは値を出さない
 - 対話的入力は行わない（stdinは接続しない）
 - TTYは割り当てない（`idev shell` とは異なる）
@@ -162,9 +162,9 @@ community.general.incus
 connection pluginを使用する。
 
 このcollectionの導入はホスト側の前提条件とする。
-devkitは同梱しない。
+idevは同梱しない。
 
-未導入が疑われる場合、devkitは以下のような具体的な対処を含むエラーを表示してよい。
+未導入が疑われる場合、idevは以下のような具体的な対処を含むエラーを表示してよい。
 
 ```text
 ansible-galaxy collection install community.general
@@ -172,12 +172,12 @@ ansible-galaxy collection install community.general
 
 ### 6.5.2 一時Inventory
 
-devkitが生成する。
+idevが生成する。
 
 ```yaml
 all:
   children:
-    devkit:
+    idev:
       hosts:
         dev:
           ansible_host: dev-example-project
@@ -188,7 +188,7 @@ all:
 
 - 対象ホストのグループ名・ホスト名は固定とし、仕様として文書化する
   - ホスト: `dev`
-  - グループ: `all`, `devkit`
+  - グループ: `all`, `idev`
 - 一時ファイルとして生成し、実行後に削除する
 - プロジェクトが `inventory` を指定した場合、追加のinventoryとして併用する
 
@@ -205,7 +205,7 @@ instanceのみであり、Incus server全体ではないため。
 ansible-playbook \
     -i <generated-inventory> \
     [-i <project-inventory>] \
-    --extra-vars @<devkit-vars> \
+    --extra-vars @<idev-vars> \
     [--extra-vars @<project-vars>] \
     [--tags ...] [extra_args...] \
     <playbook>
@@ -215,8 +215,8 @@ ansible-playbook \
 
 - 作業ディレクトリはproject rootとする
 - `.incus-dev/ansible/ansible.cfg` が存在する場合、`ANSIBLE_CONFIG` として使用する
-- devkit変数（3.10.2）はプロジェクトのvarsより先に渡し、上書きを許す
-- devkitはrole pathやcollection pathを注入しない
+- idev変数（3.10.2）はプロジェクトのvarsより先に渡し、上書きを許す
+- idevはrole pathやcollection pathを注入しない
   - Role解決はプロジェクトの `ansible.cfg` またはplaybookの配置に従う
 - 一時ファイルは実行後に必ず削除する
 
@@ -241,7 +241,7 @@ ansible-playbook \
         state: present
 ```
 
-`hosts: dev` はdevkitが生成するinventoryの規約に対応する。
+`hosts: dev` はidevが生成するinventoryの規約に対応する。
 
 ### 6.5.5 collectionの導入
 
@@ -258,7 +258,7 @@ ansible-playbook \
 
 ## 6.6 冪等性の責務
 
-devkitは以下のみを保証する。
+idevは以下のみを保証する。
 
 - 同じ `dev.yml` に対して、同じステップを同じ順序で実行すること
 - ステップの失敗を検出し、後続を実行しないこと
@@ -278,7 +278,7 @@ command -v jq >/dev/null 2>&1 || apt-get install -y jq
 
 ## 6.7 OSサポート
 
-devkitは特定のディストリビューションを前提としない。
+idevは特定のディストリビューションを前提としない。
 
 唯一の例外は 6.3.2 の既定bootstrapであり、これは上書き可能である。
 
@@ -293,7 +293,7 @@ provisioning関連処理を `internal/provision` へ集約する。
 ```go
 package provision
 
-// Env はdevkitが各ステップへ渡す実行文脈。
+// Env はidevが各ステップへ渡す実行文脈。
 type Env struct {
     ProjectName     string
     ProjectRoot     string // ホスト側

@@ -79,7 +79,7 @@ provision:
 # .incus-dev/scripts/setup.sh
 set -eu
 
-echo "setting up ${DEVKIT_PROJECT_NAME}"
+echo "setting up ${IDEV_PROJECT_NAME}"
 command -v jq >/dev/null 2>&1 || apt-get install -y jq
 ```
 
@@ -132,7 +132,7 @@ provision:
 ```yaml
 all:
   children:
-    devkit:
+    idev:
       hosts:
         dev:
           ansible_host: dev-my-project
@@ -195,17 +195,17 @@ instance名やパスをハードコードしなくて済むよう、実行時の
 ### `run` ステップ（環境変数）
 
 ```text
-DEVKIT_PROJECT_NAME       プロジェクト名
-DEVKIT_INSTANCE           instance名
-DEVKIT_WORKSPACE          コンテナ内のworkspaceパス
-DEVKIT_WORKSPACE_SOURCE   ホスト側のproject rootパス
-DEVKIT_INCUS_PROJECT      Incus project
+IDEV_PROJECT_NAME       プロジェクト名
+IDEV_INSTANCE           instance名
+IDEV_WORKSPACE          コンテナ内のworkspaceパス
+IDEV_WORKSPACE_SOURCE   ホスト側のproject rootパス
+IDEV_INCUS_PROJECT      Incus project
 ```
 
 ```yaml
 provision:
   - run: |
-      cd "$DEVKIT_WORKSPACE"
+      cd "$IDEV_WORKSPACE"
       make setup
 ```
 
@@ -214,17 +214,17 @@ provision:
 ### `ansible` ステップ（変数）
 
 ```yaml
-devkit_project_name: my-project
-devkit_instance: dev-my-project
-devkit_workspace: /workspace
-devkit_workspace_source: /home/you/src/my-project
-devkit_incus_project: default
+idev_project_name: my-project
+idev_instance: dev-my-project
+idev_workspace: /workspace
+idev_workspace_source: /home/you/src/my-project
+idev_incus_project: default
 ```
 
 ```yaml
 - name: Configure shell to start in the workspace
   ansible.builtin.copy:
-    content: "cd {{ devkit_workspace }}\n"
+    content: "cd {{ idev_workspace }}\n"
     dest: /etc/profile.d/workspace.sh
     mode: "0644"
 ```
@@ -248,7 +248,7 @@ command -v jq >/dev/null 2>&1 || apt-get install -y jq
 
 # 追記ではなく生成する
 cat > /etc/profile.d/workspace.sh <<EOS
-cd ${DEVKIT_WORKSPACE}
+cd ${IDEV_WORKSPACE}
 EOS
 
 # 存在確認してから作る

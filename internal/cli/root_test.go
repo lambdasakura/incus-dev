@@ -147,7 +147,7 @@ func TestShellCommandPassesArguments(t *testing.T) {
 	client.AddInstance(&incus.Instance{
 		Name:   "dev-example-project",
 		Status: "Running",
-		Config: map[string]string{"user.incus-devkit.project": "example-project"},
+		Config: map[string]string{"user.incus-dev.project": "example-project"},
 	})
 
 	root := newRootCommand("test", stub(app), stub(app))
@@ -191,7 +191,7 @@ func TestDestructiveCommandsConfirm(t *testing.T) {
 			client.AddInstance(&incus.Instance{
 				Name:   "dev-example-project",
 				Status: "Running",
-				Config: map[string]string{"user.incus-devkit.project": "example-project"},
+				Config: map[string]string{"user.incus-dev.project": "example-project"},
 			})
 
 			root := newRootCommand("test", stub(app), stub(app))

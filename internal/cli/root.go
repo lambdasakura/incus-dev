@@ -463,7 +463,7 @@ func Execute(ctx context.Context, version string, args []string) error {
 // Report prints the error and returns the process exit code.
 //
 // A command inside the container that merely exited non-zero has its exit code
-// returned without being shown as devkit's own error: its output was already
+// returned without being shown as idev's own error: its output was already
 // streamed.
 func Report(w io.Writer, err error) int {
 	if err == nil {

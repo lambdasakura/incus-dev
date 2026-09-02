@@ -6,7 +6,7 @@
 
 | 対象 | 必要なもの |
 | --- | --- |
-| ホスト | Incus（動作確認は6.0系）、`idev` バイナリ |
+| ホスト | Linux、Incus（動作確認は6.0系）、`idev` バイナリ |
 | ホスト（ansibleステップを使う場合のみ） | `ansible-playbook`、`community.general` collection |
 | コンテナ | なし。SSH Serverは導入しない |
 
@@ -46,9 +46,9 @@ Incusへ接続できていれば、instanceがまだ無くても状態が表示�
 
 ### リリースから導入する（推奨）
 
-各リリースには Linux / macOS / Windows の amd64・arm64 向けアーカイブと
+各リリースには Linux の amd64・arm64 向けアーカイブと
 `checksums.txt` が添付されている。
-自分のプラットフォーム向けのものを取得し、検証してから
+自分のアーキテクチャ向けのものを取得し、検証してから
 `PATH` の通った場所へ置く。
 
 ```bash
@@ -57,12 +57,10 @@ tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
 
-Windowsでは `.zip` を展開し、`idev.exe` を `PATH` の通ったディレクトリへ置く。
-
-Incus daemonはLinux上で動くが、`idev` はAPI経由で操作するため、
-macOS / Windows からremoteのIncusを操作できる。
-ただしWindowsには SIGWINCH が無いため、`idev shell` は
-ウィンドウサイズの変更に追従しない。
+**idev はLinux専用である。** 動作しているマシンのIncusを操作するものであり、
+Incusのclient libraryはLinux以外でローカル接続を拒否する。
+そのため macOS / Windows ではIncusに触れるコマンドが1つも動かない。
+これらのプラットフォーム向けのバイナリは配布しない。
 
 ### ソースから導入する
 

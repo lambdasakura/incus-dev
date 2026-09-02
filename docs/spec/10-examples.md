@@ -2,7 +2,7 @@
 
 本章はプロジェクトが `.incus-dev/` に置く内容の例を示す。
 
-devkitはこれらの内容を一切持たない。すべてプロジェクトの所有物である。
+idevはこれらの内容を一切持たない。すべてプロジェクトの所有物である。
 
 ---
 
@@ -164,10 +164,10 @@ stdout_callback = yaml
 python_version: "3.13"
 ```
 
-`hosts: dev` はdevkitが生成するinventoryの規約
+`hosts: dev` はidevが生成するinventoryの規約
 （[06-provisioning.md](06-provisioning.md) 6.5.2）に対応する。
 
-Roleは完全にプロジェクトの所有物であり、devkitの更新の影響を受けない。
+Roleは完全にプロジェクトの所有物であり、idevの更新の影響を受けない。
 
 共有したい場合は、Ansible Collectionとして別リポジトリで配布し、
 `requirements.yml` で取り込む。
@@ -216,7 +216,7 @@ provision:
 ```
 
 必要な設定を `instance.config` に直接書くため、
-devkit側にProfileを用意する必要がない。
+idev側にProfileを用意する必要がない。
 
 ---
 

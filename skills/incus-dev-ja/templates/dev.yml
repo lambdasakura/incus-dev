@@ -13,7 +13,7 @@ instance:
   #   images:ubuntu/24.04 / images:debian/12 / images:alpine/3.21
   image: images:ubuntu/24.04
 
-  # ホストに存在するProfileの名前参照。devkitはProfileを作らない。
+  # ホストに存在するProfileの名前参照。idevはProfileを作らない。
   # profiles: [default]
 
   # Incusのinstance configをそのまま渡す。引用しておくのが無難だが、

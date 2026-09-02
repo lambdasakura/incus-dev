@@ -46,7 +46,7 @@ type AnsibleStep struct {
 // GalaxyStep runs ansible-galaxy install on the host.
 //
 // It lets a project install its own Ansible roles and collections without
-// help from devkit.
+// help from idev.
 type GalaxyStep struct {
 	Requirements string   `json:"requirements"`
 	ExtraArgs    []string `json:"extra_args,omitempty"`

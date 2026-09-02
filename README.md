@@ -9,9 +9,9 @@ environments on [Incus](https://linuxcontainers.org/incus/).
 
 ## Quick start
 
-You need [Incus](https://linuxcontainers.org/incus/docs/main/installing/) on the
-host. Nothing else: `idev` is a single static binary with no runtime
-dependencies.
+You need a Linux host with
+[Incus](https://linuxcontainers.org/incus/docs/main/installing/) on it. Nothing
+else: `idev` is a single static binary with no runtime dependencies.
 
 ### 1. Install idev
 
@@ -129,7 +129,7 @@ See the **[manual](docs/manual/README.md)** for details, and
 
 | Where | What you need |
 | --- | --- |
-| Host | Incus, and the `idev` binary |
+| Host | Linux, with Incus, and the `idev` binary |
 | Host, for `ansible` steps | `ansible-playbook` and the `community.general` collection |
 | Container | Nothing — no SSH server required |
 
@@ -150,16 +150,14 @@ root:<gid>:1
 
 ## Installing
 
-Every [release](../../releases) carries binaries for Linux, macOS and Windows,
-on amd64 and arm64, plus a `checksums.txt` to check them against.
+Every [release](../../releases) carries a Linux binary for amd64 and arm64,
+plus a `checksums.txt` to check it against.
 
 ```bash
 sha256sum --check --ignore-missing checksums.txt
 tar -xzf incus-dev_<version>_linux_amd64.tar.gz
 sudo install -m 0755 idev /usr/local/bin/idev
 ```
-
-On Windows, unpack the `.zip` and put `idev.exe` in a directory on `PATH`.
 
 With a Go toolchain, no download is needed. A binary built this way reports
 `dev` for `idev --version`, because the version is stamped in at release time.
@@ -174,9 +172,6 @@ From a checkout:
 make build     # ./bin/idev
 make install   # into $GOBIN
 ```
-
-The Incus daemon runs on Linux, but `idev` talks to it over the API, so a macOS
-or Windows machine can drive a remote Incus.
 
 ## Development
 
@@ -230,14 +225,15 @@ a real Incus daemon.
 
 ## Not supported
 
-Two things are permanently out of scope, because both would need a different
-way to share the workspace, and that is away from what this tool is for: a
-per-project environment on the machine in front of you.
+A remote Incus and virtual machines are permanently out of scope, because both
+would need a different way to share the workspace, and that is away from what
+this tool is for: a per-project environment on the machine in front of you.
 
 | | |
 | --- | --- |
 | A remote Incus | `idev` always talks to the local one, and does not follow `incus remote switch` |
 | Virtual machines | An instance is always a container; there is no `instance.type` |
+| macOS and Windows | Talking to the local Incus is what `idev` does, and the client refuses a local connection anywhere but Linux. Only Linux binaries are released |
 
 ## License
 

@@ -201,7 +201,7 @@ CPU数（`nproc`）とメモリ量（`/proc/meminfo`）にも反映される。
 `limits.*` の変更は実行中のコンテナにもそのまま反映されるため、
 再起動は要らない。
 
-`user.incus-devkit.*` は idev の管理用に予約されているため使用できない。
+`user.incus-dev.*` は idev の管理用に予約されているため使用できない。
 
 ### `devices`
 

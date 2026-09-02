@@ -20,7 +20,7 @@ const (
 	// (spec 06-provisioning.md 6.5.2).
 	InventoryHost = "dev"
 	// InventoryGroup is the group name in the generated inventory.
-	InventoryGroup = "devkit"
+	InventoryGroup = "idev"
 	// ConnectionPlugin is the connection plugin used to reach the container.
 	ConnectionPlugin = "community.general.incus"
 )
@@ -70,9 +70,9 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	if err := writeYAML(inventoryPath, inventoryFor(env)); err != nil {
 		return fmt.Errorf("write inventory: %w", err)
 	}
-	varsPath := filepath.Join(dir, "devkit-vars.json")
+	varsPath := filepath.Join(dir, "idev-vars.json")
 	if err := writeJSON(varsPath, env.AnsibleVars()); err != nil {
-		return fmt.Errorf("write devkit vars: %w", err)
+		return fmt.Errorf("write idev vars: %w", err)
 	}
 
 	// Secrets go in a file of their own: a mode 0600 temporary file, deleted
@@ -88,7 +88,7 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	if step.Inventory != "" {
 		args.Add("-i", resolve(env.ProjectRoot, step.Inventory))
 	}
-	// Pass devkit's variables first, so the project can override them.
+	// Pass idev's variables first, so the project can override them.
 	args.Add("--extra-vars=@" + varsPath)
 	if len(env.Secrets) > 0 {
 		args.Add("--extra-vars=@" + secretsPath)
@@ -121,7 +121,7 @@ func (e *Executor) execAnsible(ctx context.Context, step *config.AnsibleStep, en
 	return err
 }
 
-// inventoryFor builds the contents of the temporary inventory devkit generates.
+// inventoryFor builds the contents of the temporary inventory idev generates.
 func inventoryFor(env Env) map[string]any {
 	host := map[string]any{
 		"ansible_host":       env.Instance,

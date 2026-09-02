@@ -157,16 +157,17 @@ func TestConnectError(t *testing.T) {
 }
 
 // Connect works on the defaults with no configuration, leaving them to
-// LoadConfig. It gets as far as the local socket, whether or not a daemon is
-// listening on it.
+// LoadConfig: it gets past loading and on to the local remote.
+//
+// What that attempt reports differs by platform — a missing socket on Linux,
+// "not a Linux system" elsewhere — so only the stage it reached is checked.
 func TestConnectLoadsCLIConfig(t *testing.T) {
 	t.Setenv("INCUS_CONF", t.TempDir())
-	socket := filepath.Join(t.TempDir(), "does-not-exist.socket")
-	t.Setenv("INCUS_SOCKET", socket)
+	t.Setenv("INCUS_SOCKET", filepath.Join(t.TempDir(), "does-not-exist.socket"))
 
 	_, err := Connect(Target{})
-	if err == nil || !strings.Contains(err.Error(), socket) {
-		t.Errorf("error = %v, want it to have reached the local socket", err)
+	if err == nil || !strings.Contains(err.Error(), "connect to the local incus") {
+		t.Errorf("error = %v, want it to have reached the local remote", err)
 	}
 }
 

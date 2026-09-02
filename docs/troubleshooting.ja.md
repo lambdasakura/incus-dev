@@ -11,7 +11,7 @@
 | provisionステップ中の `apt-get` / `apk` が失敗する、コンテナから名前解決やダウンロードができない | [1](#1-コンテナから外部へ通信できない) |
 | workspaceへ書き込めない、生成物がホスト側でrootの所有になる | [2](#2-workspaceの所有者がおかしい--書き込めない) |
 | `incus profile(s) not found on this host` | [3](#3-profileが見つからない) |
-| `is not managed by devkit` | [4](#4-instanceがdevkit管理外と言われる) |
+| `is not managed by idev` | [4](#4-instanceがidev管理外と言われる) |
 | ansibleステップが失敗する | [5](#5-ansibleステップが失敗する) |
 | Incusへ接続できない、API呼び出しが失敗する | [6](#6-incus-apiとの通信で失敗する) |
 
@@ -203,7 +203,7 @@ incus config get dev-<project> raw.idmap    # "uid <uid> 0 / gid <gid> 0" が出
 
 ```text
 incus profile(s) not found on this host: gpu-nvidia
-devkit does not create profiles; create them or remove them from instance.profiles
+idev does not create profiles; create them or remove them from instance.profiles
 ```
 
 `idev` はIncus Profileを同梱も作成もしない。
@@ -235,17 +235,17 @@ storage pool名やnetwork名はホストに依存するため、
 
 ---
 
-## 4. instanceがdevkit管理外と言われる
+## 4. instanceがidev管理外と言われる
 
 ```text
-instance dev-example exists but is not managed by devkit for project "example"
+instance dev-example exists but is not managed by idev for project "example"
 ```
 
 `idev` は自分が作成したinstanceに印を付けており、印が無いinstanceは
 誤って壊さないよう触れない。
 
 ```bash
-incus config get dev-<project> user.incus-devkit.project
+incus config get dev-<project> user.incus-dev.project
 ```
 
 同名のinstanceを手動で作っていた場合は、削除するか

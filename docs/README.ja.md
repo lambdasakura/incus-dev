@@ -14,7 +14,7 @@
 - **動かない** → [troubleshooting.ja.md](troubleshooting.ja.md)
 - **設定項目を調べたい** → [manual/ja/04-dev-yml.md](manual/ja/04-dev-yml.md)
 - **なぜそう設計されているか知りたい** → [spec/01-overview.md](spec/01-overview.md)
-- **devkit自体を開発する** → [../CLAUDE.md](../CLAUDE.md) → [spec/07-implementation.md](spec/07-implementation.md)
+- **idev自体を開発する** → [../CLAUDE.md](../CLAUDE.md) → [spec/07-implementation.md](spec/07-implementation.md)
 
 ## 言語
 

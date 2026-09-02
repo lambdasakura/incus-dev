@@ -23,7 +23,7 @@ type Target struct {
 	Project string
 }
 
-// cliConfig is the part of the incus command's configuration devkit uses.
+// cliConfig is the part of the incus command's configuration idev uses.
 type cliConfig interface {
 	// GetInstanceServer connects to a remote's Incus API.
 	GetInstanceServer(name string) (incusclient.InstanceServer, error)

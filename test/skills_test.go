@@ -47,6 +47,22 @@ func TestSkillTemplateIsValid(t *testing.T) {
 	}
 }
 
+// codeIn returns the code in a Markdown document, one span or block line per
+// line, with the prose around it left out.
+func codeIn(md string) string {
+	fenced := regexp.MustCompile("(?s)```[^\n]*\n(.*?)```")
+	inline := regexp.MustCompile("`([^`\n]*)`")
+
+	var b strings.Builder
+	for _, m := range fenced.FindAllStringSubmatch(md, -1) {
+		b.WriteString(m[1] + "\n")
+	}
+	for _, m := range inline.FindAllStringSubmatch(fenced.ReplaceAllString(md, ""), -1) {
+		b.WriteString(m[1] + "\n")
+	}
+	return b.String()
+}
+
 // The commands a skill points at exist. This is what catches a skill left
 // behind when the CLI changes.
 func TestSkillReferencesExistingCommands(t *testing.T) {
@@ -59,10 +75,12 @@ func TestSkillReferencesExistingCommands(t *testing.T) {
 	}
 	// Pick up the `idev <subcommand>` shape; `idev --version` and the like are out
 	// of scope.
-	command := regexp.MustCompile(`idev ([a-z][a-z-]*)`)
-
-	// The frontmatter is prose and out of scope: in English, phrasing such as
-	// "the idev command" is indistinguishable from pointing at a command.
+	//
+	// Only what a code span or a fenced block starts with counts as pointing
+	// at a command. Prose ("idev does not create them") and a quoted error
+	// ("... is not managed by idev for project ...") mention idev without
+	// naming a subcommand.
+	command := regexp.MustCompile(`(?m)^\s*idev ([a-z][a-z-]*)`)
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
@@ -72,7 +90,7 @@ func TestSkillReferencesExistingCommands(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for _, m := range command.FindAllStringSubmatch(withoutFrontmatter(string(body)), -1) {
+		for _, m := range command.FindAllStringSubmatch(codeIn(withoutFrontmatter(string(body))), -1) {
 			if !known[m[1]] {
 				t.Errorf("%s: points at %q, which does not exist", path, "idev "+m[1])
 			}

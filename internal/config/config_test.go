@@ -326,7 +326,7 @@ func TestParseErrors(t *testing.T) {
 		},
 		{
 			name: "reserved config key",
-			yaml: minimal + "  config:\n    user.incus-devkit.project: x\n",
+			yaml: minimal + "  config:\n    user.incus-dev.project: x\n",
 			want: "user.incus-dev",
 		},
 		{
@@ -1031,7 +1031,7 @@ func TestSecretErrors(t *testing.T) {
 	}{
 		{"env and file together", minimal + "secrets:\n  A:\n    env: X\n    file: /f\n", "mutually exclusive"},
 		{"neither given", minimal + "secrets:\n  A:\n    optional: true\n", "must specify"},
-		{"a name devkit reserves", minimal + "secrets:\n  DEVKIT_TOKEN:\n    env: X\n", "reserved"},
+		{"a name idev reserves", minimal + "secrets:\n  IDEV_TOKEN:\n    env: X\n", "reserved"},
 		{"not a valid environment variable name", minimal + "secrets:\n  \"bad-name\":\n    env: X\n", "bad-name"},
 	}
 

@@ -31,7 +31,7 @@ provision:
       vars: .incus-dev/ansible/vars.yml
 `)
 
-	// Use both the variables devkit injects and the project's own. Keep to
+	// Use both the variables idev injects and the project's own. Keep to
 	// tasks that need no network.
 	writeFile(t, filepath.Join(f.root, ".incus-dev", "ansible", "site.yml"), `---
 - name: Provision development environment
@@ -41,13 +41,13 @@ provision:
   tasks:
     - name: Write marker
       ansible.builtin.copy:
-        content: "{{ devkit_project_name }} {{ greeting }}\n"
+        content: "{{ idev_project_name }} {{ greeting }}\n"
         dest: /etc/idev-ansible-marker
         mode: "0644"
 
     - name: Ensure workspace is visible
       ansible.builtin.stat:
-        path: "{{ devkit_workspace }}/src/marker.txt"
+        path: "{{ idev_workspace }}/src/marker.txt"
       register: ws
 
     - name: Fail when workspace is missing
@@ -61,7 +61,7 @@ provision:
 
 	got := f.mustRun("shell", "--", "cat", "/etc/idev-ansible-marker")
 	if !strings.Contains(got, f.project) {
-		t.Errorf("marker = %q, the devkit variables never arrived", got)
+		t.Errorf("marker = %q, the idev variables never arrived", got)
 	}
 	if !strings.Contains(got, "konnichiwa") {
 		t.Errorf("marker = %q, the project's vars never arrived", got)

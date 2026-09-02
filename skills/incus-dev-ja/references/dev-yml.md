@@ -10,7 +10,7 @@
 schema: 1                      # 必須。現在は 1 のみ
 
 runtime:
-  version: "1.0"               # 任意。devkitの想定バージョン
+  version: "1.0"               # 任意。idevの想定バージョン
 
 project:
   name: my-project             # 必須。instance名 dev-<name> の元
@@ -105,11 +105,11 @@ inventory上のホスト名は `dev` なので、playbookは `hosts: dev` と書
 ## run ステップへ渡る環境変数
 
 ```text
-DEVKIT_PROJECT_NAME       プロジェクト名
-DEVKIT_INSTANCE           instance名
-DEVKIT_WORKSPACE          コンテナ内のworkspaceパス
-DEVKIT_WORKSPACE_SOURCE   ホスト側のプロジェクトルート
-DEVKIT_INCUS_PROJECT      Incus project
+IDEV_PROJECT_NAME       プロジェクト名
+IDEV_INSTANCE           instance名
+IDEV_WORKSPACE          コンテナ内のworkspaceパス
+IDEV_WORKSPACE_SOURCE   ホスト側のプロジェクトルート
+IDEV_INCUS_PROJECT      Incus project
 ```
 
 `env:` で同名を指定すると上書きされる。`secrets:` の値も環境変数として渡る。
@@ -149,7 +149,7 @@ Debian系以外のimageでは失敗するので、その場合は `bootstrap` �
 ## 書くときの注意
 
 - `instance.config` の値は数値・真偽値で書いてもよい（文字列へ変換される）
-- `user.incus-devkit.*` は devkit が管理に使うので書かない
+- `user.incus-dev.*` は idev が管理に使うので書かない
 - `-` で始まるキー、`=` を含むキーは使えない
 - `profiles: []` にする場合、root diskとネットワークも自分で宣言する
 - 相対パス（`workspace.source`、device の `source`、playbook など）は

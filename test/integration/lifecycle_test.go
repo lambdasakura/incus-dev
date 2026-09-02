@@ -63,9 +63,9 @@ func TestUpCreatesRunningInstanceWithWorkspace(t *testing.T) {
 		t.Errorf("the host's file is not visible through the workspace: %q", out)
 	}
 
-	// The mark that says devkit manages it.
-	if got := incusOut(t, "config", "get", f.instance, "user.incus-devkit.project"); got != f.project {
-		t.Errorf("user.incus-devkit.project = %q, want %q", got, f.project)
+	// The mark that says idev manages it.
+	if got := incusOut(t, "config", "get", f.instance, "user.incus-dev.project"); got != f.project {
+		t.Errorf("user.incus-dev.project = %q, want %q", got, f.project)
 	}
 }
 
@@ -93,7 +93,7 @@ provision:
     run: |
       [ -f /etc/idev-marker ] || echo created > /etc/idev-marker
   - name: read workspace
-    run: cat "$DEVKIT_WORKSPACE/src/marker.txt"
+    run: cat "$IDEV_WORKSPACE/src/marker.txt"
 `)
 	out := f.mustRun("up")
 	if !strings.Contains(out, "hello from host") {
@@ -230,7 +230,7 @@ func TestDestroyKeepsHostFiles(t *testing.T) {
 	}
 }
 
-// An instance devkit does not manage is left alone (spec 05-incus.md 5.2).
+// An instance idev does not manage is left alone (spec 05-incus.md 5.2).
 func TestRefusesUnmanagedInstance(t *testing.T) {
 	f := newFixture(t, minimalYAML)
 
@@ -239,10 +239,10 @@ func TestRefusesUnmanagedInstance(t *testing.T) {
 	}
 
 	out := f.mustFail("up")
-	if !strings.Contains(out, "not managed by devkit") {
+	if !strings.Contains(out, "not managed by idev") {
 		t.Errorf("output = %q, want it to say the instance is unmanaged", out)
 	}
-	if out := f.mustFail("destroy", "--force"); !strings.Contains(out, "not managed by devkit") {
+	if out := f.mustFail("destroy", "--force"); !strings.Contains(out, "not managed by idev") {
 		t.Errorf("destroy output = %q", out)
 	}
 	if got := incusOut(t, "list", f.instance, "--format", "csv", "-c", "n"); got == "" {
@@ -267,7 +267,7 @@ func TestFailsWhenProfileMissing(t *testing.T) {
 	}
 }
 
-// devkit ships no profile. config and devices alone can declare an environment
+// idev ships no profile. config and devices alone can declare an environment
 // (REQ-007).
 func TestWorksWithoutAnyProfile(t *testing.T) {
 	f := newFixture(t, `
