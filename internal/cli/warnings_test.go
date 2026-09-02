@@ -1468,3 +1468,94 @@ func TestUpNamesWhatItCannotManageOnAnOlderInstance(t *testing.T) {
 		t.Errorf("second run = %q, want it said only while it could be", errOut.String())
 	}
 }
+
+// The warning is for an instance that predates idev's records. On one idev
+// itself created, a key set by hand is idev's to leave alone and not to
+// complain about -- on every run, for good, inflating the closing count.
+func TestUpDoesNotWarnAboutAnInstanceItRecorded(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	// Either record is enough to say the instance is not from before them,
+	// so each is tested on its own.
+	for _, marker := range []string{managedKeysKey, managedDevicesKey} {
+		t.Run(marker, func(t *testing.T) {
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name:     "dev-example-project",
+				Status:   "Running",
+				Profiles: []string{"default"},
+				Config: map[string]string{
+					managedProjectKey: "example-project",
+					marker:            "raw.idmap",
+					"limits.cpu":      "2", // set by hand; idev did not apply it
+				},
+			})
+
+			errOut := &bytes.Buffer{}
+			app := NewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+			})
+
+			if err := app.Up(context.Background(), UpOptions{}); err != nil {
+				t.Fatalf("Up() error = %v", err)
+			}
+			if strings.Contains(errOut.String(), "predates idev's record") {
+				t.Errorf("output = %q, want no such warning on an instance idev recorded",
+					errOut.String())
+			}
+		})
+	}
+}
+
+// The two stranded-instance warnings say different things, and the difference
+// is the whole message: one says idev will not adopt it, the other that a new
+// name is being derived.
+func TestStrandedWarningsSayWhichKind(t *testing.T) {
+	cfg := mustParse(t, rootYAML)
+
+	tests := []struct {
+		name         string
+		config       map[string]string
+		want, unwant string
+	}{
+		{
+			name:   "an older marker prefix",
+			config: map[string]string{legacyProjectKey: "example-project"},
+			want:   "made by an older idev",
+			unwant: "no longer derives that name",
+		},
+		{
+			name:   "a name idev no longer derives",
+			config: map[string]string{managedProjectKey: "example-project"},
+			want:   "no longer derives that name",
+			unwant: "made by an older idev",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := incustest.New()
+			client.AddInstance(&incus.Instance{
+				Name: "dev-example-project-other", Status: "Running", Config: tt.config,
+			})
+
+			errOut := &bytes.Buffer{}
+			app := NewApp(AppOptions{
+				Config: cfg, Client: client, Runner: &runnertest.Fake{},
+				Out: &bytes.Buffer{}, ErrOut: errOut, CheckIDMap: func(int, int) error { return nil },
+			})
+			if err := app.Up(context.Background(), UpOptions{}); err != nil {
+				t.Fatalf("Up() error = %v", err)
+			}
+			if !strings.Contains(errOut.String(), tt.want) {
+				t.Errorf("output = %q, want it to contain %q", errOut.String(), tt.want)
+			}
+			// The other wording gives contradictory advice about the same
+			// instance, and inflates the count the closing line reports.
+			if strings.Contains(errOut.String(), tt.unwant) {
+				t.Errorf("output = %q, want it not to also say %q", errOut.String(), tt.unwant)
+			}
+		})
+	}
+}

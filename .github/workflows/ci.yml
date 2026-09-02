@@ -53,6 +53,21 @@ jobs:
 
   # Builds the release and exercises .goreleaser.yaml, so a broken release
   # configuration is caught here rather than on a tag.
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # The same target a developer runs, so the two cannot drift. It fails
+      # on a reachable vulnerability that has a fix, and prints the ones that
+      # have none -- see the comment on the target for why.
+      - run: make vuln
+
   release-config:
     name: release-config
     runs-on: ubuntu-latest

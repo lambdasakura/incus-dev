@@ -52,6 +52,10 @@ jobs:
         with:
           # GoReleaser builds the changelog from the history.
           fetch-depth: 0
+          # Otherwise the write-scoped token is left in .git/config for every
+          # later step, including the third-party action. GoReleaser takes its
+          # token from the environment, not from git.
+          persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

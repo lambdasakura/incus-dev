@@ -105,11 +105,18 @@ incus-dev/
 │   ├── shell-based/
 │   └── ansible-based/
 │
+├── scripts/                    # ビルド・検査用。バイナリには入らない
+│   └── vuln.jq                 # make vuln の判定（8.4.0）
+│
+├── .claude/skills/             # 開発者向け作業手順（利用者向けの skills/ とは別）
+│
 └── test/
     ├── examples_test.go        # examples/ が読めることの確認
-    ├── skills_test.go          # skills/ の雛形とコマンド名の確認
-    ├── structure_test.go       # REQ-007の資産検査とパッケージ依存方向の確認
+    ├── skills_test.go          # skills/ と .claude/skills/ の確認
+    ├── structure_test.go       # REQ-007の資産検査、パッケージ依存方向、
+    │                           # 外部コマンドとos.Exitの局在、Makefile/CIのゲート
     └── integration/            # //go:build integration
+        └── contract_test.go    # 実daemonに対する Client 契約（8.3.2）
 ```
 
 利用者向け文書は英語と日本語の両方を保つ。英語が既定のパスで、

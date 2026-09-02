@@ -21,6 +21,12 @@ type Fake struct {
 	SnapshotsByInstance map[string][]incus.Snapshot
 	// Volumes are the storage volumes that exist, as "pool/name".
 	Volumes map[string]bool
+	// Pools are the storage pools that exist. A pool with no row holds
+	// nothing, which Incus reports differently from a missing volume.
+	Pools []string
+	// Images are the references that resolve. nil accepts any, which is what
+	// most tests want; set it to refuse one.
+	Images []string
 
 	// ExecFunc, when set, decides what Exec returns.
 	ExecFunc func(name string, argv []string, opt incus.ExecOptions) (int, error)
@@ -51,6 +57,7 @@ func New() *Fake {
 		SnapshotsByInstance: map[string][]incus.Snapshot{},
 		Volumes:             map[string]bool{},
 		Profiles:            []string{"default"},
+		Pools:               []string{"default"},
 	}
 }
 
@@ -124,7 +131,7 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 		return err
 	}
 	if _, exists := f.Instances[spec.Name]; exists {
-		return fmt.Errorf("instance %s already exists", spec.Name)
+		return fmt.Errorf("instance %s: %w", spec.Name, incus.ErrInstanceExists)
 	}
 	config := map[string]string{}
 	for k, v := range spec.Config {
@@ -274,13 +281,28 @@ func (f *Fake) ProfileExists(_ context.Context, name string) (bool, error) {
 
 // CheckImage reports whether the image resolves.
 func (f *Fake) CheckImage(_ context.Context, ref string) error {
-	return f.record("image check %s", ref)
+	if err := f.record("image check %s", ref); err != nil {
+		return err
+	}
+	if f.Images != nil && !slices.Contains(f.Images, ref) {
+		return fmt.Errorf("image %s: not found", ref)
+	}
+	return nil
+}
+
+// hasPool reports whether the pool exists. A pool with no row holds nothing,
+// which Incus answers differently from a volume that is merely absent.
+func (f *Fake) hasPool(pool string) bool {
+	return f.Pools == nil || slices.Contains(f.Pools, pool)
 }
 
 // VolumeExists reports whether the volume is registered.
 func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) {
 	if err := f.record("volume exists %s %s", pool, name); err != nil {
 		return false, err
+	}
+	if !f.hasPool(pool) {
+		return false, fmt.Errorf("storage pool %s: %w", pool, incus.ErrPoolNotFound)
 	}
 	return f.Volumes[pool+"/"+name], nil
 }
@@ -289,6 +311,14 @@ func (f *Fake) VolumeExists(_ context.Context, pool, name string) (bool, error) 
 func (f *Fake) CreateVolume(_ context.Context, pool, name string, config map[string]string) error {
 	if err := f.record("volume create %s %s %v", pool, name, sortedPairs(config)); err != nil {
 		return err
+	}
+	if !f.hasPool(pool) {
+		return fmt.Errorf("storage pool %s: %w", pool, incus.ErrPoolNotFound)
+	}
+	// Incus answers "Volume by that name already exists". Succeeding here
+	// would hide a caller that creates without checking.
+	if f.Volumes[pool+"/"+name] {
+		return fmt.Errorf("storage volume %q already exists on pool %q", name, pool)
 	}
 	f.Volumes[pool+"/"+name] = true
 	return nil
@@ -313,6 +343,16 @@ func (f *Fake) DeleteVolume(_ context.Context, pool, name string) error {
 func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) error {
 	if err := f.record("snapshot create %s %s", instance, snapshot); err != nil {
 		return err
+	}
+	// Incus refuses a name with a "/" or a space, whatever idev checks first.
+	if strings.ContainsAny(snapshot, "/ \t\n") {
+		return fmt.Errorf("invalid snapshot name %q", snapshot)
+	}
+	for _, s := range f.SnapshotsByInstance[instance] {
+		if s.Name == snapshot {
+			return fmt.Errorf("%s already has a snapshot named %q: %w",
+				instance, snapshot, incus.ErrSnapshotExists)
+		}
 	}
 	f.SnapshotsByInstance[instance] = append(f.SnapshotsByInstance[instance],
 		incus.Snapshot{Name: snapshot})

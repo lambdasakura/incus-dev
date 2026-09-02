@@ -99,6 +99,26 @@ func (r *configImageResolver) Resolve(ctx context.Context, ref string) (incuscli
 	}
 }
 
+// Alias splits a reference into the remote's name and the image name, without
+// contacting anything.
+//
+// Creation passes the image name to the daemon rather than the fingerprint
+// this package resolved: a simplestreams remote cannot be queried by
+// fingerprint, so the daemon can only satisfy one out of its local cache. The
+// two views also drift -- the client sees the index as it is now, the daemon
+// sees the copy it cached -- and asking it for a fingerprint it has never
+// heard of is how 'idev up' broke every time the upstream image was rebuilt.
+func (r *configImageResolver) Alias(ref string) (remote, name string, err error) {
+	remote, name, err = r.config.ParseRemote(ref)
+	if err != nil {
+		return "", "", fmt.Errorf("parse image reference %q: %w", ref, err)
+	}
+	if name == "" {
+		return "", "", fmt.Errorf("image reference %q has no image name", ref)
+	}
+	return remote, name, nil
+}
+
 func (r *configImageResolver) resolve(ref string) (incusclient.ImageServer, *api.Image, error) {
 	remote, name, err := r.config.ParseRemote(ref)
 	if err != nil {

@@ -23,15 +23,29 @@ var errAPI = errors.New("api failed")
 type fakeOp struct {
 	err      error
 	metadata map[string]any
+	// block, when non-nil, holds Wait open until it is closed.
+	block chan struct{}
+	// canceled is closed when Cancel is called.
+	canceled chan struct{}
 }
 
 func (o *fakeOp) AddHandler(func(api.Operation)) (*incusclient.EventTarget, error) { return nil, nil }
-func (o *fakeOp) Cancel() error                                                    { return nil }
-func (o *fakeOp) Get() api.Operation                                               { return api.Operation{Metadata: o.metadata} }
-func (o *fakeOp) GetWebsocket(string) (*websocket.Conn, error)                     { return nil, nil }
-func (o *fakeOp) RemoveHandler(*incusclient.EventTarget) error                     { return nil }
-func (o *fakeOp) Refresh() error                                                   { return nil }
-func (o *fakeOp) Wait() error                                                      { return o.err }
+func (o *fakeOp) Cancel() error {
+	if o.canceled != nil {
+		close(o.canceled)
+	}
+	return nil
+}
+func (o *fakeOp) Get() api.Operation                           { return api.Operation{Metadata: o.metadata} }
+func (o *fakeOp) GetWebsocket(string) (*websocket.Conn, error) { return nil, nil }
+func (o *fakeOp) RemoveHandler(*incusclient.EventTarget) error { return nil }
+func (o *fakeOp) Refresh() error                               { return nil }
+func (o *fakeOp) Wait() error {
+	if o.block != nil {
+		<-o.block
+	}
+	return o.err
+}
 
 // WaitContext returns without waiting once interrupted, as the real one does.
 func (o *fakeOp) WaitContext(ctx context.Context) error {
@@ -43,25 +57,29 @@ func (o *fakeOp) WaitContext(ctx context.Context) error {
 	}
 }
 
-// fakeRemoteOp is an operation that involves a transfer.
+// fakeServer is a fake of the Incus API.
+// fakeRemoteOp is an operation that transfers, which is what a create is.
 type fakeRemoteOp struct {
 	err error
-	// block, when non-nil, holds the operation open until it is closed.
+	// block, when non-nil, holds Wait open until it is closed.
 	block chan struct{}
-	// canceled reports whether a cancellation was requested.
+	// canceled is closed when CancelTarget is called.
 	canceled chan struct{}
 }
 
 func (o *fakeRemoteOp) AddHandler(func(api.Operation)) (*incusclient.EventTarget, error) {
 	return nil, nil
 }
+
 func (o *fakeRemoteOp) CancelTarget() error {
 	if o.canceled != nil {
 		close(o.canceled)
 	}
 	return nil
 }
+
 func (o *fakeRemoteOp) GetTarget() (*api.Operation, error) { return nil, nil }
+
 func (o *fakeRemoteOp) Wait() error {
 	if o.block != nil {
 		<-o.block
@@ -69,7 +87,6 @@ func (o *fakeRemoteOp) Wait() error {
 	return o.err
 }
 
-// fakeServer is a fake of the Incus API.
 type fakeServer struct {
 	instances map[string]*api.InstanceFull
 	profiles  []string
@@ -98,7 +115,7 @@ type fakeServer struct {
 	lastExecArgs *incusclient.InstanceExecArgs
 	// lastCreate is the most recent create request.
 	lastCreate api.InstancesPost
-	// lastImage and lastSource are the image and its source used to create.
+	// lastImage and lastSource are what the create was given to work from.
 	lastImage  api.Image
 	lastSource incusclient.ImageServer
 	// createOp is the operation CreateInstanceFromImage returns. nil means the
@@ -180,7 +197,7 @@ func (f *fakeServer) CreateInstanceFromImage(source incusclient.ImageServer, ima
 	f.lastCreate = req
 	f.lastImage = image
 	f.lastSource = source
-	if err := f.record("CreateInstanceFromImage"); err != nil {
+	if err := f.record("CreateInstance"); err != nil {
 		return nil, err
 	}
 	f.addInstance(req.Name, req.InstancePut)
@@ -188,7 +205,7 @@ func (f *fakeServer) CreateInstanceFromImage(source incusclient.ImageServer, ima
 	if f.createOp != nil {
 		return f.createOp, nil
 	}
-	return &fakeRemoteOp{err: f.opErr["CreateInstanceFromImage"]}, nil
+	return &fakeRemoteOp{err: f.opErr["CreateInstance"]}, nil
 }
 
 func (f *fakeServer) UpdateInstance(name string, put api.InstancePut, _ string) (incusclient.Operation, error) {
@@ -350,10 +367,27 @@ func (f *fakeServer) DeleteInstanceSnapshot(name, snapshot string) (incusclient.
 // fakeImages fakes resolving an image reference.
 type fakeImages struct {
 	err error
+	// aliasErr, when set, is what Alias returns.
+	aliasErr error
 	// ref is what it was asked to resolve.
 	ref string
 	// server is the source it returns.
 	server incusclient.ImageServer
+}
+
+// Alias splits a reference the way the real resolver does.
+func (f *fakeImages) Alias(ref string) (string, string, error) {
+	if f.aliasErr != nil {
+		return "", "", f.aliasErr
+	}
+	if f.err != nil {
+		return "", "", f.err
+	}
+	remote, name, found := strings.Cut(ref, ":")
+	if !found {
+		return "", ref, nil
+	}
+	return remote, name, nil
 }
 
 func (f *fakeImages) Resolve(_ context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
@@ -438,14 +472,6 @@ func TestAPICreateInstance(t *testing.T) {
 
 	if images.ref != "images:alpine/3.21" {
 		t.Errorf("image resolution = %q", images.ref)
-	}
-	// What was resolved goes to Incus as it is: a different fingerprint is a
-	// different image.
-	if f.lastImage.Fingerprint != "abc123" {
-		t.Errorf("image = %+v, want the resolved image passed", f.lastImage)
-	}
-	if f.lastSource != images.server {
-		t.Errorf("source = %v, want the resolved source passed", f.lastSource)
 	}
 	req := f.lastCreate
 	if req.Name != "dev-x" || string(req.Type) != "container" {
@@ -1026,7 +1052,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 		fn   func(*API) error
 	}{
 		"instance":   {"GetInstanceFull", func(a *API) error { _, err := a.Instance(ctx, "dev-x"); return err }},
-		"create":     {"CreateInstanceFromImage", func(a *API) error { return a.CreateInstance(ctx, InstanceSpec{Name: "dev-x"}) }},
+		"create":     {"CreateInstance", func(a *API) error { return a.CreateInstance(ctx, InstanceSpec{Name: "dev-x"}) }},
 		"start":      {"UpdateInstanceState", func(a *API) error { return a.StartInstance(ctx, "dev-x") }},
 		"delete":     {"DeleteInstance", func(a *API) error { return a.DeleteInstance(ctx, "dev-x") }},
 		"get":        {"GetInstanceFull", func(a *API) error { return a.ApplyConfig(ctx, "dev-x", map[string]string{"a": "1"}) }},
@@ -1048,7 +1074,7 @@ func TestAPIPropagatesErrors(t *testing.T) {
 			f.addInstance("dev-x", api.InstancePut{})
 			f.err[tt.call] = errAPI
 
-			if err := tt.fn(&API{Server: f, Images: &fakeImages{}}); !errors.Is(err, errAPI) {
+			if err := tt.fn(&API{Server: f, Images: &fakeImages{server: &fakeImageServer{}}}); !errors.Is(err, errAPI) {
 				t.Errorf("error = %v, want %v", err, errAPI)
 			}
 		})
@@ -1175,7 +1201,7 @@ func TestAPIPropagatesAsyncErrors(t *testing.T) {
 		call string
 		fn   func(*API) error
 	}{
-		"create":     {"CreateInstanceFromImage", func(a *API) error { return a.CreateInstance(context.Background(), InstanceSpec{Name: "dev-x"}) }},
+		"create":     {"CreateInstance", func(a *API) error { return a.CreateInstance(context.Background(), InstanceSpec{Name: "dev-x"}) }},
 		"delete":     {"DeleteInstance", func(a *API) error { return a.DeleteInstance(context.Background(), "dev-x") }},
 		"update":     {"UpdateInstance", func(a *API) error { return a.ApplyConfig(context.Background(), "dev-x", map[string]string{"a": "1"}) }},
 		"snapcreate": {"CreateInstanceSnapshot", func(a *API) error { return a.CreateSnapshot(context.Background(), "dev-x", "s") }},
@@ -1410,7 +1436,7 @@ func TestNotFoundDistinguishesTheScope(t *testing.T) {
 func TestCreateInstanceReportsALostRace(t *testing.T) {
 	f := newFakeServer()
 	f.err = map[string]error{
-		"CreateInstanceFromImage": errors.New(
+		"CreateInstance": errors.New(
 			"Failed instance creation: Failed creating instance record: " +
 				`Add instance info to the database: This "instances" entry already exists`),
 	}
@@ -1489,5 +1515,121 @@ func TestExecDoesNotWaitWhenItNeverStarted(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("Exec() took %v, want it not to wait for a signal it never sent", elapsed)
+	}
+}
+
+// Creation hands the library the alias and lets it decide the rest.
+//
+// The library already prefers the alias over the fingerprint when it has one
+// and the image is public; the original defect was never setting it, so it
+// always took the fingerprint branch -- which a simplestreams remote cannot
+// serve. Building the source by hand instead loses what the library does for
+// a private image (a secret), a remote with its own certificate, and an image
+// that is already on this daemon.
+func TestCreateInstancePassesTheAliasToTheLibrary(t *testing.T) {
+	f := newFakeServer()
+	a, images := newAPI(f)
+
+	err := a.CreateInstance(context.Background(),
+		InstanceSpec{Name: "dev-x", Image: "images:alpine/3.21"})
+	if err != nil {
+		t.Fatalf("CreateInstance() error = %v", err)
+	}
+
+	if images.ref != "images:alpine/3.21" {
+		t.Errorf("resolved %q, want the whole reference", images.ref)
+	}
+	if got := f.lastCreate.Source.Alias; got != "alpine/3.21" {
+		t.Errorf("Source.Alias = %q, want the image name", got)
+	}
+	// The library fills in the rest from the image and the server, so idev
+	// must not pre-empt it.
+	if got := f.lastCreate.Source.Fingerprint; got != "" {
+		t.Errorf("Source.Fingerprint = %q, want the library to decide", got)
+	}
+	if f.lastSource != images.server {
+		t.Errorf("source = %v, want the resolved image server passed through", f.lastSource)
+	}
+	if f.lastImage.Fingerprint != "abc123" {
+		t.Errorf("image = %+v, want the resolved image passed through", f.lastImage)
+	}
+}
+
+// A reference the resolver cannot split is reported before anything is made.
+func TestCreateInstanceReportsAnUnsplittableReference(t *testing.T) {
+	f := newFakeServer()
+	a := &API{Server: f, Images: &fakeImages{
+		server:   &fakeImageServer{},
+		aliasErr: errAPI,
+	}}
+
+	err := a.CreateInstance(context.Background(),
+		InstanceSpec{Name: "dev-x", Image: "images:alpine/3.21"})
+	if !errors.Is(err, errAPI) {
+		t.Errorf("error = %v, want %v", err, errAPI)
+	}
+	if slices.Contains(f.calls, "CreateInstance") {
+		t.Errorf("calls = %v, want no request sent", f.calls)
+	}
+}
+
+// Exec reports a missing instance with the same sentinel Instance uses, so a
+// caller does not have to read the daemon's wording to tell it apart.
+func TestExecReportsAMissingInstance(t *testing.T) {
+	f := newFakeServer()
+	f.err = map[string]error{
+		"ExecInstance": api.StatusErrorf(404, `Failed to fetch instance "dev-x": Instance not found`),
+	}
+	a, _ := newAPI(f)
+
+	_, err := a.Exec(context.Background(), "dev-x", []string{"true"}, ExecOptions{})
+	if !errors.Is(err, ErrInstanceNotFound) {
+		t.Errorf("error = %v, want ErrInstanceNotFound", err)
+	}
+}
+
+// A 404 means four different things, and idev acts differently on each. The
+// contract pins this for the fake; this is the same distinction on the side
+// that actually talks to Incus.
+func TestVolumeExistsDistinguishesTheScope(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantExists bool
+		wantErr    error
+	}{
+		{"the volume is not there", api.StatusErrorf(404, "Storage pool volume not found"), false, nil},
+		{"the pool is not there", api.StatusErrorf(404, "Storage pool not found"), false, ErrPoolNotFound},
+		{"the project is not there", api.StatusErrorf(404, "Project not found"), false, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeServer()
+			f.err = map[string]error{"GetStoragePoolVolume": tt.err}
+			a, _ := newAPI(f)
+
+			exists, err := a.VolumeExists(context.Background(), "default", "v")
+			if exists != tt.wantExists {
+				t.Errorf("VolumeExists() = %v, want %v", exists, tt.wantExists)
+			}
+			switch {
+			case tt.wantErr != nil:
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("error = %v, want %v", err, tt.wantErr)
+				}
+			case tt.name == "the project is not there":
+				// Not "the volume is absent": a project idev cannot see says
+				// nothing about what is in it, and treating it as absent
+				// drops the record that names it.
+				if err == nil {
+					t.Error("error = nil, want the missing project reported")
+				}
+			default:
+				if err != nil {
+					t.Errorf("error = %v, want none", err)
+				}
+			}
+		})
 	}
 }

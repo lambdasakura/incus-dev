@@ -68,12 +68,32 @@ func (s *fakeInstanceServer) UseProject(name string) incusclient.InstanceServer 
 	return &fakeInstanceServer{project: name}
 }
 
-// fakeImageServer handles nothing but resolving aliases and images.
+// fakeImageServer handles nothing but resolving aliases and images, and
+// saying where it is -- which creation needs, since the daemon is told to
+// pull from there by alias.
 type fakeImageServer struct {
 	incusclient.ImageServer
 	aliases map[string]string
 	images  map[string]*api.Image
 	err     error
+	// info is what GetConnectionInfo returns. The zero value names a
+	// simplestreams remote, which is what every example uses.
+	info *incusclient.ConnectionInfo
+	// infoErr, when set, is what GetConnectionInfo returns instead.
+	infoErr error
+}
+
+func (s *fakeImageServer) GetConnectionInfo() (*incusclient.ConnectionInfo, error) {
+	if s.infoErr != nil {
+		return nil, s.infoErr
+	}
+	if s.info != nil {
+		return s.info, nil
+	}
+	return &incusclient.ConnectionInfo{
+		Addresses: []string{"https://images.example.test"},
+		Protocol:  "simplestreams",
+	}, nil
 }
 
 // GetImageAliasType returns a different image per instance type, as the real
@@ -328,4 +348,50 @@ func TestResolveImageIsInterruptible(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Resolve() kept waiting after the run was interrupted")
 	}
+}
+
+// Alias splits a reference without contacting anything, since creation needs
+// the image name to hand to the library even when nothing is reachable.
+func TestConfigImageResolverAlias(t *testing.T) {
+	r := &configImageResolver{config: newFakeCLIConfig()}
+
+	tests := []struct {
+		ref            string
+		remote, name   string
+		wantErrMessage string
+	}{
+		{ref: "images:alpine/3.21", remote: "images", name: "alpine/3.21"},
+		{ref: "alpine/3.21", remote: "", name: "alpine/3.21"},
+		{ref: "images:", wantErrMessage: "has no image name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			remote, name, err := r.Alias(tt.ref)
+			if tt.wantErrMessage != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrMessage) {
+					t.Fatalf("Alias(%q) error = %v, want %q", tt.ref, err, tt.wantErrMessage)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Alias(%q) error = %v", tt.ref, err)
+			}
+			if name != tt.name {
+				t.Errorf("name = %q, want %q", name, tt.name)
+			}
+			if remote != tt.remote {
+				t.Errorf("remote = %q, want %q", remote, tt.remote)
+			}
+		})
+	}
+
+	t.Run("a reference the config cannot parse", func(t *testing.T) {
+		bad := newFakeCLIConfig()
+		bad.parseErr = errors.New("bad remote")
+
+		if _, _, err := (&configImageResolver{config: bad}).Alias("x:y"); err == nil {
+			t.Error("Alias() = nil error, want the parse failure reported")
+		}
+	})
 }

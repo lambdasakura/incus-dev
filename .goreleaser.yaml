@@ -44,7 +44,13 @@ archives:
       # Whole directories are included recursively; a `**/*` glob would
       # skip the files sitting directly in them.
       - docs/manual
+      - docs/troubleshooting.md
+      - docs/troubleshooting.ja.md
       - examples
+      # docs/manual/07-ai-agents.md tells the reader to copy these, and both
+      # READMEs link them. Shipping the instruction without the files sends
+      # the user to a directory that is not there.
+      - skills
 
 checksum:
   name_template: checksums.txt
@@ -73,6 +79,10 @@ changelog:
 
 release:
   prerelease: auto
+  # GoReleaser creates the release before uploading. Without this, a failed
+  # upload leaves a published release whose assets are missing, and re-pushing
+  # the tag fails with a 422 on the assets that did land.
+  replace_existing_artifacts: true
   footer: |
     ## Installation
 

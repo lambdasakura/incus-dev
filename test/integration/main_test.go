@@ -92,16 +92,20 @@ func newFixture(t *testing.T, devYAML string) *fixture {
 	project := fmt.Sprintf("idev-it-%d", time.Now().UnixNano()%1e9)
 	instance := "dev-" + project
 
-	body := strings.ReplaceAll(devYAML, "{{PROJECT}}", project)
-	body = strings.ReplaceAll(body, "{{IMAGE}}", testImage)
-	body = strings.ReplaceAll(body, "{{ANSIBLE_IMAGE}}", ansibleImage)
-
-	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), body)
+	f := &fixture{t: t, root: root, project: project, instance: instance}
+	writeFile(t, filepath.Join(root, ".incus-dev", "dev.yml"), render(f, devYAML))
 	writeFile(t, filepath.Join(root, "src", "marker.txt"), "hello from host\n")
 
-	f := &fixture{t: t, root: root, project: project, instance: instance}
 	t.Cleanup(f.cleanup)
 	return f
+}
+
+// render substitutes the placeholders in a dev.yml body for this fixture, so
+// a test can rewrite the file mid-run the way a user edits it.
+func render(f *fixture, devYAML string) string {
+	body := strings.ReplaceAll(devYAML, "{{PROJECT}}", f.project)
+	body = strings.ReplaceAll(body, "{{IMAGE}}", testImage)
+	return strings.ReplaceAll(body, "{{ANSIBLE_IMAGE}}", ansibleImage)
 }
 
 func (f *fixture) cleanup() {

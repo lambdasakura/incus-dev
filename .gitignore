@@ -2,3 +2,6 @@
 /dist/
 *.test
 cover.out
+cover.out.func
+vuln.json
+vuln.json.called

@@ -96,22 +96,20 @@ type control struct {
 // run (spec 05-incus.md 5.7.3).
 func (c control) forwardInterrupt(send func(any) error) {
 	_ = send(signalMessage(syscall.SIGTERM))
-	c.finish()
 }
 
 // finish releases whoever is waiting for the signal to go out.
 //
-// Every exit from handle goes through it: retiring on a failed send without
-// closing sent leaves the caller waiting out the whole grace period for a
-// signal nothing will ever send.
+// handle's deferred call is the only closer, so there is one and it cannot
+// run twice -- an idempotent close would need a lock, and a
+// receive-then-close is not atomic: two callers can both find the channel
+// open, and the second close panics.
+//
+// It has to cover every exit, not just the interrupting ones: retiring on a
+// failed send without closing sent leaves the caller waiting out the whole
+// grace period for a signal nothing will send.
 func (c control) finish() {
-	if c.sent == nil {
-		return
-	}
-	select {
-	case <-c.sent:
-		// Already closed by forwardInterrupt.
-	default:
+	if c.sent != nil {
 		close(c.sent)
 	}
 }

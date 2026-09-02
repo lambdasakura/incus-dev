@@ -462,3 +462,78 @@ func TestRestartOwedIsEmptyForAStoppedInstance(t *testing.T) {
 		t.Errorf("restartOwed() = %v, %v, %v; want nothing owed", fresh, all, owed)
 	}
 }
+
+// raw.idmap changed spelling, not meaning, so sameIDMapping decides whether a
+// restart is owed. Getting it wrong costs in both directions: too loose and an
+// owed restart is skipped while up reports ready, too strict and a spurious
+// one kills whatever the user is running inside the container.
+func TestSameIDMapping(t *testing.T) {
+	tests := []struct {
+		name       string
+		want, have string
+		same       bool
+	}{
+		{"the same text", "both 1000 0", "both 1000 0", true},
+		{"both expands to uid and gid", "uid 1000 0\ngid 1000 0", "both 1000 0", true},
+		{"order does not matter", "gid 1000 0\nuid 1000 0", "both 1000 0", true},
+		// A value written by anything but idev may space its fields
+		// differently; that is not a change worth a restart.
+		{"whitespace inside a line does not matter", "uid  1000   0", "uid 1000 0", true},
+		{"a trailing newline does not matter", "both 1000 0\n", "both 1000 0", true},
+		// A line idev does not write is compared trimmed, so indentation in
+		// a hand-edited value is not a difference.
+		{"space around a line idev did not write", "  keep me  ", "keep me", true},
+		{"a different id is a different mapping", "both 1001 0", "both 1000 0", false},
+		// A "both" line with anything after it is not idev's shape, so it is
+		// compared whole rather than expanded from its first three fields.
+		{"a longer both line is not truncated", "both 1000 0 junk", "both 1000 0", false},
+		{"an extra line is a difference", "uid 1000 0\ngid 1000 0", "uid 1000 0", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sameIDMapping(idmapConfigKey, tt.want, tt.have); got != tt.same {
+				t.Errorf("sameIDMapping(%q, %q) = %v, want %v", tt.want, tt.have, got, tt.same)
+			}
+		})
+	}
+
+	// Only raw.idmap is normalised; another key is compared literally.
+	if sameIDMapping("security.nesting", "true ", "true") {
+		t.Error("sameIDMapping normalised a key that is not raw.idmap")
+	}
+}
+
+// The two wordings are the only thing telling a user whether this run caused
+// the pending restart or whether they are looking at one left over, so which
+// one appears is part of the behaviour.
+func TestRestartWarningWording(t *testing.T) {
+	started := time.Now().Add(-time.Hour)
+	before := map[string]string{
+		managedRestartKey: recordRestart(started,
+			map[string]bootedValue{"security.nesting": {value: "false", known: true}}),
+		"security.nesting": "true",
+	}
+	desired := map[string]string{"security.nesting": "true"}
+
+	// Nothing changed this run: it is carried forward from an earlier one.
+	fresh, all, _ := restartOwed(true, before, desired, nil, started)
+	if len(fresh) != 0 {
+		t.Errorf("fresh = %v, want none: this run changed nothing", fresh)
+	}
+	if got := restartWarning(fresh, all); !strings.Contains(got, "still waiting on a restart") {
+		t.Errorf("warning = %q, want the carried-forward wording", got)
+	}
+
+	// And a run that changes it again says so instead: the record still
+	// carries the booted value, but the stored value is not what dev.yml now
+	// asks for.
+	before["security.nesting"] = "false"
+	fresh, all, _ = restartOwed(true, before, desired, nil, started)
+	if len(fresh) == 0 {
+		t.Fatal("fresh = none, want the change reported")
+	}
+	if got := restartWarning(fresh, all); !strings.Contains(got, "changed but the instance is running") {
+		t.Errorf("warning = %q, want the changed wording", got)
+	}
+}

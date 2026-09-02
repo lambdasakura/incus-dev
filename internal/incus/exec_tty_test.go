@@ -554,3 +554,35 @@ func TestControlHandlerClosesSentWhenItRetires(t *testing.T) {
 		t.Error("sent was left open, so the caller waits out the grace period for nothing")
 	}
 }
+
+// handle closes sent exactly once, on every path out.
+//
+// Closing a closed channel panics and takes the CLI with it, so the design is
+// one closer rather than a close anything can repeat.
+func TestHandleClosesSentExactlyOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// The interrupting path, which also sends the signal.
+	c := control{ctx: ctx, done: make(chan struct{}), sent: make(chan struct{})}
+	c.handle(func(any) error { return nil })
+	select {
+	case <-c.sent:
+	default:
+		t.Fatal("sent was not closed on the interrupting path")
+	}
+
+	// And the path that retires on a failed send.
+	resized := make(chan struct{}, 1)
+	resized <- struct{}{}
+	c = control{
+		ctx: context.Background(), done: make(chan struct{}), sent: make(chan struct{}),
+		resized: resized, console: newFakeConsole(),
+	}
+	c.handle(func(any) error { return errors.New("socket gone") })
+	select {
+	case <-c.sent:
+	default:
+		t.Fatal("sent was not closed when the handler retired")
+	}
+}

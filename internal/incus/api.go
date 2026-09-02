@@ -41,6 +41,8 @@ type server interface {
 // imageResolver resolves an image reference such as images:ubuntu/24.04.
 type imageResolver interface {
 	Resolve(ctx context.Context, ref string) (incusclient.ImageServer, *api.Image, error)
+	// Alias splits a reference into its remote and image name.
+	Alias(ref string) (remote, name string, err error)
 }
 
 // API is the Client implementation that calls the Incus HTTP API.
@@ -190,6 +192,10 @@ func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	if err != nil {
 		return err
 	}
+	_, alias, err := a.Images.Alias(spec.Image)
+	if err != nil {
+		return err
+	}
 
 	req := api.InstancesPost{
 		Name: spec.Name,
@@ -199,6 +205,16 @@ func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 			Devices:  toAPIDevices(spec.Devices),
 			Profiles: spec.Profiles,
 		},
+		// The alias, so the library prefers it over the fingerprint this
+		// package resolved. A simplestreams remote cannot be queried by
+		// fingerprint, so a daemon asked for one answers only from its local
+		// cache -- which made every run fail once the upstream image was
+		// rebuilt, and a first run on a clean host fail outright.
+		//
+		// Only the alias: the library fills in the mode, the protocol, the
+		// remote's certificate, a secret for a private image, and the
+		// same-server case where nothing is pulled at all.
+		Source: api.InstanceSource{Alias: alias},
 	}
 	if spec.NoProfiles {
 		req.Profiles = []string{}
@@ -210,8 +226,9 @@ func (a *API) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	if err != nil {
 		return createError(spec.Name, err)
 	}
-	// RemoteOperation takes no context, and fetching an image can take
-	// minutes, so wait for it ourselves and stay interruptible.
+	// The operation takes no context, and the daemon fetching an image can
+	// take minutes, so wait for it here and cancel the transfer if the run is
+	// interrupted.
 	if err := waitOp(ctx, op); err != nil {
 		return createError(spec.Name, err)
 	}
@@ -635,6 +652,11 @@ func (a *API) Exec(ctx context.Context, name string, argv []string, opt ExecOpti
 
 	op, err := a.Server.ExecInstance(name, req, args)
 	if err != nil {
+		// The same sentinel Instance uses. A caller that has to tell "not
+		// there" from "would not run" should not have to read the text.
+		if api.StatusErrorCheck(err, 404) && !missingScope(err) {
+			return 0, fmt.Errorf("exec in %s: %w", name, ErrInstanceNotFound)
+		}
 		return 0, fmt.Errorf("exec in %s: %w", name, err)
 	}
 	// From here the control socket exists, so an interruption has somewhere

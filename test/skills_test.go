@@ -157,9 +157,12 @@ func TestSkillHasFrontmatter(t *testing.T) {
 }
 
 // skillName pulls the value of name out of the frontmatter, or the empty string.
-func skillName(front string) string {
+func skillName(front string) string { return skillField(front, "name:") }
+
+// skillField pulls a frontmatter value out, or the empty string.
+func skillField(front, key string) string {
 	for _, line := range strings.Split(front, "\n") {
-		if rest, ok := strings.CutPrefix(line, "name:"); ok {
+		if rest, ok := strings.CutPrefix(line, key); ok {
 			return strings.TrimSpace(rest)
 		}
 	}
@@ -242,4 +245,99 @@ func TestManualPagesLinkToTheOtherLanguage(t *testing.T) {
 			}
 		}
 	}
+}
+
+// devSkillsDir holds the skills for working *on* this repository, as opposed
+// to skills/, which is shipped to users of idev.
+const devSkillsDir = "../.claude/skills"
+
+// The developer skills are read by whoever picks up the next round of work, so
+// a broken frontmatter or a dead link costs exactly when it is least noticed.
+func TestDeveloperSkillsAreWellFormed(t *testing.T) {
+	entries, err := os.ReadDir(devSkillsDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", devSkillsDir, err)
+	}
+
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		t.Run(e.Name(), func(t *testing.T) {
+			path := filepath.Join(devSkillsDir, e.Name(), "SKILL.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+
+			front, _, ok := strings.Cut(strings.TrimPrefix(string(body), "---\n"), "\n---")
+			if !ok {
+				t.Fatal("SKILL.md does not begin with frontmatter")
+			}
+
+			name := skillName(front)
+			if name != e.Name() {
+				t.Errorf("name = %q, want the directory name %q", name, e.Name())
+			}
+			if seen[name] {
+				t.Errorf("two skills are named %q", name)
+			}
+			seen[name] = true
+
+			// The description is what decides whether the skill is reached
+			// for at all, so an empty one makes the skill invisible.
+			if d := skillField(front, "description:"); len(d) < 40 {
+				t.Errorf("description = %q, want it to say when to use the skill", d)
+			}
+
+			// Links into the repository have to resolve, since these are read
+			// while working in it.
+			for _, target := range markdownLinks(string(body)) {
+				if strings.HasPrefix(target, "http") || strings.HasPrefix(target, "#") {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join("..", target)); err != nil {
+					t.Errorf("link %q does not resolve from the repository root", target)
+				}
+			}
+		})
+	}
+
+	if len(seen) == 0 {
+		t.Errorf("%s holds no skill at all", devSkillsDir)
+	}
+}
+
+// CLAUDE.md points at the developer skills; the pointers have to resolve.
+func TestClaudeMdLinksToTheDeveloperSkills(t *testing.T) {
+	body, err := os.ReadFile("../CLAUDE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var linked int
+	for _, target := range markdownLinks(string(body)) {
+		if !strings.HasPrefix(target, ".claude/skills/") {
+			continue
+		}
+		linked++
+		if _, err := os.Stat(filepath.Join("..", target)); err != nil {
+			t.Errorf("CLAUDE.md links %q, which does not resolve", target)
+		}
+	}
+	if linked == 0 {
+		t.Error("CLAUDE.md links no developer skill, so nothing will find them")
+	}
+}
+
+// markdownLinks returns the targets of the [text](target) links in body.
+var markdownLink = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+
+func markdownLinks(body string) []string {
+	var out []string
+	for _, m := range markdownLink.FindAllStringSubmatch(body, -1) {
+		out = append(out, m[1])
+	}
+	return out
 }

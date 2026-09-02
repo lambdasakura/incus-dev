@@ -125,8 +125,14 @@ provision:
 	if steps[0].Run == nil {
 		t.Fatal("want the default bootstrap to be a run step")
 	}
-	if !strings.Contains(steps[0].Run.Script, "python3") {
-		t.Errorf("script = %q, want it to install python3", steps[0].Run.Script)
+	// The exact script, not a substring: this is the one piece of
+	// environment-specific content REQ-007 allows, and "python3" appears in
+	// the guard as well as the install, so a substring stays true even if the
+	// install changes or the guard is dropped -- which would run apt-get on
+	// every provisioning run.
+	const want = `command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3)`
+	if steps[0].Run.Script != want {
+		t.Errorf("script =\n%s\nwant\n%s", steps[0].Run.Script, want)
 	}
 }
 

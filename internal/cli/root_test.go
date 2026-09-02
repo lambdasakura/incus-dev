@@ -794,7 +794,9 @@ func TestExecAndSnapshotCommands(t *testing.T) {
 		want  string // the expected prefix of the Incus operation
 	}{
 		{"exec", []string{"exec", "--", "make", "test"}, "", "exec dev-example-project make test"},
-		{"snapshot create", []string{"snapshot", "create", "s1"}, "", "snapshot create dev-example-project s1"},
+		// Not s1: the fixture already has one by that name, and Incus refuses
+		// a duplicate.
+		{"snapshot create", []string{"snapshot", "create", "s2"}, "", "snapshot create dev-example-project s2"},
 		{"snapshot create without a name", []string{"snapshot", "create"}, "", "snapshot create dev-example-project"},
 		{"snapshot list", []string{"snapshot", "list"}, "", "snapshot list dev-example-project"},
 		{"snapshot restore", []string{"snapshot", "restore", "s1", "--force"}, "", "snapshot restore dev-example-project s1"},
