@@ -252,3 +252,32 @@ func TestStopInstanceMissing(t *testing.T) {
 		t.Errorf("error = %v, want ErrInstanceNotFound", err)
 	}
 }
+
+// hangingClient never finishes an exec of its own accord.
+type hangingClient struct{ Client }
+
+func (hangingClient) Exec(ctx context.Context, _ string, _ []string, _ ExecOptions) (int, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// The timeout bounds the wait even when a single attempt never comes back.
+//
+// The deadline was only checked between attempts, and one exec has no bound of
+// its own: a wedged init or a half-open websocket left idev waiting with
+// nothing said, and only Ctrl-C got out.
+func TestWaitExecIsBoundedByTheTimeout(t *testing.T) {
+	done := make(chan error, 1)
+	go func() {
+		done <- waitExec(context.Background(), hangingClient{}, "dev-x", fastWait())
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "did not become ready") {
+			t.Errorf("error = %v, want the timeout reported", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitExec() ignored its own timeout")
+	}
+}

@@ -363,3 +363,26 @@ func TestGitBranch(t *testing.T) {
 		})
 	}
 }
+
+// Switching to a user-managed idmap clears the shift idev had set.
+//
+// ApplyDevices merges into the existing device, so a key left out of the
+// declaration is never cleared. Leaving shift=true beside a raw.idmap the user
+// set maps the workspace twice, and no edit to dev.yml can undo it.
+func TestDesiredDevicesClearsShiftWhenTheUserTakesOver(t *testing.T) {
+	cfg := mustParse(t, planBase+"  config:\n    raw.idmap: \"both 1000 0\"\n")
+
+	plan, err := resolveIDMap(cfg, 1000, 1000, func(int, int) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Managed {
+		t.Fatal("resolveIDMap() says idev manages the mapping, want the user's own to win")
+	}
+
+	got := desiredDevices(cfg, plan, "dev-example-project")
+
+	if shift, ok := got["workspace"]["shift"]; !ok || shift != "false" {
+		t.Errorf("workspace shift = %q (set: %v), want it explicitly false", shift, ok)
+	}
+}

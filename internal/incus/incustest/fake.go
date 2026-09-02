@@ -47,8 +47,9 @@ var _ incus.Client = (*Fake)(nil)
 // New returns a Fake that has the default profile.
 func New() *Fake {
 	return &Fake{
-		Instances: map[string]*incus.Instance{},
-		Profiles:  []string{"default"},
+		Instances:           map[string]*incus.Instance{},
+		SnapshotsByInstance: map[string][]incus.Snapshot{},
+		Profiles:            []string{"default"},
 	}
 }
 
@@ -109,6 +110,9 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 		sortedPairs(spec.Config), sortedDeviceNames(spec.Devices)); err != nil {
 		return err
 	}
+	if _, exists := f.Instances[spec.Name]; exists {
+		return fmt.Errorf("instance %s already exists", spec.Name)
+	}
 	config := map[string]string{}
 	for k, v := range spec.Config {
 		config[k] = v
@@ -117,10 +121,14 @@ func (f *Fake) CreateInstance(_ context.Context, spec incus.InstanceSpec) error 
 	for name, dev := range spec.Devices {
 		devices[name] = dev
 	}
+	profiles := spec.Profiles
+	if spec.NoProfiles {
+		profiles = []string{}
+	}
 	f.Instances[spec.Name] = &incus.Instance{
 		Name:     spec.Name,
 		Status:   "Stopped",
-		Profiles: spec.Profiles,
+		Profiles: profiles,
 		Config:   config,
 		Devices:  devices,
 	}
@@ -132,9 +140,11 @@ func (f *Fake) StartInstance(_ context.Context, name string) error {
 	if err := f.record("start %s", name); err != nil {
 		return err
 	}
-	if inst, ok := f.Instances[name]; ok {
-		inst.Status = "Running"
+	inst, ok := f.Instances[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
+	inst.Status = "Running"
 	return nil
 }
 
@@ -143,9 +153,11 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 	if err := f.record("stop %s", name); err != nil {
 		return err
 	}
-	if inst, ok := f.Instances[name]; ok {
-		inst.Status = "Stopped"
+	inst, ok := f.Instances[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
+	inst.Status = "Stopped"
 	return nil
 }
 
@@ -153,6 +165,9 @@ func (f *Fake) StopInstance(_ context.Context, name string) error {
 func (f *Fake) DeleteInstance(_ context.Context, name string) error {
 	if err := f.record("delete %s", name); err != nil {
 		return err
+	}
+	if _, ok := f.Instances[name]; !ok {
+		return fmt.Errorf("%w: %s", incus.ErrInstanceNotFound, name)
 	}
 	delete(f.Instances, name)
 	return nil
@@ -286,9 +301,6 @@ func (f *Fake) CreateSnapshot(_ context.Context, instance, snapshot string) erro
 	if err := f.record("snapshot create %s %s", instance, snapshot); err != nil {
 		return err
 	}
-	if f.SnapshotsByInstance == nil {
-		f.SnapshotsByInstance = map[string][]incus.Snapshot{}
-	}
 	f.SnapshotsByInstance[instance] = append(f.SnapshotsByInstance[instance],
 		incus.Snapshot{Name: snapshot})
 	return nil
@@ -312,16 +324,18 @@ func (f *Fake) DeleteSnapshot(_ context.Context, instance, snapshot string) erro
 	if err := f.record("snapshot delete %s %s", instance, snapshot); err != nil {
 		return err
 	}
-	existing, ok := f.SnapshotsByInstance[instance]
-	if !ok {
-		return nil
-	}
+	existing := f.SnapshotsByInstance[instance]
 
-	kept := existing[:0]
+	// A fresh slice: the one Snapshots handed out earlier must not be
+	// rewritten underneath its caller, as the real API never does.
+	kept := make([]incus.Snapshot, 0, len(existing))
 	for _, s := range existing {
 		if s.Name != snapshot {
 			kept = append(kept, s)
 		}
+	}
+	if len(kept) == len(existing) {
+		return fmt.Errorf("snapshot %s of %s not found", snapshot, instance)
 	}
 	f.SnapshotsByInstance[instance] = kept
 

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Command is an external command to run.
@@ -151,9 +152,19 @@ func New() *Exec { return &Exec{} }
 // NewWithLogger returns a Runner that logs what it runs.
 func NewWithLogger(l *slog.Logger) *Exec { return &Exec{Logger: l} }
 
+// waitDelay bounds how long an interrupted command is given to finish
+// streaming its output.
+//
+// Killing the command does not kill what it started, and a surviving
+// grandchild holds the output pipe open. Without a bound, Run would wait for
+// it — leaving the ansible step's temporary files, secrets included, on disk
+// for as long as that lasted.
+const waitDelay = 2 * time.Second
+
 // Run executes the command.
 func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
+	cmd.WaitDelay = waitDelay
 	cmd.Dir = c.Dir
 	if len(c.Env) > 0 {
 		cmd.Env = append(os.Environ(), c.Env...)
@@ -186,6 +197,16 @@ func (e *Exec) Run(ctx context.Context, c Command) (Result, error) {
 	}
 	if err == nil {
 		return res, nil
+	}
+
+	// The command was killed because the run was interrupted, so it did not
+	// fail on its own account. Reported as a failure, the user is told their
+	// playbook broke when they are the one who stopped it.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if c.Label == "" {
+			return res, ctxErr
+		}
+		return res, fmt.Errorf("%s: %w", c.Label, ctxErr)
 	}
 
 	var exitErr *exec.ExitError

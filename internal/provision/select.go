@@ -66,7 +66,21 @@ func Select(steps []config.Step, sel Selection) ([]int, error) {
 }
 
 // match returns the positions of the steps matching a name or a number.
+//
+// A name wins over a position. Reading "2" as a position first would make a
+// step actually named "2" unreachable, and asking for it would silently run
+// whatever sits second instead.
 func match(steps []config.Step, ref string) ([]int, error) {
+	var out []int
+	for i, s := range steps {
+		if s.DisplayName(i+1) == ref {
+			out = append(out, i)
+		}
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+
 	if n, err := strconv.Atoi(ref); err == nil {
 		if n < 1 || n > len(steps) {
 			return nil, fmt.Errorf("step %d is out of range (1-%d)%s", n, len(steps), available(steps))
@@ -74,16 +88,7 @@ func match(steps []config.Step, ref string) ([]int, error) {
 		return []int{n - 1}, nil
 	}
 
-	var out []int
-	for i, s := range steps {
-		if s.DisplayName(i+1) == ref {
-			out = append(out, i)
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no step named %q%s", ref, available(steps))
-	}
-	return out, nil
+	return nil, fmt.Errorf("no step named %q%s", ref, available(steps))
 }
 
 // available lists the steps that can be chosen.

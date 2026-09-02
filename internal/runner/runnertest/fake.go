@@ -54,7 +54,10 @@ func (f *Fake) Run(_ context.Context, c runner.Command) (runner.Result, error) {
 	for prefix, out := range f.Stdout {
 		if strings.HasPrefix(cmd, prefix) {
 			if c.Stdout != nil {
+				// Streamed, so nothing is captured — as with the real runner,
+				// where os/exec writes straight to the given writer.
 				_, _ = fmt.Fprint(c.Stdout, out)
+				return runner.Result{}, nil
 			}
 			return runner.Result{Stdout: []byte(out)}, nil
 		}

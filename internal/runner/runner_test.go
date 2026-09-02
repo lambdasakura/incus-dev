@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -164,6 +165,15 @@ func TestRunRespectsContextCancellation(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("elapsed = %v, want the context to have interrupted it", elapsed)
+	}
+	// An interruption is not a failure of the command. Reported as one, the
+	// user is told their playbook failed when they are the one who stopped it.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want the interruption reported as such", err)
+	}
+	var exitErr *runner.ExitError
+	if errors.As(err, &exitErr) {
+		t.Errorf("error = %v, want it not to look like a command failure", err)
 	}
 }
 
@@ -359,5 +369,76 @@ func TestCollapseMultilineArgs(t *testing.T) {
 				t.Errorf("String() = %q, want it to contain %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// An interrupted command does not wait for a process that outlived it.
+//
+// The caller's writers are ordinary io.Writers, so os/exec streams through a
+// pipe and Wait blocks until every process holding the write end is gone. A
+// grandchild kept running would hold the run open, and the ansible step's
+// temporary files — the secrets among them — stay on disk for as long as that
+// lasts.
+func TestRunReturnsOnCancellationDespiteALingeringChild(t *testing.T) {
+	r := runner.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started := make(chan struct{})
+	var out lockedWriter
+	out.onWrite = func() { close(started) }
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Run(ctx, runner.Command{
+			Name:   "sh",
+			Args:   []string{"-c", "sleep 30 & echo started; wait"},
+			Stdout: &out,
+		})
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the command never started")
+	}
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run() waited for the process that outlived the command")
+	}
+}
+
+// lockedWriter is a writer that reports the first write.
+type lockedWriter struct {
+	mu      sync.Mutex
+	once    sync.Once
+	onWrite func()
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.once.Do(w.onWrite)
+	return len(p), nil
+}
+
+// The operation's name is kept on an interruption, as it is on a failure.
+func TestRunLabelsAnInterruption(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := runner.New().Run(ctx, runner.Command{
+		Label: "provision step 2/3", Name: "sleep", Args: []string{"10"},
+	})
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want the interruption reported", err)
+	}
+	if !strings.Contains(err.Error(), "provision step 2/3") {
+		t.Errorf("error = %v, want it to name the step", err)
 	}
 }

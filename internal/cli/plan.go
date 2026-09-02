@@ -168,14 +168,15 @@ func volumeName(instance, key string) string {
 //
 // Extra mounts get the same treatment as the workspace; without that, a host
 // using the shift strategy ends up able to write to the workspace but not to
-// anything else. It is always set explicitly, so switching strategies leaves
-// nothing stale behind.
+// anything else.
+//
+// It is set explicitly even when the user manages the mapping themselves,
+// because ApplyDevices merges: a key left out is never cleared, so a shift
+// idev had set would survive beside the user's own raw.idmap and map the
+// workspace twice.
 //
 // A shift the project set explicitly wins.
 func applyShift(dev incus.Device, plan idmapPlan) {
-	if !plan.Managed {
-		return
-	}
 	if _, explicit := dev["shift"]; explicit {
 		return
 	}

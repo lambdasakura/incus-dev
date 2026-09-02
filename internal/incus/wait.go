@@ -35,28 +35,41 @@ func waitReady(ctx context.Context, c Client, name string, opt WaitOptions) erro
 
 // waitExec waits until commands can run inside the container.
 func waitExec(ctx context.Context, c Client, name string, opt WaitOptions) error {
-	deadline := time.Now().Add(opt.Timeout)
+	// One exec has no bound of its own: a wedged init or a half-open websocket
+	// would never come back. Bound the attempts, not just the gaps between
+	// them.
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, opt.Timeout)
+	defer cancel()
+
 	for {
 		code, err := c.Exec(ctx, name, []string{"true"}, ExecOptions{})
 		if err == nil && code == 0 {
 			return nil
 		}
 
-		if time.Now().After(deadline) {
-			// Say why the last attempt failed. Without it there is nothing to go
-			// on beyond "it does not start", and no way to act on that.
-			if err != nil {
-				return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, err)
-			}
-			return fmt.Errorf("instance %s did not become ready within %s (last exit code %d)",
-				name, opt.Timeout, code)
-		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if parent.Err() != nil {
+				// Interrupted rather than timed out.
+				return parent.Err()
+			}
+			return notReadyError(name, opt.Timeout, code, err)
 		case <-time.After(opt.Interval):
 		}
 	}
+}
+
+// notReadyError says why the last attempt failed.
+//
+// Without it there is nothing to go on beyond "it does not start", and no way
+// to act on that.
+func notReadyError(name string, timeout time.Duration, code int, err error) error {
+	if err != nil {
+		return fmt.Errorf("instance %s did not become ready within %s: %w", name, timeout, err)
+	}
+	return fmt.Errorf("instance %s did not become ready within %s (last exit code %d)",
+		name, timeout, code)
 }
 
 // waitNetwork waits until traffic can reach the outside.

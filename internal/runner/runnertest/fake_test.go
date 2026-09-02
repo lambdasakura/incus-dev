@@ -72,7 +72,9 @@ func TestFakeStdoutAndError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(res.Stdout) != "output" || buf.String() != "output" {
+	// Streamed to the writer, so Result.Stdout stays empty, as with the real
+	// runner.
+	if len(res.Stdout) != 0 || buf.String() != "output" {
 		t.Errorf("Stdout = %q, writer = %q", res.Stdout, buf.String())
 	}
 
@@ -100,5 +102,39 @@ func TestFakeHandlerTakesPrecedence(t *testing.T) {
 	}
 	if string(res.Stdout) != "from handler" {
 		t.Errorf("Stdout = %q", res.Stdout)
+	}
+}
+
+// Result.Stdout is empty when the caller streamed the output, as it is with
+// the real runner: os/exec writes to the given writer and nothing is captured.
+//
+// A fake that fills in both hides code that streams output and then reads
+// Result.Stdout, which returns nothing in production.
+func TestFakeStdoutMatchesTheRealRunner(t *testing.T) {
+	f := &runnertest.Fake{Stdout: map[string]string{"git": "main\n"}}
+
+	var streamed bytes.Buffer
+	res, err := f.Run(context.Background(), runner.Command{
+		Name:   "git",
+		Args:   []string{"branch", "--show-current"},
+		Stdout: &streamed,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if streamed.String() != "main\n" {
+		t.Errorf("streamed = %q, want it written to the writer", streamed.String())
+	}
+	if len(res.Stdout) != 0 {
+		t.Errorf("Result.Stdout = %q, want it empty when the caller streams", res.Stdout)
+	}
+
+	// Without a writer it is captured, again as the real runner does.
+	res, err = f.Run(context.Background(), runner.Command{Name: "git"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if string(res.Stdout) != "main\n" {
+		t.Errorf("Result.Stdout = %q, want the output captured", res.Stdout)
 	}
 }

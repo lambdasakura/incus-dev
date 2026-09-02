@@ -208,6 +208,7 @@ func TestFakeErrorInjection(t *testing.T) {
 
 func TestFakeCalled(t *testing.T) {
 	f := incustest.New()
+	f.AddInstance(&incus.Instance{Name: "dev-x", Status: "Stopped"})
 
 	if f.Called("start") {
 		t.Error("Called() is true though nothing ran")
@@ -244,10 +245,90 @@ func TestFakeHook(t *testing.T) {
 		return nil
 	}
 
+	f.AddInstance(&incus.Instance{Name: "dev-x", Status: "Running"})
+
 	if err := f.StartInstance(context.Background(), "dev-x"); !errors.Is(err, errInjected) {
 		t.Errorf("error = %v, want %v", err, errInjected)
 	}
 	if err := f.StopInstance(context.Background(), "dev-x"); err != nil {
 		t.Errorf("error = %v, want nil", err)
+	}
+}
+
+// The fake refuses what the real Incus refuses.
+//
+// A fake more forgiving than the real thing makes the guards in other packages
+// untestable: an instance that was never created could be started, stopped and
+// deleted, so removing an existence check broke nothing (spec 08-testing.md
+// 8.1).
+func TestFakeRefusesAbsentInstances(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name string
+		call func(f *incustest.Fake) error
+	}{
+		{"start", func(f *incustest.Fake) error { return f.StartInstance(ctx, "nope") }},
+		{"stop", func(f *incustest.Fake) error { return f.StopInstance(ctx, "nope") }},
+		{"delete", func(f *incustest.Fake) error { return f.DeleteInstance(ctx, "nope") }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(incustest.New()); !errors.Is(err, incus.ErrInstanceNotFound) {
+				t.Errorf("error = %v, want ErrInstanceNotFound", err)
+			}
+		})
+	}
+}
+
+// Creating a name that is already in use is a conflict, not an overwrite.
+func TestFakeRefusesToCreateTwice(t *testing.T) {
+	ctx := context.Background()
+	f := incustest.New()
+	spec := incus.InstanceSpec{Name: "dev-x", Image: "images:alpine/3.21"}
+
+	if err := f.CreateInstance(ctx, spec); err != nil {
+		t.Fatalf("CreateInstance() error = %v", err)
+	}
+	if err := f.CreateInstance(ctx, spec); err == nil {
+		t.Error("CreateInstance() = nil error, want a name already in use to be refused")
+	}
+}
+
+// profiles: [] means no profile at all, which the fake has to reflect.
+func TestFakeRecordsNoProfiles(t *testing.T) {
+	f := incustest.New()
+
+	if err := f.CreateInstance(context.Background(), incus.InstanceSpec{
+		Name: "dev-x", Image: "images:alpine/3.21",
+		Profiles: []string{"default"}, NoProfiles: true,
+	}); err != nil {
+		t.Fatalf("CreateInstance() error = %v", err)
+	}
+
+	if got := f.Instances["dev-x"].Profiles; len(got) != 0 {
+		t.Errorf("Profiles = %v, want none", got)
+	}
+}
+
+// Deleting a snapshot that is not there is an error, and the slices handed out
+// by Snapshots are not rewritten underneath the caller.
+func TestFakeDeleteSnapshot(t *testing.T) {
+	ctx := context.Background()
+	f := incustest.New()
+	f.SnapshotsByInstance["dev-x"] = []incus.Snapshot{{Name: "a"}, {Name: "b"}}
+
+	if err := f.DeleteSnapshot(ctx, "dev-x", "typo"); err == nil {
+		t.Error("DeleteSnapshot() = nil error, want an unknown snapshot to be refused")
+	}
+
+	before, err := f.Snapshots(ctx, "dev-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteSnapshot(ctx, "dev-x", "a"); err != nil {
+		t.Fatalf("DeleteSnapshot() error = %v", err)
+	}
+	if before[0].Name != "a" || before[1].Name != "b" {
+		t.Errorf("the slice returned earlier became %v", before)
 	}
 }

@@ -165,3 +165,34 @@ func TestSelectDeduplicates(t *testing.T) {
 		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
 	}
 }
+
+// A step's own name wins over reading the reference as a position.
+//
+// Otherwise a step named "2" cannot be selected at all, and asking for it
+// silently runs whatever sits at position 2 instead.
+func TestSelectPrefersAStepNamedLikeANumber(t *testing.T) {
+	yaml := base + `
+provision:
+  - name: setup
+    run: "true"
+  - name: build
+    run: "true"
+  - name: "2"
+    run: "true"
+`
+
+	got := selectSteps(t, yaml, provision.Selection{Only: []string{"2"}})
+
+	if diff := cmp.Diff([]int{2}, got); diff != "" {
+		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// A number that names no step is still a position.
+func TestSelectFallsBackToThePosition(t *testing.T) {
+	got := selectSteps(t, threeSteps, provision.Selection{Only: []string{"2"}})
+
+	if diff := cmp.Diff([]int{1}, got); diff != "" {
+		t.Errorf("Select() mismatch (-want +got):\n%s", diff)
+	}
+}

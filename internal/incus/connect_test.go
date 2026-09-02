@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	incusclient "github.com/lxc/incus/v6/client"
 	"github.com/lxc/incus/v6/shared/api"
@@ -24,6 +25,8 @@ type fakeCLIConfig struct {
 
 	// requestedRemote is the remote name GetInstanceServer was given.
 	requestedRemote string
+	// blockImages, when non-nil, holds GetImageServer until it is closed.
+	blockImages chan struct{}
 }
 
 func (c *fakeCLIConfig) GetInstanceServer(name string) (incusclient.InstanceServer, error) {
@@ -35,6 +38,9 @@ func (c *fakeCLIConfig) GetInstanceServer(name string) (incusclient.InstanceServ
 }
 
 func (c *fakeCLIConfig) GetImageServer(string) (incusclient.ImageServer, error) {
+	if c.blockImages != nil {
+		<-c.blockImages
+	}
 	if c.imageErr != nil {
 		return nil, c.imageErr
 	}
@@ -292,3 +298,34 @@ func TestResolveImageErrors(t *testing.T) {
 
 // *cliconfig.Config satisfies cliConfig.
 var _ cliConfig = (*cliconfig.Config)(nil)
+
+// Resolving an image can be interrupted.
+//
+// Fetching an image is the slow part of `idev up`, and it runs against a
+// possibly distant server. Ignoring Ctrl-C there leaves the user with nothing
+// to do but kill idev (spec 05-incus.md 5.7.3).
+func TestResolveImageIsInterruptible(t *testing.T) {
+	config := newFakeCLIConfig()
+	config.blockImages = make(chan struct{})
+	defer close(config.blockImages)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &configImageResolver{config: config}
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := r.Resolve(ctx, "images:alpine/3.21")
+		done <- err
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want the interruption reported", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Resolve() kept waiting after the run was interrupted")
+	}
+}

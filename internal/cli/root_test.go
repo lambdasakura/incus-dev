@@ -642,6 +642,7 @@ func TestExecAndSnapshotCommands(t *testing.T) {
 				Status: "Running",
 				Config: map[string]string{managedProjectKey: "example-project"},
 			})
+			client.SnapshotsByInstance["dev-example-project"] = []incus.Snapshot{{Name: "s1"}}
 
 			root := newRootCommand("test", stub(app), stub(app))
 			root.SetArgs(tt.args)

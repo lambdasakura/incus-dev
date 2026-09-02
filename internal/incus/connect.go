@@ -75,7 +75,31 @@ type configImageResolver struct {
 // An alias points at a different image per instance type, and only containers
 // are supported, so the container image is what is asked for
 // (spec 03-configuration.md 3.4).
-func (r *configImageResolver) Resolve(_ context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
+func (r *configImageResolver) Resolve(ctx context.Context, ref string) (incusclient.ImageServer, *api.Image, error) {
+	type resolved struct {
+		server incusclient.ImageServer
+		image  *api.Image
+		err    error
+	}
+
+	done := make(chan resolved, 1)
+	go func() {
+		server, image, err := r.resolve(ref)
+		done <- resolved{server, image, err}
+	}()
+
+	select {
+	case res := <-done:
+		return res.server, res.image, res.err
+	case <-ctx.Done():
+		// incus's ImageServer takes no context, so the request itself cannot
+		// be stopped. Stop waiting for it instead: fetching an image is the
+		// slow part of a run and has to stay interruptible.
+		return nil, nil, ctx.Err()
+	}
+}
+
+func (r *configImageResolver) resolve(ref string) (incusclient.ImageServer, *api.Image, error) {
 	remote, name, err := r.config.ParseRemote(ref)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse image reference %q: %w", ref, err)
