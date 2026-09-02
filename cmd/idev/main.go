@@ -3,8 +3,7 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,19 +14,18 @@ import (
 // version はビルド時に -ldflags で埋め込む。
 var version = "dev"
 
+// osExit はテストから差し替えるための間接参照。
+var osExit = os.Exit
+
 func main() {
+	osExit(run(os.Args[1:], os.Stderr))
+}
+
+// run はCLIを実行し、プロセスの終了コードを返す。
+// os.Exit を呼ばないため、テストから実行できる。
+func run(args []string, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := cli.Execute(ctx, version, os.Args[1:]); err != nil {
-		// コンテナ内コマンドが異常終了しただけの場合は、
-		// その終了コードをそのまま返す（出力は既に中継済み）。
-		var exitErr *cli.ExitCodeError
-		if errors.As(err, &exitErr) {
-			os.Exit(exitErr.Code)
-		}
-
-		fmt.Fprintf(os.Stderr, "[idev] error: %v\n", err)
-		os.Exit(1)
-	}
+	return cli.Report(stderr, cli.Execute(ctx, version, args))
 }

@@ -18,6 +18,21 @@ idev rebuild
 idev validate
 ```
 
+## 4.0 共通フラグ
+
+すべてのコマンドで以下を受け付ける。
+
+| フラグ | 既定 | 説明 |
+| --- | --- | --- |
+| `-v`, `--verbose` | | 実行した外部コマンドなどを出力する |
+| `-C`, `--directory` | カレントディレクトリ | プロジェクト探索の起点 |
+| `--incus-remote` | `local` | Incus remote |
+| `--incus-project` | `default` | Incus project |
+
+`--incus-remote` / `--incus-project` は操作層へそのまま渡す
+（[05-incus.md](05-incus.md) 5.5、5.6）。remoteを指定した場合、
+workspaceのbind mountはホスト側パスを前提とするため成立しない点に注意する。
+
 ---
 
 ## 4.1 `idev up`
@@ -128,7 +143,7 @@ idev status
 ```text
 Project:    example-project
 Instance:   dev-example-project
-Status:     RUNNING
+Status:     Running
 Image:      images:ubuntu/24.04
 Workspace:  /home/user/src/example-project -> /workspace
 ```
@@ -217,17 +232,17 @@ idev validate
   - 相対パスで指定されたdeviceの `source`
 - Profile名の構文
 - `profiles: []` の場合に root disk device が宣言されていること
+- `instance.config` / `instance.devices` のキーが `-` で始まらないこと
+  （incusコマンドのフラグとして解釈されうるため）
 - `instance.config` の値がスカラであること
 - `user.incus-devkit.*` を使用していないこと
 
 CIから実行可能なこと。Incusが無い環境でも実行可能とする。
 
 Incus daemonへの問い合わせ（Profileの実在確認など）は行わない。
-それが必要な場合は明示的なオプションとする。
 
-```bash
-idev validate --check-host
-```
+ホスト側の状態まで検査するオプション（`--check-host` など）は将来の候補とする
+（[09-roadmap.md](09-roadmap.md) 9.2）。
 
 ---
 
@@ -282,7 +297,10 @@ idev up
 [idev] Development environment is ready
 ```
 
-ステップ実行中の出力は、通常モードでは要約し、失敗時には全量を表示する。
+ステップ実行中の出力は、そのまま標準エラーへ中継する。
+
+長時間かかる処理（パッケージの導入など）で進行が見えなくなることを避けるため、
+要約や抑制は行わない。`--verbose` では、これに加えて実行した外部コマンドを出力する。
 
 詳細確認用に以下を提供する。
 
@@ -358,7 +376,7 @@ MVPで `--json` を実装する場合、最低限以下を返す。
 {
   "project": "example-project",
   "instance": "dev-example-project",
-  "status": "RUNNING",
+  "status": "Running",
   "workspace": "/workspace"
 }
 ```

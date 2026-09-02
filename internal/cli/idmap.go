@@ -71,10 +71,12 @@ func allowsID(ranges []subIDRange, owner string, id int64) bool {
 func checkSubIDAllowed(uidPath, gidPath string, uid, gid int) error {
 	uidRanges, err := readSubIDs(uidPath)
 	if err != nil {
+		//nolint:nilerr // 設定ファイルを読めない環境では判定できないため通す
 		return nil
 	}
 	gidRanges, err := readSubIDs(gidPath)
 	if err != nil {
+		//nolint:nilerr // 同上
 		return nil
 	}
 
@@ -92,18 +94,19 @@ func checkSubIDAllowed(uidPath, gidPath string, uid, gid int) error {
 	return fmt.Errorf(
 		"workspace idmap (raw.idmap) is not permitted on this host.\n"+
 			"Incus needs permission to map your uid/gid into the container.\n\n"+
-			"Add the following entries and restart incus:\n  %s\n\n"+
+			"Add the following entries (no incus restart needed):\n  %s\n\n"+
 			"Alternatively set 'workspace: {idmap: none}' in dev.yml and handle\n"+
-			"ownership yourself (host files will not be writable from the container).",
+			"ownership yourself (host files will not be writable from the container)",
 		strings.Join(missing, "\n  "))
 }
 
 func readSubIDs(path string) ([]subIDRange, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // 読み取り先は固定の /etc/subuid, /etc/subgid
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
+
 	return parseSubIDs(f), nil
 }
 

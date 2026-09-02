@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
@@ -563,5 +564,234 @@ func TestWorkspaceIDMapModes(t *testing.T) {
 				t.Errorf("IDMap = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// incusコマンドのフラグとして解釈されうるキーを拒否する
+func TestValidateRejectsFlagLikeKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{"config キー", minimal + "  config:\n    \"--project\": other\n"},
+		{"device 名", minimal + "  devices:\n    \"--help\":\n      type: none\n"},
+		{"device キー", minimal + "  devices:\n    data:\n      type: disk\n      \"--force\": \"1\"\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := parseErr(t, tt.yaml)
+			if !strings.Contains(err.Error(), "must not start with") {
+				t.Errorf("error = %q", err.Error())
+			}
+		})
+	}
+}
+
+// pool を伴う disk の source はストレージボリューム名なので、パスとして検査しない
+func TestLoadAllowsStorageVolumeSource(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+  devices:
+    data:
+      type: disk
+      pool: default
+      source: myvolume
+      path: /data
+`)
+	if _, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml")); err != nil {
+		t.Errorf("Load() error = %v, ボリューム名をパスとして扱わないこと", err)
+	}
+}
+
+// 予約されたdevice名は使えない
+func TestValidateRejectsReservedDeviceName(t *testing.T) {
+	err := parseErr(t, minimal+`
+  devices:
+    workspace:
+      type: disk
+      source: /tmp
+      path: /elsewhere
+`)
+	if !strings.Contains(err.Error(), "workspace") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+// 参照先の問題は「存在しない」以外の理由も報告する
+func TestLoadReportsStatError(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+workspace:
+  source: ./missing
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestLoadReadError(t *testing.T) {
+	_, err := config.Load(filepath.Join(t.TempDir(), "no-such-file.yml"))
+	if err == nil || !strings.Contains(err.Error(), "read") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestParseRejectsNonMappingDocument(t *testing.T) {
+	for _, in := range []string{"- a\n- b\n", "just a string\n", "42\n"} {
+		if _, err := config.Parse([]byte(in), config.Options{}); err == nil {
+			t.Errorf("Parse(%q) = nil error, want error", in)
+		}
+	}
+}
+
+func TestParseRejectsNonNumericSchema(t *testing.T) {
+	err := parseErr(t, "schema: \"1\"\nproject:\n  name: p\ninstance:\n  image: i\n")
+	if !strings.Contains(err.Error(), "integer") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestInstanceTypeExplicit(t *testing.T) {
+	c := parse(t, minimal+"  type: virtual-machine\n")
+
+	if got := c.Instance.TypeOrDefault(); got != "virtual-machine" {
+		t.Errorf("TypeOrDefault() = %q", got)
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	c := parse(t, minimal)
+	c.Root = "/root"
+
+	tests := map[string]string{
+		"":           "/root",
+		"rel":        "/root/rel",
+		"/absolute":  "/absolute",
+		"./nested/x": "/root/nested/x",
+	}
+	for in, want := range tests {
+		if got := c.ResolvePath(in); got != want {
+			t.Errorf("ResolvePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestWorkspaceOrDefaultPartialOverride(t *testing.T) {
+	c := parse(t, minimal+"workspace:\n  target: /src\n")
+
+	ws := c.WorkspaceOrDefault()
+	if ws.Target != "/src" || ws.Source != "." || ws.IDMap != config.IDMapAuto {
+		t.Errorf("WorkspaceOrDefault() = %+v", ws)
+	}
+}
+
+// bootstrap 内のパスも検査する
+func TestLoadChecksBootstrapPaths(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+bootstrap:
+  - run: echo hi
+provision:
+  - ansible:
+      playbook: .incus-dev/ansible/site.yml
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "site.yml") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestWorkspaceTargetMustBeAbsolute(t *testing.T) {
+	err := parseErr(t, minimal+"workspace:\n  target: relative/path\n")
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestWorkspaceSourceMustBeDirectory(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "afile"), "x")
+	mustWrite(t, filepath.Join(root, ".incus-dev", "dev.yml"), minimal+`
+workspace:
+  source: ./afile
+`)
+	_, err := config.Load(filepath.Join(root, ".incus-dev", "dev.yml"))
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+// Profile名の構文を検査する（仕様 04-cli.md 4.7）
+func TestValidateProfileNameSyntax(t *testing.T) {
+	invalid := []string{"bad name", "../escape", "-leading", "with/slash", ""}
+	for _, name := range invalid {
+		t.Run(name, func(t *testing.T) {
+			err := parseErr(t, minimal+"  profiles:\n    - \""+name+"\"\n")
+			if !strings.Contains(err.Error(), "profile") && !strings.Contains(err.Error(), "profiles") {
+				t.Errorf("error = %q", err.Error())
+			}
+		})
+	}
+
+	parse(t, minimal+"  profiles:\n    - default\n    - gpu-nvidia\n    - my.profile_1\n")
+}
+
+// incusやsuのオプションとして解釈されうる値を拒否する
+func TestValidateRejectsFlagLikeValues(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{"image", "schema: 1\nproject:\n  name: p\ninstance:\n  image: \"--project=other\"\n"},
+		{"run.user", minimal + "provision:\n  - run: echo\n    user: \"-lc\"\n"},
+		{"run.shell", minimal + "provision:\n  - run: echo\n    shell: \"--login\"\n"},
+		{"bootstrap.user", minimal + "bootstrap:\n  - run: echo\n    user: \"-x\"\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := parseErr(t, tt.yaml)
+			if !strings.Contains(err.Error(), "must not start with") {
+				t.Errorf("error = %q", err.Error())
+			}
+		})
+	}
+}
+
+// root diskは「type: disk かつ path: /」で判定する（仕様 03-configuration.md 3.6.3）
+func TestValidateRootDiskRequiresRootPath(t *testing.T) {
+	// diskはあるが / を提供していない
+	err := parseErr(t, minimal+`
+  profiles: []
+  devices:
+    data:
+      type: disk
+      pool: default
+      path: /data
+`)
+	if !strings.Contains(err.Error(), "root") {
+		t.Errorf("error = %q, root diskの不足を報告すること", err.Error())
+	}
+
+	// disk以外で path: / を持つdeviceもroot diskとは認めない
+	err = parseErr(t, minimal+`
+  profiles: []
+  devices:
+    weird:
+      type: none
+      path: /
+`)
+	if !strings.Contains(err.Error(), "root") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+// incusは k=v を最初の = で分割するため、キーに = を含められない
+func TestValidateRejectsEqualsInConfigKey(t *testing.T) {
+	err := parseErr(t, minimal+"  config:\n    \"limits.cpu=8\": \"x\"\n")
+	if !strings.Contains(err.Error(), "=") {
+		t.Errorf("error = %q", err.Error())
 	}
 }

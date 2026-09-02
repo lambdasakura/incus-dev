@@ -38,21 +38,19 @@ incus-devkit/
 │       └── main.go             # エントリポイント / exit code のみ担当
 │
 ├── internal/
-│   ├── cli/                    # コマンド定義（cobra）
-│   │   ├── root.go
-│   │   ├── up.go
-│   │   ├── provision.go
-│   │   ├── shell.go
-│   │   ├── status.go
-│   │   ├── destroy.go
-│   │   ├── rebuild.go
-│   │   └── validate.go
+│   ├── cli/                    # コマンド定義（cobra）と実処理
+│   │   ├── root.go             # コマンド配線
+│   │   ├── app.go              # up / provision / shell / status / ...
+│   │   ├── plan.go             # 適用すべきconfig / deviceの算出
+│   │   ├── idmap.go            # ホスト側のidmap可否検査
+│   │   ├── idmap_mode.go       # idmap方式の解決
+│   │   └── log.go
 │   │
 │   ├── config/                 # dev.yml の読み込みとvalidation
 │   │   ├── config.go
 │   │   ├── step.go             # provision ステップのデコード
-│   │   ├── schema.go
-│   │   └── testdata/
+│   │   ├── parse.go
+│   │   └── validate.go
 │   │
 │   ├── project/                # project root 探索
 │   │   └── discover.go
@@ -64,15 +62,13 @@ incus-devkit/
 │   │
 │   ├── provision/              # bootstrap / provision ステップの実行
 │   │   ├── provision.go
+│   │   ├── env.go
 │   │   ├── step_run.go
-│   │   ├── step_ansible.go
-│   │   └── inventory.go
+│   │   └── step_ansible.go
 │   │
-│   ├── runner/                 # 外部コマンド実行の集約
-│   │   └── runner.go
-│   │
-│   └── errs/                   # エラー型 / exit code マッピング
-│       └── errs.go
+│   └── runner/                 # 外部コマンド実行の集約
+│       ├── runner.go
+│       └── args.go             # 引数の組み立てとマスク指定
 │
 ├── schemas/
 │   └── dev-v1.schema.json
@@ -191,8 +187,12 @@ my-project/
 └── ...
 ```
 
-devkitは `dev.yml` 以外のディレクトリ名・構成を規定しない。
+devkitは `dev.yml` 以外のディレクトリ名・構成を原則として規定しない。
 `dev.yml` から参照されたパスのみを使用する。
+
+唯一の例外は `.incus-dev/ansible/ansible.cfg` で、
+存在する場合にansibleステップの設定として使用する
+（[06-provisioning.md](06-provisioning.md) 6.5.3）。置かなくてもよい。
 
 **この配下のファイルだけで、その開発環境が完全に再現できる状態を維持する。**
 

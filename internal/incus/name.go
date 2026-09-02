@@ -1,6 +1,10 @@
 package incus
 
-import "strings"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+)
 
 const (
 	// InstanceNamePrefix は生成するinstance名の接頭辞。
@@ -27,9 +31,22 @@ func InstanceName(projectName string) string {
 			}
 		}
 	}
-	name := InstanceNamePrefix + strings.Trim(sb.String(), "-")
+	normalized := strings.Trim(sb.String(), "-")
+	if normalized == "" {
+		// 英数字を含まない名前はすべて同じ結果になってしまうため、
+		// 元の名前から短いハッシュを作って区別する。
+		normalized = shortHash(projectName)
+	}
+
+	name := InstanceNamePrefix + normalized
 	if len(name) > maxInstanceNameLength {
 		name = name[:maxInstanceNameLength]
 	}
 	return strings.TrimRight(name, "-")
+}
+
+// shortHash は名前を区別するための短い16進文字列を返す。
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:4])
 }

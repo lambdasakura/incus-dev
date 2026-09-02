@@ -74,7 +74,7 @@ idev destroy       # instanceを削除する（ホスト側のソースは削除
 利用できなければidmapped mount（`shift`）へ退避する。
 
 コンテナ内で作られたファイルをホスト側でも自分の所有にしたい場合は、
-`/etc/subuid`・`/etc/subgid` へ以下を追加してincusを再起動する。
+`/etc/subuid`・`/etc/subgid` へ以下を追加する（incusの再起動は不要）。
 （一般的なIncusセットアップ手順に含まれる `root:1000000:1000000000` とは
 別に必要になる。）
 
@@ -123,6 +123,9 @@ MVP（仕様 [09-roadmap.md](docs/spec/09-roadmap.md)）は実装済み。
 | instance config / devices の素通し、workspace mount | 実装済み |
 | idmap（`auto` / `raw` / `shift` / `none`） | 実装済み |
 | `status --json` | 実装済み |
+| `--incus-remote` / `--incus-project` | 実装済み（remoteはworkspaceのマウントが成立しないため未検証） |
+| `instance.type: virtual-machine` | Incusへ素通しするが未検証 |
 | `up --dry-run` | 未実装 |
 | `provision --step` / `--from`（部分実行） | 未実装 |
-| Incus remote、virtual-machine、snapshot | 未実装 |
+| `validate --check-host` | 未実装 |
+| snapshot / persistent volume / secrets | 未実装 |

@@ -10,18 +10,25 @@ import (
 )
 
 // execRun はコンテナ内でスクリプトを実行する（仕様 06-provisioning.md 6.4）。
-func (e *Executor) execRun(ctx context.Context, step *config.RunStep, label string, env Env) error {
-	vars := env.EnvVars()
+func (e *Executor) execRun(ctx context.Context, step *config.RunStep, env Env) error {
+	// devkitが注入する変数は診断に役立つため表示してよい。
+	// プロジェクトが指定した値はSecretを含みうるため隠す。
+	public := env.EnvVars()
+	secret := make(map[string]string, len(step.Env))
 	for k, v := range step.Env {
-		vars[k] = v // プロジェクト指定を優先する
+		delete(public, k) // プロジェクト指定を優先する
+		secret[k] = v
 	}
 
-	code, err := e.Incus.Exec(ctx, env.Instance, runArgv(step), incus.ExecOptions{
-		Env:    vars,
-		Cwd:    step.Cwd,
-		User:   step.User,
-		Stdout: e.Stdout,
-		Stderr: e.Stderr,
+	argv, user := runArgv(step)
+
+	code, err := e.Incus.Exec(ctx, env.Instance, argv, incus.ExecOptions{
+		Env:       secret,
+		PublicEnv: public,
+		Cwd:       step.Cwd,
+		User:      user,
+		Stdout:    e.Stdout,
+		Stderr:    e.Stderr,
 	})
 	if err != nil {
 		return err
@@ -32,17 +39,17 @@ func (e *Executor) execRun(ctx context.Context, step *config.RunStep, label stri
 	return nil
 }
 
-// runArgv はコンテナ内で実行するargvを組み立てる。
+// runArgv はコンテナ内で実行するargvと、incusへ渡すユーザー指定を返す。
 //
 // incus exec --user はUIDのみを受け付けるため、ユーザー名が指定された場合は
-// su でユーザーを切り替える。
-func runArgv(step *config.RunStep) []string {
+// su でユーザーを切り替え、incusへは何も渡さない。
+func runArgv(step *config.RunStep) (argv []string, user string) {
 	shell := step.ShellOrDefault()
 
 	if step.User != "" {
 		if _, err := strconv.Atoi(step.User); err != nil {
-			return []string{"su", "-s", shell, step.User, "-c", step.Script}
+			return []string{"su", "-s", shell, step.User, "-c", step.Script}, ""
 		}
 	}
-	return []string{shell, "-c", step.Script}
+	return []string{shell, "-c", step.Script}, step.User
 }

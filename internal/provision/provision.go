@@ -22,6 +22,15 @@ const defaultBootstrapScript = `command -v python3 >/dev/null 2>&1 || ` +
 // DefaultBootstrapName は既定bootstrapステップの表示名。
 const DefaultBootstrapName = "bootstrap (default)"
 
+// defaultBootstrapHint は既定bootstrapが失敗したときの案内。
+const defaultBootstrapHint = `The default bootstrap assumes a Debian-family image (apt-get).
+Define bootstrap explicitly in dev.yml for this image, for example:
+
+  bootstrap:
+    - run: command -v python3 >/dev/null 2>&1 || dnf install -y python3
+
+Use "bootstrap: []" to skip it entirely.`
+
 // BootstrapSteps は実行すべきbootstrapステップを返す。
 //
 //   - bootstrap が明示されていればそれを使う（空リストは無効化）
@@ -67,19 +76,24 @@ func (e *Executor) RunSteps(ctx context.Context, steps []config.Step, kind strin
 		label := fmt.Sprintf("%s step %d/%d: %s", kind, i+1, total, step.DisplayName(i+1))
 		e.log(label)
 
-		if err := e.runStep(ctx, step, label, env); err != nil {
+		if err := e.runStep(ctx, step, env); err != nil {
+			if step.Name == DefaultBootstrapName {
+				// 既定bootstrapはDebian系を前提とする。失敗した場合は
+				// プロジェクト側で明示するよう促す（仕様 06-provisioning.md 6.3.2）。
+				return fmt.Errorf("%s: %w\n\n%s", label, err, defaultBootstrapHint)
+			}
 			return fmt.Errorf("%s: %w", label, err)
 		}
 	}
 	return nil
 }
 
-func (e *Executor) runStep(ctx context.Context, step config.Step, label string, env Env) error {
+func (e *Executor) runStep(ctx context.Context, step config.Step, env Env) error {
 	switch {
 	case step.Run != nil:
-		return e.execRun(ctx, step.Run, label, env)
+		return e.execRun(ctx, step.Run, env)
 	case step.Ansible != nil:
-		return e.execAnsible(ctx, step.Ansible, label, env)
+		return e.execAnsible(ctx, step.Ansible, env)
 	default:
 		return fmt.Errorf("step has neither run nor ansible")
 	}

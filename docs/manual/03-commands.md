@@ -44,6 +44,10 @@ idev shell -- sh -c 'exit 42'; echo $?   # 42
 project.name: my.project_1   →   instance: dev-my-project-1
 ```
 
+- 63文字を超える場合は切り詰める
+- 正規化した結果が空になる名前（記号のみなど）は、
+  元の名前のハッシュで区別する
+
 ---
 
 ## 3.2 `idev validate`

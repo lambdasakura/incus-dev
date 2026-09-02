@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"os"
+	"slices"
 	"strings"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
@@ -41,6 +44,14 @@ type AppOptions struct {
 
 	// CheckIDMap は workspace.idmap: auto の事前検査。nilの場合は既定の検査を使う。
 	CheckIDMap func(uid, gid int) error
+	// Host はworkspaceの対応付けに使うホスト側のID。
+	// nilの場合は実行ユーザーのものを使う。
+	Host *HostIDs
+}
+
+// HostIDs はホスト側のuid/gid。
+type HostIDs struct {
+	UID, GID int
 }
 
 // App はコマンドの実処理を保持する。
@@ -59,6 +70,7 @@ type App struct {
 	incusProject string
 
 	checkIDMap func(uid, gid int) error
+	host       HostIDs
 }
 
 // NewApp は App を構成する。
@@ -76,6 +88,11 @@ func NewApp(opt AppOptions) *App {
 	checkIDMap := opt.CheckIDMap
 	if checkIDMap == nil {
 		checkIDMap = defaultIDMapCheck
+	}
+
+	host := opt.Host
+	if host == nil {
+		host = &HostIDs{UID: os.Getuid(), GID: os.Getgid()}
 	}
 
 	return &App{
@@ -97,6 +114,7 @@ func NewApp(opt AppOptions) *App {
 		remote:       opt.Remote,
 		incusProject: opt.IncusProject,
 		checkIDMap:   checkIDMap,
+		host:         *host,
 	}
 }
 
@@ -121,16 +139,18 @@ func (a *App) Up(ctx context.Context) error {
 	a.log.Info("Project: " + a.cfg.Project.Name)
 
 	// instanceを作る前に、ホスト側の前提を確認する。
-	mode, warn, err := a.idmapMode()
+	plan, err := a.idmapPlan()
 	if err != nil {
 		return err
 	}
-	if warn != "" {
-		a.log.Warn(warn)
+	if plan.Warning != "" {
+		a.log.Warn(plan.Warning)
 	}
 	if err := a.checkProfiles(ctx); err != nil {
 		return err
 	}
+
+	created := false
 
 	inst, err := a.client.Instance(ctx, a.instance)
 	switch {
@@ -139,22 +159,26 @@ func (a *App) Up(ctx context.Context) error {
 			return a.unmanagedError(inst)
 		}
 		a.log.Info("Using existing instance " + a.instance)
-		if err := a.client.ApplyConfig(ctx, a.instance, desiredConfig(a.cfg, mode)); err != nil {
+		if err := a.reapplyInstance(ctx, inst, plan); err != nil {
 			return err
 		}
 	case errors.Is(err, incus.ErrInstanceNotFound):
 		a.log.Info("Creating instance " + a.instance)
-		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, mode)); err != nil {
+		if err := a.client.CreateInstance(ctx, instanceSpec(a.cfg, a.instance, plan)); err != nil {
 			return err
 		}
+		// deviceは作成時に設定済みなので、再適用は不要。
+		created = true
 	default:
 		return err
 	}
 
 	ws := a.cfg.WorkspaceOrDefault()
 	a.log.Info(fmt.Sprintf("Mounting workspace %s -> %s", a.cfg.WorkspaceSourcePath(), ws.Target))
-	if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, mode)); err != nil {
-		return err
+	if !created {
+		if err := a.client.ApplyDevices(ctx, a.instance, desiredDevices(a.cfg, plan)); err != nil {
+			return err
+		}
 	}
 
 	if err := a.ensureRunning(ctx); err != nil {
@@ -332,15 +356,66 @@ func (a *App) Validate() error {
 	return err
 }
 
-// idmapMode は適用するidmap方式を解決する。
-func (a *App) idmapMode() (config.IDMapMode, string, error) {
-	declared := a.cfg.WorkspaceOrDefault().IDMap
+// reapplyInstance は既存instanceへ宣言内容を再適用する。
+func (a *App) reapplyInstance(ctx context.Context, inst *incus.Instance, plan idmapPlan) error {
+	desired := desiredConfig(a.cfg, plan)
+	// 適用前の状態を控える。適用後は差分が分からなくなるため。
+	before := maps.Clone(inst.Config)
 
-	// プロジェクトが raw.idmap を明示している場合は尊重し、検査しない。
-	if _, explicit := a.cfg.Instance.Config[idmapConfigKey]; explicit {
-		return config.IDMapNone, "", nil
+	// idmap方式を切り替えた場合、devkitが以前設定したキーを残さない。
+	stale := staleIDMapKeys(inst.Config, plan)
+	if len(stale) > 0 {
+		if err := a.client.UnsetConfig(ctx, a.instance, stale); err != nil {
+			return err
+		}
 	}
-	return resolveIDMapMode(declared, a.checkIDMap)
+	if err := a.client.ApplyConfig(ctx, a.instance, desired); err != nil {
+		return err
+	}
+
+	a.warnRestartRequired(inst.IsRunning(), before, desired, stale)
+	return nil
+}
+
+// restartRequiredKeys は変更に再起動を要するconfigキー。
+var restartRequiredKeys = []string{idmapConfigKey, "security.nesting", "security.privileged"}
+
+// warnRestartRequired は稼働中instanceで即座に反映されない変更を警告する
+// （仕様 05-incus.md 5.4.5）。
+//
+// devkitが実際に変更したキーのみを対象とする。宣言から消えたキーは
+// unset しない方針（仕様 5.4.4）なので、それを変更として扱うと
+// 何もしていないのに警告が出続けてしまう。
+func (a *App) warnRestartRequired(running bool, before, desired map[string]string, unset []string) {
+	if !running {
+		return
+	}
+
+	var changed []string
+	for _, k := range restartRequiredKeys {
+		if want, declared := desired[k]; declared && before[k] != want {
+			changed = append(changed, k)
+		}
+	}
+	for _, k := range unset {
+		if slices.Contains(restartRequiredKeys, k) && before[k] != "" {
+			changed = append(changed, k)
+		}
+	}
+	if len(changed) == 0 {
+		return
+	}
+	slices.Sort(changed)
+	changed = slices.Compact(changed)
+
+	a.log.Warn(fmt.Sprintf(
+		"%s changed but the instance is running; restart it to apply (idev rebuild --force, or incus restart %s)",
+		strings.Join(changed, ", "), a.instance))
+}
+
+// idmapPlan は適用するidmap方針を解決する。
+func (a *App) idmapPlan() (idmapPlan, error) {
+	return resolveIDMap(a.cfg, a.host.UID, a.host.GID, a.checkIDMap)
 }
 
 // checkProfiles は指定Profileの存在を確認する。devkitはProfileを作成しない。
@@ -414,9 +489,9 @@ type ExitCodeError struct{ Code int }
 func (e *ExitCodeError) Error() string { return fmt.Sprintf("exited with code %d", e.Code) }
 
 // limitsOf は表示対象のconfigキーを抽出する。
-func limitsOf(config map[string]string) map[string]string {
+func limitsOf(instanceConfig map[string]string) map[string]string {
 	out := map[string]string{}
-	for k, v := range config {
+	for k, v := range instanceConfig {
 		if strings.HasPrefix(k, "limits.") {
 			out[k] = v
 		}
@@ -432,14 +507,5 @@ func yesNo(b bool) string {
 }
 
 func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }

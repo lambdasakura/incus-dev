@@ -192,7 +192,9 @@ image選択と、それに適合するprovisioning手順の整合はプロジェ
 
 任意。`container`（既定）または `virtual-machine`。
 
-MVPでは `container` のみをサポートする。
+`virtual-machine` はIncusへそのまま渡すが、MVPでは検証していない。
+workspaceのbind mountやidmapの扱いがコンテナと異なるため、
+利用する場合はプロジェクト側で確認すること。
 
 ### 3.6.3 profiles
 
@@ -282,7 +284,12 @@ devices:
 ```
 
 - deviceの `source` に相対パスを指定した場合、project rootを基準に解決する
+- ただし `pool` を伴う `disk` の `source` はストレージボリューム名であり、
+  パスとして解決も検査もしない
+- ホストのディレクトリをマウントする `disk` には、devkitが `workspace` と
+  同じidmap方式を適用する（3.7.3参照）。`shift` を明示した場合はそちらを尊重する
 - `workspace` という名前のdeviceはdevkitが予約する（3.7参照）
+- device名およびキーは `-` で始められない（incusのフラグと衝突するため）
 
 ---
 
@@ -329,8 +336,11 @@ instance configに `raw.idmap` を設定し、実行ユーザーのuid/gidを
 コンテナのrootへ対応付ける。
 
 ```text
-raw.idmap: both <uid> 0
+raw.idmap: uid <uid> 0
+            gid <gid> 0
 ```
+
+uidとgidは異なりうるため、個別に写像する。
 
 開発用途では最も望ましい。コンテナ内でrootとして作ったファイルが、
 ホスト側では実行ユーザーの所有になる。
@@ -370,6 +380,20 @@ workspaceのdisk deviceに `shift=true` を設定し、idmapped mountを使う�
 
 何も設定しない。プロジェクトが `instance.config` で自前に対応付ける場合や、
 workspaceへの書き込みが不要な場合に使う。
+
+#### 適用範囲
+
+ここで決まった方式は、workspaceだけでなく
+**ホストのディレクトリをマウントする `instance.devices` の `disk` にも適用する**。
+
+workspaceだけを対象にすると、`shift` 方式のホストで
+「workspaceは書けるが追加マウントは書けない」という不整合が生じるためである。
+
+適用対象は `type: disk` かつ `source` を持ち、`pool` を伴わないdeviceに限る
+（storage volumeやroot diskは対象外）。
+
+プロジェクトがdeviceに `shift` を明示した場合は、そちらを尊重する。
+ただし最適な値はホストに依存するため、**通常は書かないほうがよい**。
 
 なお `instance.config` に `raw.idmap` が明示されている場合、
 devkitは対応付けに一切介入しない。
@@ -464,11 +488,15 @@ provision:
 | `name` | | 表示名。ログとエラーに使用する |
 | `shell` | | スクリプトを解釈するシェル |
 | `cwd` | | 作業ディレクトリ（コンテナ内パス） |
-| `user` | | 実行ユーザー |
+| `user` | | 実行ユーザー。数値uidまたはユーザー名 |
 | `env` | | 追加の環境変数 |
 
 `.incus-dev/` はworkspaceの一部としてコンテナ内に見えるため、
 スクリプトファイルは `<workspace.target>/.incus-dev/...` として参照できる。
+
+`user` に数値uidを指定した場合はIncusのexecへそのまま渡す。
+ユーザー名を指定した場合は、コンテナ内で `su` を用いて切り替える
+（Incusのexecはuidしか受け付けないため）。
 
 冪等性はプロジェクトの責務とする（REQ-005）。
 

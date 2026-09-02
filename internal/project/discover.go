@@ -27,11 +27,6 @@ type Project struct {
 	ConfigPath string
 }
 
-// ConfigDirPath は .incus-dev ディレクトリの絶対パスを返す。
-func (p *Project) ConfigDirPath() string {
-	return filepath.Join(p.Root, ConfigDir)
-}
-
 // Discover は startDir から親方向へ .incus-dev/dev.yml を探索する。
 // 最も近いプロジェクトrootを返す。
 func Discover(startDir string) (*Project, error) {

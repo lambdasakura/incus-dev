@@ -20,7 +20,7 @@ Instance naming / 正規化
 Bootstrap 既定動作の選択
   - ansible ステップの有無による分岐
   - bootstrap 明示時の上書き
-Step planning（実行順序、dry-run出力）
+Step planning（実行順序）
 Command construction
   - incus exec の引数
   - ansible-playbook の引数
@@ -36,15 +36,37 @@ Error handling（失敗ステップの特定）
 - 外部コマンド実行は `internal/runner` のinterfaceを差し替え、
   「どのコマンドが構築されたか」を検証する
 - project discoveryは `t.TempDir()` に一時ツリーを作って検証する
-- `dev.yml` のパースは `internal/config/testdata/` の
-  正常系・異常系ファイルで検証する
-- 生成されるinventoryやextra-varsはgolden fileで比較する
+- `dev.yml` のパースは、正常系・異常系のYAMLをテスト内に直接書いて検証する
+  （入力と期待結果が同じ場所にある方が読みやすいため）
+- 生成されるinventoryやextra-varsは、一時ファイルの内容を読んで検証する
 
 ```bash
 go test ./...
 ```
 
 がIncusの無い環境で成功すること。
+
+### カバレッジ
+
+```bash
+make cover
+```
+
+パッケージ横断で測る（`-coverpkg=./...`）。テスト用のfakeは他パッケージの
+テストからのみ実行されるため、これを付けないと0%として集計される。
+
+**目標は、到達可能な分岐をすべて網羅すること。**
+
+以下のような、不変条件により到達しない防御的分岐は残してよい。
+カバレッジのために検査を削ったり、テスト専用の注入点を実装へ埋め込んだりしない。
+
+- 同梱JSON Schemaが壊れている場合の分岐（ビルド成果物の不具合）
+- JSON Schema検証を通過した値の構造体デコード失敗
+- 文字列だけを含むmapのmarshal失敗
+- `os.Getwd` の失敗
+
+これらは「起きたとき何が起きるか」を定義するために必要であり、
+到達可能性とは別の価値を持つ。
 
 ---
 

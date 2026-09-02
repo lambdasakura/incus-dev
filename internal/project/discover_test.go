@@ -130,3 +130,28 @@ func mustEvalSymlinks(t *testing.T, p string) string {
 	}
 	return resolved
 }
+
+// 読み取れないディレクトリは「見つからない」ではなくエラーとして報告する
+func TestDiscoverReportsUnreadableDirectory(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("rootでは権限による失敗を再現できません")
+	}
+
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(filepath.Join(locked, ".incus-dev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	_, err := project.Discover(locked)
+	if err == nil {
+		t.Fatal("Discover() = nil error, want error")
+	}
+	if errors.Is(err, project.ErrNotFound) {
+		t.Errorf("error = %v, 権限の問題を ErrNotFound として報告しないこと", err)
+	}
+}

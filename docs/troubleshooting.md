@@ -138,7 +138,8 @@ Dockerのチェーンがufwのチェーンより先に評価されるため。
 
 ### 症状
 
-- コンテナ内から `/workspace` へ書き込めない
+- コンテナ内から `/workspace` や、`instance.devices` でマウントした
+  ホストのディレクトリへ書き込めない
 - コンテナ内で作ったファイルがホスト側でrootの所有になり、sudoなしで消せない
 - `idev up` が `workspace idmap (raw.idmap) is not permitted on this host` で停止する
 
@@ -177,7 +178,7 @@ newuidmap: uid range [0-1) -> [1000-1001) not allowed
 ```bash
 grep '^root:' /etc/subuid /etc/subgid
 idev up
-incus config get dev-<project> raw.idmap    # both <uid> 0 になっていれば適用済み
+incus config get dev-<project> raw.idmap    # "uid <uid> 0 / gid <gid> 0" が出れば適用済み
 ```
 
 追加しない場合、既定の `auto` は `shift`（idmapped mount）へ退避して動作を継続する。

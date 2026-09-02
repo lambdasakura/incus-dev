@@ -134,6 +134,10 @@ MVPでは、`dev.yml` から削除されたキーやdeviceの自動的なunset�
 
 クリーンな状態が必要な場合は `idev rebuild` を使用する。
 
+例外として、**devkit自身が設定したidmap関連のキー**（`raw.idmap`）は、
+方式を切り替えた際に取り消す。利用者が書いたキーには触れない。
+残したままにすると、`raw.idmap` と `shift` が二重に適用されるためである。
+
 将来的には、devkitが適用したキーの一覧を
 
 ```text
@@ -205,20 +209,20 @@ CLI処理からIncusコマンド文字列を直接組み立てることを避け
 package incus
 
 type Client interface {
-    InstanceExists(ctx context.Context, name string) (bool, error)
-    Instance(ctx context.Context, name string) (Instance, error)
+    Instance(ctx context.Context, name string) (*Instance, error)
 
     CreateInstance(ctx context.Context, spec InstanceSpec) error
     StartInstance(ctx context.Context, name string) error
-    StopInstance(ctx context.Context, name string) error
     DeleteInstance(ctx context.Context, name string) error
 
     ApplyConfig(ctx context.Context, name string, cfg map[string]string) error
+    UnsetConfig(ctx context.Context, name string, keys []string) error
     ApplyDevices(ctx context.Context, name string, dev map[string]Device) error
 
     ProfileExists(ctx context.Context, name string) (bool, error)
 
     Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error)
+    WaitReady(ctx context.Context, name string, opt WaitOptions) error
 }
 
 type ExecOptions struct {
@@ -236,6 +240,10 @@ interfaceとして定義することで、以下を可能にする。
 
 - 単体テストでのfake実装（Incus daemon不要）
 - 将来的な実装差し替え
+
+interfaceには **実際に使う操作だけ** を並べる。
+instanceの存在確認は `Instance` と `errors.Is(ErrInstanceNotFound)` で行う。
+差し替え時の負担がそのまま増えるため、使わない操作を含めない。
 
 ### 5.7.1 実装方針
 

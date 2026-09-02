@@ -62,7 +62,7 @@ idev はSSHを使わず、このconnection pluginでコンテナへ接続する�
 ## 1.5 workspaceの所有者について（任意だが推奨）
 
 コンテナ内で作ったファイルを、ホスト側でも自分の所有にしたい場合は
-`/etc/subuid` と `/etc/subgid` へ以下を追加してIncusを再起動する。
+`/etc/subuid` と `/etc/subgid` へ以下を追加する。
 
 ```text
 root:1000:1        # 1000 は自分のuid（id -u）
@@ -72,6 +72,8 @@ root:1000:1        # 1000 は自分のuid（id -u）
 id -u; id -g                        # 自分のuid/gidを確認
 grep '^root:' /etc/subuid /etc/subgid
 ```
+
+追加後、Incusの再起動は不要（コンテナ起動時に読まれる）。
 
 未設定でも `idev` は動作する。その場合はidmapped mountへ自動的に退避し、
 コンテナが作ったファイルはホスト側でrootの所有になる。

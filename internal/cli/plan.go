@@ -1,8 +1,7 @@
 package cli
 
 import (
-	"fmt"
-	"os"
+	"maps"
 	"strconv"
 
 	"github.com/lambdasakura/incus-dev/internal/config"
@@ -20,8 +19,7 @@ const (
 const idmapConfigKey = "raw.idmap"
 
 // desiredConfig は dev.yml から適用すべきinstance configを組み立てる。
-// mode は解決済みのidmap方式。
-func desiredConfig(cfg *config.Config, mode config.IDMapMode) map[string]string {
+func desiredConfig(cfg *config.Config, plan idmapPlan) map[string]string {
 	out := make(map[string]string, len(cfg.Instance.Config)+4)
 	for k, v := range cfg.Instance.Config {
 		out[k] = v
@@ -32,27 +30,26 @@ func desiredConfig(cfg *config.Config, mode config.IDMapMode) map[string]string 
 	out[managedSchemaKey] = strconv.Itoa(cfg.Schema)
 
 	// raw方式ではホストの実行ユーザーをコンテナのrootへ対応付ける。
-	// プロジェクトが raw.idmap を明示している場合は尊重する。
-	if _, explicit := cfg.Instance.Config[idmapConfigKey]; !explicit && mode == config.IDMapRaw {
-		out[idmapConfigKey] = fmt.Sprintf("both %d 0", os.Getuid())
+	if v := plan.rawIDMap(); v != "" {
+		out[idmapConfigKey] = v
 	}
 	return out
 }
 
 // desiredDevices は dev.yml から適用すべきdeviceを組み立てる。
 // workspaceは予約名のdisk deviceとして追加する。
-func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.Device {
+func desiredDevices(cfg *config.Config, plan idmapPlan) map[string]incus.Device {
 	out := make(map[string]incus.Device, len(cfg.Instance.Devices)+1)
 
 	for name, dev := range cfg.Instance.Devices {
-		copied := make(incus.Device, len(dev))
-		for k, v := range dev {
-			copied[k] = v
-		}
+		copied := maps.Clone(incus.Device(dev))
+
 		// deviceのsourceはproject rootを基準に解決する（仕様 3.11）。
-		if src, ok := copied["source"]; ok && src != "" {
+		if src, ok := copied["source"]; ok && src != "" && !isVolumeSource(copied) {
 			copied["source"] = cfg.ResolvePath(src)
 		}
+		applyShift(copied, plan)
+
 		out[name] = copied
 	}
 
@@ -62,16 +59,58 @@ func desiredDevices(cfg *config.Config, mode config.IDMapMode) map[string]incus.
 		"source": cfg.WorkspaceSourcePath(),
 		"path":   ws.Target,
 	}
-	// shift方式ではidmapped mountを使い、ホスト側の追加設定を不要にする。
-	if mode == config.IDMapShift {
-		workspace["shift"] = "true"
-	}
+	applyShift(workspace, plan)
+
 	out[config.WorkspaceDeviceName] = workspace
 	return out
 }
 
+// applyShift はホストのディレクトリをマウントするdiskへidmap方式を反映する。
+//
+// workspace以外の追加マウントにも同じ扱いを適用しないと、
+// shift方式のホストで「workspaceだけ書けて追加マウントは書けない」状態になる。
+// 方式を切り替えたときに古い設定が残らないよう、常に明示的に設定する。
+//
+// プロジェクトが shift を明示している場合は、そちらを尊重する。
+func applyShift(dev incus.Device, plan idmapPlan) {
+	if !plan.Managed {
+		return
+	}
+	if _, explicit := dev["shift"]; explicit {
+		return
+	}
+	if !isHostPathMount(dev) {
+		return
+	}
+	dev["shift"] = strconv.FormatBool(plan.shiftEnabled())
+}
+
+// isHostPathMount はホストのディレクトリをマウントするdiskかを返す。
+//
+// storage volume（poolを伴うもの）やroot disk、disk以外のdeviceは対象外。
+func isHostPathMount(dev incus.Device) bool {
+	return dev.Type() == "disk" && dev["source"] != "" && !isVolumeSource(dev)
+}
+
+// isVolumeSource は source がホストのパスではなくストレージボリューム名かを返す。
+func isVolumeSource(dev incus.Device) bool {
+	return dev.Type() == "disk" && dev["pool"] != ""
+}
+
+// staleIDMapKeys は現在の方針では不要になった、devkit設定のconfigキーを返す。
+func staleIDMapKeys(current map[string]string, plan idmapPlan) []string {
+	if !plan.Managed || plan.Mode == config.IDMapRaw {
+		// 利用者が管理している、または今も設定すべき場合は触れない。
+		return nil
+	}
+	if _, ok := current[idmapConfigKey]; !ok {
+		return nil
+	}
+	return []string{idmapConfigKey}
+}
+
 // instanceSpec はinstance作成時の指定を組み立てる。
-func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode) incus.InstanceSpec {
+func instanceSpec(cfg *config.Config, name string, plan idmapPlan) incus.InstanceSpec {
 	profiles := cfg.ProfileNames()
 	return incus.InstanceSpec{
 		Name:       name,
@@ -79,8 +118,8 @@ func instanceSpec(cfg *config.Config, name string, mode config.IDMapMode) incus.
 		Type:       cfg.Instance.TypeOrDefault(),
 		Profiles:   profiles,
 		NoProfiles: len(profiles) == 0,
-		Config:     desiredConfig(cfg, mode),
-		Devices:    desiredDevices(cfg, mode),
+		Config:     desiredConfig(cfg, plan),
+		Devices:    desiredDevices(cfg, plan),
 	}
 }
 

@@ -53,7 +53,7 @@ func (f *Fake) Run(_ context.Context, c runner.Command) (runner.Result, error) {
 	for prefix, out := range f.Stdout {
 		if strings.HasPrefix(cmd, prefix) {
 			if c.Stdout != nil {
-				fmt.Fprint(c.Stdout, out)
+				_, _ = fmt.Fprint(c.Stdout, out)
 			}
 			return runner.Result{Stdout: []byte(out)}, nil
 		}
@@ -70,7 +70,27 @@ func (f *Fake) Commands() []string {
 	return out
 }
 
-// LastCommand は最後に実行されたコマンド文字列を返す。
+// LastArgv は最後に実行されたコマンドを、マスクせずに返す。
+// 実際に実行される引数を検証するために使う。
+func (f *Fake) LastArgv() string {
+	if len(f.Calls) == 0 {
+		return ""
+	}
+	c := f.Calls[len(f.Calls)-1]
+	return strings.Join(append([]string{c.Name}, c.Args...), " ")
+}
+
+// Argvs は実行されたコマンドを、マスクせずに返す。
+func (f *Fake) Argvs() []string {
+	out := make([]string, 0, len(f.Calls))
+	for _, c := range f.Calls {
+		out = append(out, strings.Join(append([]string{c.Name}, c.Args...), " "))
+	}
+	return out
+}
+
+// LastCommand は最後に実行されたコマンドの表示用文字列を返す。
+// Secretを含みうる値はマスクされる。
 func (f *Fake) LastCommand() string {
 	if len(f.Calls) == 0 {
 		return ""
@@ -84,10 +104,4 @@ func (f *Fake) LastStdin() string {
 		return ""
 	}
 	return f.Stdins[len(f.Stdins)-1]
-}
-
-// Reset は記録を消去する。
-func (f *Fake) Reset() {
-	f.Calls = nil
-	f.Stdins = nil
 }

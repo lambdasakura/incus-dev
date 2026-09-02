@@ -53,11 +53,14 @@ CLIのフラグ・出力・既定値を変更した場合、`docs/manual/03-comm
 ## コマンド
 
 ```bash
-make build          # ./bin/idev をビルド
-make test           # go test ./...（Incus不要）
+make build              # ./bin/idev をビルド
+make test               # go test ./...（Incus不要）
+make cover              # カバレッジ（-coverpkg=./... で横断集計）
 make test-integration   # go test -tags integration ./test/integration/...（Incus必須）
-make lint           # gofmt -l . && go vet ./...
-make check          # lint + test
+make lint               # golangci-lint（無ければ gofmt + go vet）
+make fmt                # 整形
+make tools              # golangci-lint を導入
+make check              # lint + test
 ```
 
 ## 開発フロー（TDD）
@@ -71,6 +74,11 @@ make check          # lint + test
 5. リファクタリングする
 
 「実装してからテストを書く」「テストを書かずにコミットする」は行わない。
+
+カバレッジは到達可能な分岐をすべて網羅することを目標とする。
+ただし **カバレッジのために検査を削ったり、テスト専用の注入点を実装へ
+埋め込んだりしない**。不変条件により到達しない防御的分岐は残してよい
+（仕様 08-testing.md「カバレッジ」参照）。
 
 Incus daemonが無い環境でも `make test` が全て通ること。
 Incusに触れるテストは `test/integration/` に置き `//go:build integration` を付ける。
@@ -101,7 +109,9 @@ cmd/idev
 - エラーは `fmt.Errorf("...: %w", err)` でラップする
 - 一時ファイル・一時ディレクトリは `defer` で必ず削除する
 - ログは `log/slog`。通常は `[idev] ...` 形式、`--verbose` でdebug
-- Secretを含みうる引数・環境変数をログへ出さない
+- Secretを含みうる引数・環境変数をログやエラーへ出さない。
+  外部コマンドへ渡す値は `runner.Command.Redact` で表示時にマスクする
+  （実行される引数は変えない）
 - `CGO_ENABLED=0` でビルドできない依存を追加しない
 - 標準ライブラリで足りる領域に依存を足さない
 

@@ -12,11 +12,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lambdasakura/incus-dev/schemas"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"sigs.k8s.io/yaml"
+
+	"github.com/lambdasakura/incus-dev/schemas"
 )
 
 // Options は Parse の挙動を制御する。
@@ -29,7 +30,7 @@ type Options struct {
 // Load は dev.yml を読み込み、validationを行う。
 // configPath は <root>/.incus-dev/dev.yml を想定する。
 func Load(configPath string) (*Config, error) {
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) //nolint:gosec // 利用者が指定した設定ファイルを読むことが目的
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", configPath, err)
 	}
@@ -48,9 +49,13 @@ func Parse(data []byte, opt Options) (*Config, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 
-	raw, err := decodeRaw(jsonData)
+	doc, err := decodeDocument(jsonData)
 	if err != nil {
 		return nil, err
+	}
+	raw, ok := doc.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("parse yaml: document must be a mapping")
 	}
 
 	// schema versionは他のvalidationより先に確認する（仕様 3.2）。
@@ -59,9 +64,7 @@ func Parse(data []byte, opt Options) (*Config, error) {
 	}
 
 	var ps problems
-	if err := validateSchema(jsonData, &ps); err != nil {
-		return nil, err
-	}
+	validateSchema(doc, &ps)
 	if len(ps) > 0 {
 		return nil, ps.err()
 	}
@@ -80,19 +83,17 @@ func Parse(data []byte, opt Options) (*Config, error) {
 	return &c, nil
 }
 
-func decodeRaw(jsonData []byte) (map[string]any, error) {
+// decodeDocument はJSONを、JSON Schema検証にもそのまま渡せる形へデコードする。
+// 数値は json.Number として保持する。
+func decodeDocument(jsonData []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(jsonData))
 	dec.UseNumber()
 
-	var raw any
-	if err := dec.Decode(&raw); err != nil {
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("parse yaml: document must be a mapping")
-	}
-	return m, nil
+	return doc, nil
 }
 
 func checkSchemaVersion(raw map[string]any) error {
@@ -120,49 +121,46 @@ func checkSchemaVersion(raw map[string]any) error {
 	return nil
 }
 
-var (
-	compileOnce sync.Once
-	compiled    *jsonschema.Schema
-	compileErr  error
-)
+// devSchema は同梱されたJSON Schemaを返す。
+//
+// Schemaはバイナリへ同梱されており、これが壊れているのは利用者の入力ではなく
+// ビルド成果物の不具合であるため、regexp.MustCompile と同様にpanicさせる。
+// test/structure_test.go と config のテストで常に検証される。
+var devSchema = sync.OnceValue(func() *jsonschema.Schema {
+	sch, err := compileSchema(schemas.DevV1)
+	if err != nil {
+		panic("incus-devkit: embedded schema is broken: " + err.Error())
+	}
+	return sch
+})
 
-func devSchema() (*jsonschema.Schema, error) {
-	compileOnce.Do(func() {
-		const url = "https://github.com/lambdasakura/incus-dev/schemas/dev-v1.schema.json"
+// compileSchema はJSON SchemaをコンパイルするJSON。
+func compileSchema(raw []byte) (*jsonschema.Schema, error) {
+	const url = "https://github.com/lambdasakura/incus-dev/schemas/dev-v1.schema.json"
 
-		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schemas.DevV1))
-		if err != nil {
-			compileErr = fmt.Errorf("load embedded schema: %w", err)
-			return
-		}
-		c := jsonschema.NewCompiler()
-		if err := c.AddResource(url, doc); err != nil {
-			compileErr = fmt.Errorf("add embedded schema: %w", err)
-			return
-		}
-		compiled, compileErr = c.Compile(url)
-	})
-	return compiled, compileErr
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse schema: %w", err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource(url, doc); err != nil {
+		return nil, fmt.Errorf("add schema: %w", err)
+	}
+	return c.Compile(url)
 }
 
 // validateSchema はJSON Schemaによる構造検証を行い、問題を ps へ追加する。
-func validateSchema(jsonData []byte, ps *problems) error {
-	sch, err := devSchema()
-	if err != nil {
-		return err
-	}
-	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonData))
-	if err != nil {
-		return fmt.Errorf("parse yaml: %w", err)
+func validateSchema(doc any, ps *problems) {
+	err := devSchema().Validate(doc)
+	if err == nil {
+		return
 	}
 
-	err = sch.Validate(inst)
-	if err == nil {
-		return nil
-	}
 	var verr *jsonschema.ValidationError
 	if !errors.As(err, &verr) {
-		return err
+		// Validate は *ValidationError しか返さない。
+		*ps = append(*ps, Problem{Path: "(root)", Message: err.Error()})
+		return
 	}
 
 	// 中間ノードは "validation failed" のような要約しか持たないため、
@@ -171,7 +169,6 @@ func validateSchema(jsonData []byte, ps *problems) error {
 	collectLeafProblems(verr, message.NewPrinter(language.English), &found)
 	sort.SliceStable(found, func(i, j int) bool { return found[i].Path < found[j].Path })
 	*ps = append(*ps, found...)
-	return nil
 }
 
 func collectLeafProblems(e *jsonschema.ValidationError, p *message.Printer, out *[]Problem) {

@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/lambdasakura/incus-dev/internal/runner"
 	"sigs.k8s.io/yaml"
+
+	"github.com/lambdasakura/incus-dev/internal/runner"
 )
 
 // CLI は incus コマンドを呼び出す Client 実装。
@@ -27,10 +29,18 @@ var _ Client = (*CLI)(nil)
 
 // qualify はremoteでinstance名を修飾する。
 func (c *CLI) qualify(name string) string {
-	if c.Remote == "" || c.Remote == "local" {
-		return name
+	if remote := c.remoteRef(); remote != "" {
+		return remote + name
 	}
-	return c.Remote + ":" + name
+	return name
+}
+
+// remoteRef は remote 指定の接頭辞（"name:"）を返す。ローカルの場合は空。
+func (c *CLI) remoteRef() string {
+	if c.Remote == "" || c.Remote == "local" {
+		return ""
+	}
+	return c.Remote + ":"
 }
 
 // args はサブコマンドの直後にグローバルフラグを挿入した引数列を返す。
@@ -82,7 +92,7 @@ func (c *CLI) InstanceExists(ctx context.Context, name string) (bool, error) {
 }
 
 func isNotFound(err error) bool {
-	return err != nil && strings.Contains(err.Error(), ErrInstanceNotFound.Error())
+	return errors.Is(err, ErrInstanceNotFound)
 }
 
 // CreateInstance はinstanceを作成する（起動はしない）。
@@ -167,12 +177,30 @@ func (c *CLI) ApplyConfig(ctx context.Context, name string, config map[string]st
 	if len(config) == 0 {
 		return nil
 	}
-	args := c.args([]string{"config", "set"}, c.qualify(name))
+	args := runner.Args(c.args([]string{"config", "set"}, c.qualify(name))...)
 	for _, k := range sortedKeys(config) {
-		args = append(args, k+"="+config[k])
+		args.AddSecret(k + "=" + config[k])
 	}
-	_, err := c.run(ctx, "set config on "+name, args)
+
+	cmd := runner.Command{Label: "set config on " + name, Name: "incus"}
+	args.Apply(&cmd)
+
+	_, err := c.Runner.Run(ctx, cmd)
 	return err
+}
+
+// UnsetConfig は指定されたconfigキーを削除する。
+//
+// devkit自身が設定したキー（idmap方式の切り替えなど）を取り消すために使う。
+// 利用者が書いたキーへは使わない（仕様 05-incus.md 5.4.4）。
+func (c *CLI) UnsetConfig(ctx context.Context, name string, keys []string) error {
+	for _, k := range keys {
+		if _, err := c.run(ctx, "unset config on "+name,
+			c.args([]string{"config", "unset"}, c.qualify(name), k)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ApplyDevices は宣言されたdeviceを設定する。
@@ -199,33 +227,42 @@ func (c *CLI) ApplyDevices(ctx context.Context, name string, devices map[string]
 		}
 
 		if !exists {
-			args := c.args([]string{"config", "device", "add"}, c.qualify(name), devName, want.Type())
+			args := runner.Args(c.args([]string{"config", "device", "add"},
+				c.qualify(name), devName, want.Type())...)
 			for _, k := range sortedKeys(want) {
-				if k == "type" {
-					continue
+				if k != "type" {
+					args.AddSecret(k + "=" + want[k])
 				}
-				args = append(args, k+"="+want[k])
 			}
-			if _, err := c.run(ctx, "add device "+devName, args); err != nil {
+
+			cmd := runner.Command{Label: "add device " + devName, Name: "incus"}
+			args.Apply(&cmd)
+
+			if _, err := c.Runner.Run(ctx, cmd); err != nil {
 				return err
 			}
 			continue
 		}
 
-		var changed []string
+		base := c.args([]string{"config", "device", "set"}, c.qualify(name), devName)
+		args := runner.Args(base...)
+
+		changed := false
 		for _, k := range sortedKeys(want) {
-			if k == "type" {
+			if k == "type" || current[k] == want[k] {
 				continue
 			}
-			if current[k] != want[k] {
-				changed = append(changed, k+"="+want[k])
-			}
+			args.AddSecret(k + "=" + want[k])
+			changed = true
 		}
-		if len(changed) == 0 {
+		if !changed {
 			continue
 		}
-		args := append(c.args([]string{"config", "device", "set"}, c.qualify(name), devName), changed...)
-		if _, err := c.run(ctx, "set device "+devName, args); err != nil {
+
+		cmd := runner.Command{Label: "set device " + devName, Name: "incus"}
+		args.Apply(&cmd)
+
+		if _, err := c.Runner.Run(ctx, cmd); err != nil {
 			return err
 		}
 	}
@@ -234,7 +271,13 @@ func (c *CLI) ApplyDevices(ctx context.Context, name string, devices map[string]
 
 // ProfileExists はProfileの存在を返す。devkitはProfileを作成しない（REQ-007）。
 func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
-	res, err := c.run(ctx, "list profiles", c.args([]string{"profile", "list"}, "--format", "json"))
+	args := c.args([]string{"profile", "list"}, "--format", "json")
+	if remote := c.remoteRef(); remote != "" {
+		// incus profile list [<remote>:] — remoteを省略するとローカルを見てしまう
+		args = append(args, remote)
+	}
+
+	res, err := c.run(ctx, "list profiles", args)
 	if err != nil {
 		return false, err
 	}
@@ -254,43 +297,54 @@ func (c *CLI) ProfileExists(ctx context.Context, name string) (bool, error) {
 
 // Exec はコンテナ内でコマンドを実行し、終了コードを返す。
 func (c *CLI) Exec(ctx context.Context, name string, argv []string, opt ExecOptions) (int, error) {
-	args := c.args([]string{"exec"}, c.qualify(name))
+	args := runner.Args(c.args([]string{"exec"}, c.qualify(name))...)
 
 	if opt.Cwd != "" {
-		args = append(args, "--cwd", opt.Cwd)
+		args.Add("--cwd", opt.Cwd)
+	}
+	for _, k := range sortedKeys(opt.PublicEnv) {
+		args.Add("--env", k+"="+opt.PublicEnv[k])
 	}
 	for _, k := range sortedKeys(opt.Env) {
-		args = append(args, "--env", k+"="+opt.Env[k])
+		args.Add("--env").AddSecret(k + "=" + opt.Env[k])
 	}
-	if uid, ok := numericUser(opt.User); ok {
-		args = append(args, "--user", uid)
+	if opt.User != "" {
+		uid, ok := numericUser(opt.User)
+		if !ok {
+			// incus exec --user はUIDのみを受け付ける。
+			// ユーザー名の解決は呼び出し側の責務であり、黙って無視しない。
+			return 0, fmt.Errorf("exec user must be a numeric uid, got %q", opt.User)
+		}
+		args.Add("--user", uid)
 	}
 	if opt.TTY {
-		args = append(args, "-t")
+		args.Add("-t")
 	} else {
-		args = append(args, "-T")
+		args.Add("-T")
 	}
-	args = append(args, "--")
-	args = append(args, argv...)
 
-	res, err := c.Runner.Run(ctx, runner.Command{
+	// 実行するコマンドは診断の中心であり、失敗時に表示する（仕様 04-cli.md 4.10）。
+	// 複数行のスクリプトは表示時に折り畳まれる（runner.Command.String）。
+	args.Add("--")
+	args.Add(argv...)
+
+	cmd := runner.Command{
 		Label:       "exec in " + name,
 		Name:        "incus",
-		Args:        args,
 		Stdin:       opt.Stdin,
 		Stdout:      opt.Stdout,
 		Stderr:      opt.Stderr,
 		Interactive: opt.TTY,
-	})
+	}
+	args.Apply(&cmd)
+
+	res, err := c.Runner.Run(ctx, cmd)
 	return res.ExitCode, err
 }
 
 // numericUser は数値のユーザー指定を返す。
 // incus exec --user はUIDのみを受け付けるため、名前指定は呼び出し側で扱う。
 func numericUser(user string) (string, bool) {
-	if user == "" {
-		return "", false
-	}
 	if _, err := strconv.Atoi(user); err != nil {
 		return "", false
 	}
@@ -313,9 +367,14 @@ func (c *CLI) WaitReady(ctx context.Context, name string, opt WaitOptions) error
 		if err == nil && code == 0 {
 			return nil
 		}
-		lastErr = err
+		if err != nil {
+			lastErr = err
+		}
 
 		if time.Now().After(deadline) {
+			if lastErr == nil {
+				return fmt.Errorf("instance %s did not become ready within %s", name, opt.Timeout)
+			}
 			return fmt.Errorf("instance %s did not become ready within %s: %w", name, opt.Timeout, lastErr)
 		}
 		select {
@@ -327,12 +386,7 @@ func (c *CLI) WaitReady(ctx context.Context, name string, opt WaitOptions) error
 }
 
 func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }
 
 func sortedDeviceNames(m map[string]Device) []string {

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/lambdasakura/incus-dev/internal/config"
 )
 
@@ -17,6 +18,9 @@ func mustParse(t *testing.T, yaml string) *config.Config {
 	return c
 }
 
+// rawPlan は raw 方式で解決済みの計画。
+var rawPlan = idmapPlan{Mode: config.IDMapRaw, Managed: true, UID: 1000, GID: 1000}
+
 const planBase = `
 schema: 1
 project:
@@ -28,12 +32,13 @@ instance:
 func TestDesiredDevicesIncludesWorkspace(t *testing.T) {
 	cfg := mustParse(t, planBase)
 
-	devices := desiredDevices(cfg, config.IDMapRaw)
+	devices := desiredDevices(cfg, rawPlan)
 
 	want := map[string]string{
 		"type":   "disk",
 		"source": "/home/u/src/example",
 		"path":   "/workspace",
+		"shift":  "false",
 	}
 	if diff := cmp.Diff(want, map[string]string(devices["workspace"])); diff != "" {
 		t.Errorf("workspace device mismatch (-want +got):\n%s", diff)
@@ -48,7 +53,7 @@ func TestDesiredDevicesResolvesRelativeSource(t *testing.T) {
       source: ./assets
       path: /data
 `)
-	devices := desiredDevices(cfg, config.IDMapRaw)
+	devices := desiredDevices(cfg, rawPlan)
 
 	if got := devices["data"]["source"]; got != "/home/u/src/example/assets" {
 		t.Errorf("source = %q, project rootを基準に解決すること", got)
@@ -63,7 +68,7 @@ func TestDesiredDevicesKeepsAbsoluteSource(t *testing.T) {
       source: /srv/data
       path: /data
 `)
-	if got := desiredDevices(cfg, config.IDMapRaw)["data"]["source"]; got != "/srv/data" {
+	if got := desiredDevices(cfg, rawPlan)["data"]["source"]; got != "/srv/data" {
 		t.Errorf("source = %q", got)
 	}
 }
@@ -73,7 +78,7 @@ func TestDesiredConfigIncludesManagedMarkers(t *testing.T) {
   config:
     limits.cpu: "8"
 `)
-	got := desiredConfig(cfg, config.IDMapRaw)
+	got := desiredConfig(cfg, rawPlan)
 
 	if got["limits.cpu"] != "8" {
 		t.Errorf("limits.cpu = %q", got["limits.cpu"])
@@ -92,7 +97,12 @@ func TestDesiredConfigDoesNotOverrideExplicitIDMap(t *testing.T) {
   config:
     raw.idmap: "both 1234 0"
 `)
-	if got := desiredConfig(cfg, config.IDMapRaw)["raw.idmap"]; got != "both 1234 0" {
+	plan, err := resolveIDMap(cfg, 1000, 1000, permitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := desiredConfig(cfg, plan)["raw.idmap"]; got != "both 1234 0" {
 		t.Errorf("raw.idmap = %q, 明示指定を上書きしないこと", got)
 	}
 }

@@ -77,6 +77,7 @@ command -v python3 >/dev/null 2>&1 ||
 - Debian系以外のイメージでは失敗しうることを明記する
 - プロジェクト側から完全に上書き可能とする
 - 失敗時、`bootstrap` を明示的に定義するよう促すエラーメッセージを表示する
+  （既定bootstrapであることが分かる名前を付け、エラーに含める）
 
 ### 6.3.3 上書き
 
@@ -117,9 +118,10 @@ incus exec <instance> --env KEY=VALUE ... -- <shell> -c '<script>'
 
 - 既定シェルは `/bin/sh`。`shell` フィールドで変更可能
 - 終了コードが0以外の場合は失敗とする
-- stdout / stderrはdevkitの出力へ中継する
-  - 通常モードでは要約、`--verbose` では全量
+- stdout / stderrはdevkitの出力へそのまま中継する
+  （[04-cli.md](04-cli.md) 4.9。長時間かかる処理の進行が見えなくなるため要約しない）
 - `env` は 3.10.1 のdevkit変数に追記される（プロジェクト指定が優先）
+- `env` の値はSecretを含みうるため、ログやエラーへは値を出さない
 - 対話的入力は行わない（stdinは接続しない）
 - TTYは割り当てない（`idev shell` とは異なる）
 
@@ -155,12 +157,14 @@ devkitが生成する。
 
 ```yaml
 all:
-  hosts:
-    dev:
-      ansible_host: dev-example-project
-      ansible_connection: community.general.incus
-      ansible_incus_remote: local
-      ansible_incus_project: default
+  children:
+    devkit:
+      hosts:
+        dev:
+          ansible_host: dev-example-project
+          ansible_connection: community.general.incus
+          ansible_incus_remote: local
+          ansible_incus_project: default
 ```
 
 - 対象ホストのグループ名・ホスト名は固定とし、仕様として文書化する

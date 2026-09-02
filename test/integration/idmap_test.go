@@ -52,6 +52,48 @@ func TestWorkspaceIDMapAuto(t *testing.T) {
 	}
 }
 
+// workspace以外のホストマウントも、既定のまま読み書きできること。
+// idmap方式はホスト依存で決まるため、dev.yml に何も書かなくても
+// 同じ扱いになる必要がある。
+func TestExtraHostMountIsWritable(t *testing.T) {
+	f := newFixture(t, idmapYAML)
+
+	data := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "host.txt"), []byte("from host\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, filepath.Join(f.root, ".incus-dev", "dev.yml"),
+		strings.ReplaceAll(idmapYAML, "{{PROJECT}}", f.project)+
+			strings.ReplaceAll(`  devices:
+    extdata:
+      type: disk
+      source: DATA
+      path: /data
+`, "DATA", data))
+	// テンプレートのimageも展開する
+	body, err := os.ReadFile(filepath.Join(f.root, ".incus-dev", "dev.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(f.root, ".incus-dev", "dev.yml"),
+		strings.ReplaceAll(string(body), "{{IMAGE}}", testImage))
+
+	f.mustRun("up")
+
+	if got := f.mustRun("shell", "--", "cat", "/data/host.txt"); !strings.Contains(got, "from host") {
+		t.Errorf("追加マウントが読めない: %q", got)
+	}
+	f.mustRun("shell", "--", "sh", "-c", "echo written > /data/from-container.txt")
+
+	if _, err := os.Stat(filepath.Join(data, "from-container.txt")); err != nil {
+		t.Errorf("追加マウントへ書き込めていない: %v", err)
+	}
+}
+
 // idmap: shift は追加のホスト設定なしでworkspaceを読み書き可能にする
 func TestWorkspaceIDMapShift(t *testing.T) {
 	f := newFixture(t, idmapYAML+"workspace:\n  idmap: shift\n")

@@ -74,6 +74,7 @@ type Result struct {
 - 失敗時は `exec.ExitError` から exit code を取得し、
   操作名・対象・コマンド・exit code・stderr を含むエラーを構築する
 - ログ出力時、Secretを含みうる引数・環境変数はマスクする
+  （indexの指定間違いを防ぐため、`ArgList` で引数の追加と同時に区別を宣言する）
 - dry-runモードでは実行せず、実行予定コマンドを記録する
 - 対話実行（`idev shell`）では `os.Stdin` / `os.Stdout` / `os.Stderr` を直接引き継ぐ
 

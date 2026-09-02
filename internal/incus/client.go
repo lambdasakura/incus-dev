@@ -51,9 +51,12 @@ type InstanceSpec struct {
 
 // ExecOptions はコンテナ内でのコマンド実行オプション。
 type ExecOptions struct {
-	Env  map[string]string
-	Cwd  string
-	User string
+	// Env は利用者が指定した環境変数。Secretを含みうるため表示時に値を隠す。
+	Env map[string]string
+	// PublicEnv はdevkitが注入する環境変数。診断に役立つため表示する。
+	PublicEnv map[string]string
+	Cwd       string
+	User      string
 	// TTY が真の場合、擬似端末を割り当てて標準入出力を引き継ぐ。
 	TTY    bool
 	Stdin  io.Reader
@@ -68,16 +71,18 @@ type WaitOptions struct {
 }
 
 // Client はIncus操作のインターフェース。テストではfakeへ差し替える。
+//
+// 実装差し替えの負担を増やさないよう、実際に使う操作だけを並べる。
+// instanceの存在確認は Instance と errors.Is(ErrInstanceNotFound) で行う。
 type Client interface {
 	Instance(ctx context.Context, name string) (*Instance, error)
-	InstanceExists(ctx context.Context, name string) (bool, error)
 
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 	StartInstance(ctx context.Context, name string) error
-	StopInstance(ctx context.Context, name string) error
 	DeleteInstance(ctx context.Context, name string) error
 
 	ApplyConfig(ctx context.Context, name string, config map[string]string) error
+	UnsetConfig(ctx context.Context, name string, keys []string) error
 	ApplyDevices(ctx context.Context, name string, devices map[string]Device) error
 
 	ProfileExists(ctx context.Context, name string) (bool, error)
