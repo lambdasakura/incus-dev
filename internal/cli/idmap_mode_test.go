@@ -370,3 +370,56 @@ func TestResolveIDMapWhenShiftIsUnsupported(t *testing.T) {
 	}
 	_ = supported
 }
+
+// workspace.owner decides the container side of raw.idmap (spec 3.7.3).
+func TestRawIDMapUsesTheOwner(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			"root by default, as before",
+			planBase + "workspace:\n  idmap: raw\n",
+			"uid 1000 0\ngid 1001 0",
+		},
+		{
+			"the account the project works as",
+			planBase + "workspace:\n  idmap: raw\n  owner:\n    uid: 1000\n    gid: 1002\n",
+			"uid 1000 1000\ngid 1001 1002",
+		},
+		{
+			"gid follows uid",
+			planBase + "workspace:\n  idmap: raw\n  owner:\n    uid: 500\n",
+			"uid 1000 500\ngid 1001 500",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, err := resolveIDMap(mustParse(t, tt.yaml), 1000, 1001, permitted, nil)
+			if err != nil {
+				t.Fatalf("resolveIDMap() error = %v", err)
+			}
+			if got := plan.rawIDMap(); got != tt.want {
+				t.Errorf("rawIDMap() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// auto that falls back to shift cannot honour owner, and says so.
+func TestFallbackWarningSaysOwnerIsNotApplied(t *testing.T) {
+	plan, err := resolveIDMap(
+		mustParse(t, planBase+"workspace:\n  owner:\n    uid: 1000\n"),
+		1000, 1001, denied, func() (bool, error) { return true, nil })
+	if err != nil {
+		t.Fatalf("resolveIDMap() error = %v", err)
+	}
+	if plan.Mode != config.IDMapShift {
+		t.Fatalf("Mode = %q, want the fallback", plan.Mode)
+	}
+	if !strings.Contains(plan.Warning, "owner") {
+		t.Errorf("warning = %q, want it to say owner is not applied", plan.Warning)
+	}
+}

@@ -9,8 +9,13 @@ import (
 	"fmt"
 )
 
-// idmapKey is the one scalar the map form carries at the section level.
-const idmapKey = "idmap"
+// The keys that belong to the section rather than to a mount. idmap is a
+// scalar and owner an object, which is why the form is decided by an object
+// value that is not one of these.
+const (
+	idmapKey = "idmap"
+	ownerKey = "owner"
+)
 
 // UnmarshalJSON reads either form of the workspace section (spec 3.7.2).
 //
@@ -25,7 +30,10 @@ func (w *Workspace) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("workspace: %w", err)
 	}
 
-	if !hasObjectValue(raw) {
+	if err := w.readOwner(raw); err != nil {
+		return err
+	}
+	if !hasMountEntry(raw) {
 		return w.unmarshalSingle(data)
 	}
 	return w.unmarshalMap(raw)
@@ -68,6 +76,9 @@ func (w *Workspace) unmarshalMap(raw map[string]json.RawMessage) error {
 			_ = json.Unmarshal(value, &w.IDMap)
 			continue
 		}
+		if name == ownerKey {
+			continue // readOwner already took it.
+		}
 		if !isJSONObject(value) {
 			continue
 		}
@@ -81,11 +92,31 @@ func (w *Workspace) unmarshalMap(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// hasObjectValue reports whether any value is an object, which is what tells
-// the map form from the single one (spec 3.7.2).
-func hasObjectValue(raw map[string]json.RawMessage) bool {
-	for _, value := range raw {
-		if isJSONObject(value) {
+// readOwner takes the section-level owner, if there is one.
+//
+// A wrong shape is left to validateWorkspaceShape, which reports it with the
+// path the author wrote.
+func (w *Workspace) readOwner(raw map[string]json.RawMessage) error {
+	value, ok := raw[ownerKey]
+	if !ok || !isJSONObject(value) {
+		return nil
+	}
+	var owner Owner
+	if err := json.Unmarshal(value, &owner); err != nil {
+		return fmt.Errorf("workspace.owner: %w", err)
+	}
+	w.Owner = &owner
+	return nil
+}
+
+// hasMountEntry reports whether any value is a mount, which is what tells the
+// map form from the single one (spec 3.7.2).
+//
+// owner is an object too, and belongs to the section either way, so it is not
+// what decides.
+func hasMountEntry(raw map[string]json.RawMessage) bool {
+	for name, value := range raw {
+		if name != ownerKey && isJSONObject(value) {
 			return true
 		}
 	}

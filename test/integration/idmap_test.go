@@ -407,3 +407,74 @@ func TestIDMapMapsOppositeEndsForRawAndShift(t *testing.T) {
 		})
 	}
 }
+
+// workspace.owner puts the host user on the account the project works as
+// (spec 03-configuration.md 3.7.3).
+//
+// The unit tests check what idev writes into raw.idmap. Whether the kernel
+// then makes those files the host user's is the daemon's part, and it is the
+// whole point of the setting.
+func TestWorkspaceOwnerMakesTheAccountTheHostUser(t *testing.T) {
+	requireIncus(t)
+
+	hostUID, hostGID := os.Getuid(), os.Getgid()
+	if hostUID == 0 {
+		t.Skip("running as root leaves nothing to map")
+	}
+
+	const containerID = 4242
+	f := newFixture(t, fmt.Sprintf(strings.ReplaceAll(idmapYAML,
+		"  image: {{IMAGE}}", "  image: {{IMAGE}}")+`
+workspace:
+  idmap: raw
+  owner:
+    uid: %d
+    gid: %d
+provision:
+  - name: account
+    run: |
+      addgroup -g %d probe 2>/dev/null || groupadd -g %d probe
+      adduser -D -H -u %d -G probe probe 2>/dev/null || useradd -M -u %d -g %d probe
+`, containerID, containerID, containerID, containerID, containerID, containerID, containerID))
+
+	if out, err := f.run("up"); err != nil {
+		t.Skipf("this host cannot use raw.idmap: %v\n%s", err, out)
+	}
+
+	// What idev asked the daemon for.
+	want := fmt.Sprintf("uid %d %d\ngid %d %d", hostUID, containerID, hostGID, containerID)
+	if got := strings.TrimSpace(incusOut(t, "config", "get", f.instanceName(), "raw.idmap")); got != want {
+		t.Errorf("raw.idmap = %q, want %q", got, want)
+	}
+
+	// And what it means: the account writes files that are the host user's.
+	f.mustRun("exec", "--user", "probe", "--", "sh", "-c", "touch /workspace/by-account")
+	info, err := os.Stat(filepath.Join(f.root, "by-account"))
+	if err != nil {
+		t.Fatalf("by-account: %v", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("no ownership from %T", info.Sys())
+	}
+	if int(stat.Uid) != hostUID || int(stat.Gid) != hostGID {
+		t.Errorf("the account's file is owned by %d:%d on the host, want %d:%d",
+			stat.Uid, stat.Gid, hostUID, hostGID)
+	}
+
+	// The trade: root is no longer the host user.
+	f.mustRun("exec", "--", "touch", "/workspace/by-root")
+	rootInfo, err := os.Stat(filepath.Join(f.root, "by-root"))
+	if err != nil {
+		t.Fatalf("by-root: %v", err)
+	}
+	rootStat, ok := rootInfo.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("no ownership from %T", rootInfo.Sys())
+	}
+	if int(rootStat.Uid) == hostUID {
+		t.Errorf("a file the container wrote as root is still the host user's; "+
+			"one host id cannot map onto two container ids, so owner moves it "+
+			"away from root (uid %d)", rootStat.Uid)
+	}
+}

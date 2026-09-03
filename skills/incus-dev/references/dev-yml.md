@@ -163,6 +163,10 @@ workspace:
 
 - `target` has no default except on `main`
 - `idmap` cannot go inside a mount: Incus keeps one `raw.idmap` per instance
+- `owner: {uid, gid}` beside `idmap` (raw only) maps the host user onto that
+  container id instead of root, so the account `shell.user` names writes
+  files that are yours. Root then is not: one host id maps onto one
+  container id, and provisioning runs as root
 - `main` is applied as the device named `workspace`, so `workspace` is not a
   usable mount name; every other key is its own device name
 - a mount name cannot collide with `instance.devices` or `volumes`

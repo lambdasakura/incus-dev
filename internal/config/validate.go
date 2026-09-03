@@ -448,6 +448,8 @@ func validateWorkspace(c *Config, ps *problems) {
 	}
 
 	mounts := c.Mounts()
+	validateOwner(c, ps)
+
 	for _, name := range sortedKeys(mounts) {
 		mount := mounts[name]
 		target := c.mountPath(name, "target")
@@ -468,6 +470,36 @@ func validateWorkspace(c *Config, ps *problems) {
 			continue
 		}
 		validateMountName(c, name, ps)
+	}
+}
+
+// validateOwner checks workspace.owner against the mapping mode.
+//
+// Refused rather than ignored where it cannot take effect: shift maps a
+// container id onto the host id of the same number and has no target to
+// choose, none maps nothing, and an author who wrote owner believes it applied
+// (spec 03-configuration.md 3.7.3).
+func validateOwner(c *Config, ps *problems) {
+	if c.Workspace == nil || c.Workspace.Owner == nil {
+		return
+	}
+	owner := c.WorkspaceOrDefault().Owner
+
+	if owner.UID < 0 {
+		ps.add("workspace.owner.uid", "must not be negative, got %d", owner.UID)
+	}
+	if owner.GID < 0 {
+		ps.add("workspace.owner.gid", "must not be negative, got %d", owner.GID)
+	}
+
+	switch mode := c.WorkspaceOrDefault().IDMap; mode {
+	case IDMapShift:
+		ps.add("workspace.owner", "cannot be used with idmap: shift, which maps "+
+			"a container id onto the host id of the same number and has no "+
+			"target to choose. Use idmap: raw")
+	case IDMapNone:
+		ps.add("workspace.owner", "cannot be used with idmap: none, which maps "+
+			"nothing. Use idmap: raw")
 	}
 }
 
@@ -647,8 +679,8 @@ func validateWorkspaceShape(raw map[string]any, ps *problems) {
 	}
 
 	mapForm := false
-	for _, value := range section {
-		if _, isObject := value.(map[string]any); isObject {
+	for name, value := range section {
+		if _, isObject := value.(map[string]any); isObject && name != ownerKey {
 			mapForm = true
 			break
 		}
@@ -657,6 +689,10 @@ func validateWorkspaceShape(raw map[string]any, ps *problems) {
 	for _, name := range sortedKeys(section) {
 		entry, isObject := section[name].(map[string]any)
 
+		if name == ownerKey {
+			validateOwnerShape(entry, isObject, ps)
+			continue
+		}
 		if !mapForm {
 			if !slices.Contains(singleFormFields, name) {
 				ps.add("workspace."+name, "unknown field; the one-mount form takes %s",
@@ -689,6 +725,20 @@ func validateWorkspaceShape(raw map[string]any, ps *problems) {
 	}
 }
 
+// validateOwnerShape checks the section-level owner.
+func validateOwnerShape(entry map[string]any, isObject bool, ps *problems) {
+	if !isObject {
+		ps.add("workspace.owner", "must be a mapping of uid and gid")
+		return
+	}
+	for _, field := range sortedKeys(entry) {
+		if !slices.Contains(ownerFields, field) {
+			ps.add("workspace.owner."+field, "unknown field; owner takes %s",
+				strings.Join(ownerFields, ", "))
+		}
+	}
+}
+
 // singleFormFields are the keys of the one-mount form, and mountFields those
 // of one entry in the map form. They differ by idmap, which belongs to the
 // section rather than to a mount (spec 3.7.6).
@@ -697,6 +747,7 @@ func validateWorkspaceShape(raw map[string]any, ps *problems) {
 const maxDeviceNameLength = 63
 
 var (
-	singleFormFields = []string{"idmap", "readonly", "source", "target"}
+	singleFormFields = []string{"idmap", "owner", "readonly", "source", "target"}
 	mountFields      = []string{"readonly", "source", "target"}
+	ownerFields      = []string{"gid", "uid"}
 )

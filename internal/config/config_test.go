@@ -437,8 +437,9 @@ func TestRuntimeVersionCompatibility(t *testing.T) {
 		{"1.0", true},
 		{"1", true},
 		{"1.0.0", true},
-		{"1.1", true},  // the map form of workspace, which this idev provides
-		{"1.2", false}, // a minor newer than the current one cannot be satisfied
+		{"1.1", true},  // the map form of workspace
+		{"1.2", true},  // workspace.owner, which this idev provides
+		{"1.3", false}, // a minor newer than the current one cannot be satisfied
 		{"1.99", false},
 		{"2.0", false},
 		{"0.9", false},
@@ -1822,4 +1823,83 @@ func TestScopeDefaultsToPath(t *testing.T) {
 		t.Errorf("ScopeOrDefault() = %q, want %q: under %q both checkouts of a "+
 			"repository claim one instance", got, config.ScopePath, config.ScopeName)
 	}
+}
+
+// workspace.owner chooses which container id the host user is mapped onto
+// (spec 03-configuration.md 3.7.3).
+func TestWorkspaceOwner(t *testing.T) {
+	t.Run("omitted means root, as before", func(t *testing.T) {
+		got := parse(t, minimal).WorkspaceOrDefault().Owner
+		if got.UID != 0 || got.GID != 0 {
+			t.Errorf("Owner = %+v, want 0/0", got)
+		}
+	})
+
+	t.Run("uid and gid", func(t *testing.T) {
+		c := parse(t, minimal+`
+workspace:
+  idmap: raw
+  owner:
+    uid: 1000
+    gid: 1001
+`)
+		if got := c.WorkspaceOrDefault().Owner; got.UID != 1000 || got.GID != 1001 {
+			t.Errorf("Owner = %+v, want 1000/1001", got)
+		}
+	})
+
+	t.Run("gid follows uid when omitted", func(t *testing.T) {
+		c := parse(t, minimal+`
+workspace:
+  idmap: raw
+  owner:
+    uid: 1000
+`)
+		if got := c.WorkspaceOrDefault().Owner; got.UID != 1000 || got.GID != 1000 {
+			t.Errorf("Owner = %+v, want 1000/1000", got)
+		}
+	})
+
+	t.Run("in the map form too", func(t *testing.T) {
+		c := parse(t, minimal+`
+workspace:
+  idmap: raw
+  owner:
+    uid: 1000
+  main:
+    source: .
+    target: /workspace
+`)
+		if got := c.WorkspaceOrDefault().Owner; got.UID != 1000 {
+			t.Errorf("Owner = %+v, want 1000", got)
+		}
+		if _, ok := c.Mounts()["main"]; !ok {
+			t.Error("the mount was lost")
+		}
+	})
+
+	t.Run("refused where it cannot take effect", func(t *testing.T) {
+		for _, mode := range []string{"shift", "none"} {
+			err := parseErr(t, minimal+
+				"workspace:\n  idmap: "+mode+"\n  owner:\n    uid: 1000\n")
+			if !strings.Contains(err.Error(), "owner") {
+				t.Errorf("idmap %s: error = %q, want it to name owner", mode, err)
+			}
+		}
+	})
+
+	t.Run("a negative id is refused", func(t *testing.T) {
+		err := parseErr(t, minimal+"workspace:\n  idmap: raw\n  owner:\n    uid: -1\n")
+		if !strings.Contains(err.Error(), "owner") {
+			t.Errorf("error = %q, want it to name owner", err)
+		}
+	})
+
+	t.Run("owner is not a mount name", func(t *testing.T) {
+		err := parseErr(t, minimal+
+			"workspace:\n  owner:\n    source: ../x\n    target: /x\n")
+		if !strings.Contains(err.Error(), "owner") {
+			t.Errorf("error = %q, want it to name owner", err)
+		}
+	})
 }

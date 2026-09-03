@@ -366,6 +366,36 @@ directory.
 `raw` requires `root:<uid>:1` in `/etc/subuid` and `/etc/subgid`
 ([01-installation.md](01-installation.md), 1.5).
 
+### `owner`
+
+Which id inside the container the host user is mapped onto. `raw` only.
+
+```yaml
+workspace:
+  idmap: raw
+  owner:
+    uid: 1000        # this container id becomes you on the host
+    gid: 1000        # follows uid when omitted
+```
+
+Omitted, it is root -- and the workspace then looks root-owned from inside, so
+an account that is not root cannot write to it. Set `owner` to the ids of the
+account your `shell.user` names, and that account writes files that are yours
+on the host.
+
+**Root and the account cannot both be you.** One host id maps onto one
+container id; an instance asked for both does not start. So with `owner` set,
+what the container writes *as root* lands on a subuid you do not own -- and
+provisioning runs as root. Anything provisioning writes into the workspace is
+not yours.
+
+Numbers only: `raw.idmap` is set when the instance is created, and the account
+does not exist in it yet for a name to be looked up.
+
+`shift` and `none` refuse `owner`: `shift` maps a container id onto the host id
+of the same number and has no target to choose, and `none` maps nothing. `auto`
+accepts it but cannot apply it when it falls back to `shift`, and says so.
+
 The table is about files the container creates **as root**. Both modes are
 easier to read against what happens with neither, so here are all three,
 measured on a host whose user is uid 1000:

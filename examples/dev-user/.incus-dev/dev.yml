@@ -31,6 +31,18 @@ workspace:
   # That is why DEV_UID and DEV_GID below have to be yours.
   idmap: shift
 
+  # The other way to get here is raw with an owner, which maps you onto the
+  # account instead of onto root:
+  #
+  #   idmap: raw
+  #   owner: {uid: 1000, gid: 1000}     # the account's ids, not yours
+  #
+  # It needs root:<your uid>:1 in /etc/subuid and /etc/subgid, and it is the
+  # one that works on WSL, whose kernel has no idmapped mounts. shift is used
+  # here because it needs nothing set up on the host, so this example runs as
+  # it stands. Under raw+owner what the container writes as root -- including
+  # anything provisioning puts in the workspace -- is not yours.
+
 provision:
   - name: base packages
     run: |

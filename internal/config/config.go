@@ -11,11 +11,11 @@ const SchemaVersion = 1
 // RuntimeVersion is the runtime compatibility version this CLI provides.
 // It is checked against runtime.version in dev.yml (spec 03-configuration.md 3.4).
 //
-// 1.1 added the map form of workspace (spec 3.7.2). A dev.yml written in it is
-// one an older idev cannot read at all -- the schema refuses the entry names --
-// so a project using it pins 1.1 to be told which idev it needs rather than
-// which keys are unknown.
-const RuntimeVersion = "1.1"
+// 1.1 added the map form of workspace (spec 3.7.2), 1.2 workspace.owner
+// (3.7.3). A dev.yml using either is one an older idev reads differently or
+// not at all, so a project pins the version to be told which idev it needs
+// rather than to have its declaration quietly not apply.
+const RuntimeVersion = "1.2"
 
 // Defaults (spec 03-configuration.md 3.6.3 and 3.7).
 const (
@@ -238,12 +238,29 @@ type Mount struct {
 // raw.idmap is one instance config key and cannot differ per disk (spec
 // 3.7.6).
 type Workspace struct {
-	IDMap  IDMapMode
+	IDMap IDMapMode
+	// Owner is the container-side id the host user is mapped onto under raw.
+	// nil means root, which is what idev did before it could be said.
+	Owner  *Owner
 	Mounts map[string]Mount
 	// mapForm records which form the file used, so validation can report the
 	// problem at the path the author wrote rather than at the normalised one.
 	mapForm bool
 }
+
+// Owner is the container-side identity the host user is mapped onto
+// (spec 03-configuration.md 3.7.3).
+//
+// Numbers only: raw.idmap is set when the instance is created, and no account
+// exists in it yet for a name to be looked up in.
+type Owner struct {
+	UID int `json:"uid"`
+	// GID follows UID when omitted, which is the usual arrangement.
+	GID *int `json:"gid,omitempty"`
+}
+
+// ResolvedOwner is an Owner with the defaults filled in.
+type ResolvedOwner struct{ UID, GID int }
 
 // WorkspaceMount is one resolved mount, with the section's idmap alongside.
 //
@@ -255,6 +272,10 @@ type WorkspaceMount struct {
 	Target   string
 	Readonly bool
 	IDMap    IDMapMode
+	// Owner travels here for the same reason IDMap does: it belongs to the
+	// instance, and every caller that asks for the workspace decides the
+	// mapping from it.
+	Owner ResolvedOwner
 }
 
 // WorkspaceOrDefault returns the project's own tree with defaults filled in.
@@ -273,6 +294,12 @@ func (c *Config) WorkspaceOrDefault() WorkspaceMount {
 	}
 	if c.Workspace.IDMap != "" {
 		ws.IDMap = c.Workspace.IDMap
+	}
+	if owner := c.Workspace.Owner; owner != nil {
+		ws.Owner = ResolvedOwner{UID: owner.UID, GID: owner.UID}
+		if owner.GID != nil {
+			ws.Owner.GID = *owner.GID
+		}
 	}
 	main, ok := c.Workspace.Mounts[MainMountName]
 	if !ok {

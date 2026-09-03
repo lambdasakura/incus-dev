@@ -160,6 +160,10 @@ workspace:
 
 - `target` に既定があるのは `main` だけ
 - `idmap` はmountの中に書けない（Incusの `raw.idmap` はinstanceに1つ）
+- `idmap` の隣に `owner: {uid, gid}`（`raw` のみ）を書くと、ホストの実行ユーザーを
+  rootではなくそのコンテナidへ写す。`shell.user` のアカウントが書いたファイルが
+  自分の所有になる。代わりにrootは自分ではなくなる（1ホストidは1コンテナidへ、
+  かつprovisioningはrootで走る）
 - `main` は `workspace` という名前のdeviceになるため、`workspace` はmount名に
   使えない。他のキーはそのままdevice名になる
 - mount名は `instance.devices` や `volumes` のキーと衝突できない

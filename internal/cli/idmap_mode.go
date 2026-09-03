@@ -19,6 +19,10 @@ type idmapPlan struct {
 	Managed bool
 	// UID and GID are the invoking host user.
 	UID, GID int
+	// Owner is the container-side id the host user is mapped onto. The zero
+	// value is root, which is what raw did before it could be chosen
+	// (spec 03-configuration.md 3.7.3).
+	Owner config.ResolvedOwner
 	// Warning is what to tell the user. Empty means nothing.
 	Warning string
 }
@@ -34,8 +38,8 @@ func (p idmapPlan) rawIDMap() string {
 	if !p.Managed || p.Mode != config.IDMapRaw {
 		return ""
 	}
-	// The uid and the gid can differ, so map them separately.
-	return fmt.Sprintf("uid %d 0\ngid %d 0", p.UID, p.GID)
+	// The uid and the gid can differ on both sides, so map them separately.
+	return fmt.Sprintf("uid %d %d\ngid %d %d", p.UID, p.Owner.UID, p.GID, p.Owner.GID)
 }
 
 // userManagesIDMap reports whether the user set the mapping themselves.
@@ -59,8 +63,9 @@ func userManagesIDMap(cfg *config.Config) bool {
 func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) error,
 	shiftOK func() (bool, error),
 ) (idmapPlan, error) {
-	plan := idmapPlan{UID: uid, GID: gid}
-	declared := cfg.WorkspaceOrDefault().IDMap
+	ws := cfg.WorkspaceOrDefault()
+	plan := idmapPlan{UID: uid, GID: gid, Owner: ws.Owner}
+	declared := ws.IDMap
 
 	if userManagesIDMap(cfg) {
 		if cfg.Workspace != nil && cfg.Workspace.IDMap != "" {
@@ -89,7 +94,7 @@ func resolveIDMap(cfg *config.Config, uid, gid int, check func(uid, gid int) err
 				return idmapPlan{}, neitherMethodError(uid, gid, rawErr)
 			}
 			plan.Mode = config.IDMapShift
-			plan.Warning = fallbackWarning(uid, gid)
+			plan.Warning = fallbackWarning(uid, gid, cfg.Workspace != nil && cfg.Workspace.Owner != nil)
 			return plan, nil
 		}
 		plan.Mode = config.IDMapRaw
@@ -138,8 +143,14 @@ func neitherMethodError(uid, gid int, rawErr error) error {
 }
 
 // fallbackWarning says that it fell back to shift, and how to do better.
-func fallbackWarning(uid, gid int) string {
-	return fmt.Sprintf(
+func fallbackWarning(uid, gid int, ownerDeclared bool) string {
+	owner := ""
+	if ownerDeclared {
+		// It names a container id for raw to map onto, and shift maps every
+		// id onto the host id of the same number instead.
+		owner = "\n        workspace.owner is not applied under shift."
+	}
+	return owner + fmt.Sprintf(
 		"workspace is mounted with shift (idmapped mount) because raw.idmap is not permitted on this host.\n"+
 			"        Files created inside the container will be owned by root on the host.\n"+
 			"        To have them owned by you, add 'root:%d:1' to %s and 'root:%d:1' to %s,\n"+
