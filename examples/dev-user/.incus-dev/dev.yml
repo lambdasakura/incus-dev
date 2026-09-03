@@ -12,7 +12,18 @@ project:
   name: dev-user-example
 
 instance:
-  image: images:ubuntu/24.04
+  # Debian rather than Ubuntu, and the reason is uid 1000. Under shift the
+  # account below has to hold *your* uid for the files it writes to be yours,
+  # and that is 1000 on most machines. Ubuntu's image already ships an account
+  # there ("ubuntu"), so creating a second one at 1000 gives two names for one
+  # id: id(1) answers with whichever getent returns first, and the shell you
+  # land in disagrees with $USER about who you are. Debian's image leaves 1000
+  # free.
+  #
+  # On Ubuntu, use the "ubuntu" account it already gives you -- set
+  # shell.user: ubuntu and skip the account step -- or move it out of the way
+  # first (usermod -u 1001 ubuntu && groupmod -g 1001 ubuntu).
+  image: images:debian/12
 
 workspace:
   source: .

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -148,6 +149,43 @@ func (f *fixture) runSplit(args ...string) (stdout, stderr string, err error) {
 	cmd.Stderr = &errOut
 	err = cmd.Run()
 	return out.String(), errOut.String(), err
+}
+
+// newFixtureFromExample runs one of the shipped examples/ directories.
+//
+// The example itself, not a copy of its shape: what these tests are for is the
+// file a user is told to copy, and a paraphrase of it can be right while the
+// file is wrong.
+func newFixtureFromExample(t *testing.T, name string) *fixture {
+	t.Helper()
+
+	requireIncus(t)
+
+	root := t.TempDir()
+	src := filepath.Join("..", "..", "examples", name, ".incus-dev")
+	if out, err := exec.Command("cp", "-r", src, filepath.Join(root, ".incus-dev")).CombinedOutput(); err != nil {
+		t.Fatalf("copy %s: %v\n%s", src, err, out)
+	}
+
+	path := filepath.Join(root, ".incus-dev", "dev.yml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := fmt.Sprintf("idev-it-%d", time.Now().UnixNano()%1e9)
+	text := regexp.MustCompile(`(?m)^  name: .*$`).ReplaceAllString(string(body), "  name: "+project)
+
+	// The ids the example asks for are the host's wherever the mapping is
+	// shift; under raw they are the container's and stay as written.
+	if strings.Contains(text, "idmap: shift") {
+		text = strings.ReplaceAll(text, `DEV_UID: "1000"`, fmt.Sprintf(`DEV_UID: "%d"`, os.Getuid()))
+		text = strings.ReplaceAll(text, `DEV_GID: "1000"`, fmt.Sprintf(`DEV_GID: "%d"`, os.Getgid()))
+	}
+	writeFile(t, path, text)
+
+	f := &fixture{t: t, root: root, project: project}
+	t.Cleanup(f.cleanup)
+	return f
 }
 
 // instanceName is what idev calls this project's instance.

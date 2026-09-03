@@ -7,7 +7,8 @@
 #     do shift at all
 #   - the ids below are the container's, not yours. Whoever runs idev is the
 #     one the mapping lands on, so this file is the same for everyone on the
-#     project, while the shift example needs each person's own uid
+#     project, while the shift example needs each person's own uid -- and can
+#     collide with an account the base image already ships there
 #
 # What it costs: raw needs a line in /etc/subuid and /etc/subgid on the host,
 # and container root is no longer you (see workspace.owner below).
@@ -32,8 +33,13 @@ workspace:
   # could not write to it.
   idmap: raw
   owner:
-    uid: 1000
-    gid: 1000
+    # An id no common base image ships an account on. That freedom is the
+    # point: under shift the account must hold *your* uid, which is 1000 on
+    # most machines and already taken in Ubuntu's image by "ubuntu" -- two
+    # accounts on one id, and id(1) then answers with the wrong name. Here the
+    # id is the container's, so it can be one nothing else uses.
+    uid: 4242
+    gid: 4242
 
   # The trade, and it is not small: one host id maps onto one container id, so
   # with owner set container *root* is not you. Provisioning runs as root, so
@@ -57,8 +63,8 @@ provision:
     env:
       DEV_USER: developer
       # These are workspace.owner's ids, and have nothing to do with your own.
-      DEV_UID: "1000"
-      DEV_GID: "1000"
+      DEV_UID: "4242"
+      DEV_GID: "4242"
 
 shell:
   # Where 'idev shell' and 'idev exec' land. 'idev shell --user root' for the

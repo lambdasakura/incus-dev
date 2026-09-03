@@ -212,10 +212,22 @@ workspaceはコンテナ内からrootの所有に見えるので、そもそも�
 `DEV_UID` / `DEV_GID` がそれである。詳しくは
 [03-configuration.md](03-configuration.md) 3.7.3。
 
-イメージが既に同じuidのアカウントを持つ場合（Ubuntuイメージの `ubuntu` は
-uid 1000）、`useradd --non-unique` で両方が存在する。
-`id` が返す名前はgetentが先に返した方になるが、
-workspaceにとって意味を持つのはuidであり、それは要求したものになる。
+**イメージが既に同じuidのアカウントを持つ場合、作ってはならない。**
+Ubuntuのイメージは `ubuntu` を uid 1000 に持つ。そこへ2つ目を作ると、
+1つのidに2つの名前が付き、`id` はgetentが先に返した方を答える。
+`shell.user` で指定した名前と `id` の答えが食い違い、
+例が説明どおりのものを作れない。
+
+`shift` ではアカウントのuidが実行者のuidに固定されるため、
+イメージ側で空いている必要がある。Debianのイメージは uid 1000 が空いている。
+Ubuntuを使う場合は、既にある `ubuntu` をそのまま使う（`shell.user: ubuntu`）か、
+`usermod -u` で退けてから作る。
+
+`raw` + `owner`（10.3.1の後半）ではコンテナ側のidを選べるため、
+イメージが使っていないidにすればこの衝突は起きない。
+
+例のスクリプトは、要求したuidを既に別のアカウントが持っている場合に
+エラーで止まる。黙って2つ目を作ると、上の食い違いが起きるためである。
 
 一時的にrootで入るには `idev shell --user root` を使う
 （[04-cli.md](04-cli.md) 4.3）。`dev.yml` を書き換えると

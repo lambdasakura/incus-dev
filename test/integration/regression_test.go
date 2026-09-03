@@ -348,3 +348,47 @@ func TestDryRunRefusesWhatUpWouldRefuse(t *testing.T) {
 		})
 	}
 }
+
+// The account-creating examples land you in the account they name.
+//
+// examples/dev-user/ created "developer" on uid 1000 against an Ubuntu image,
+// which already ships "ubuntu" there. Both existed, id(1) answered "ubuntu"
+// while idev set USER=developer, and the example demonstrated something other
+// than what it described. Nothing but running it could have caught that: which
+// accounts an image ships is the image's business.
+func TestUserExamplesLandInTheAccountTheyName(t *testing.T) {
+	requireIncus(t)
+
+	for _, example := range []string{"dev-user", "dev-user-raw"} {
+		t.Run(example, func(t *testing.T) {
+			f := newFixtureFromExample(t, example)
+			out, err := f.run("up")
+			switch {
+			case err == nil:
+			case strings.Contains(out, "is not permitted on this host"),
+				strings.Contains(out, "needs idmapped mounts"):
+				// The host cannot do the mapping the example asks for. Skip
+				// only for that: skipping on any failure at all turns the
+				// regression this exists for into a pass, which is what a
+				// first draft of this test did.
+				t.Skipf("this host cannot do %s's idmap:\n%s", example, out)
+			default:
+				t.Fatalf("idev up failed: %v\n%s", err, out)
+			}
+
+			// The name the example declares as shell.user.
+			want := "developer"
+			if got := strings.TrimSpace(f.mustRun("exec", "--", "id", "-un")); got != want {
+				t.Errorf("id -un = %q, want %q: the account the example names is "+
+					"not the one the shell lands in", got, want)
+			}
+			// And nothing else holds its id, which is how the two came apart.
+			ids := f.mustRun("exec", "--user", "root", "--", "sh", "-c",
+				"getent passwd | awk -F: '$1 == \"developer\" || $3 == \"'\"$(id -u developer)\"'\" {print $1}'")
+			if names := strings.Fields(ids); len(names) != 1 {
+				t.Errorf("uid is shared by %v; two names for one id make id(1) "+
+					"answer with whichever getent returns first", names)
+			}
+		})
+	}
+}

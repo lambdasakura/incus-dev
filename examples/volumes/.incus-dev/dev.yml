@@ -16,7 +16,11 @@ project:
   name: volumes-example
 
 instance:
-  image: images:ubuntu/24.04
+  # Debian rather than Ubuntu because of uid 1000: under shift the account
+  # below has to hold your uid for the files it writes to be yours, and
+  # Ubuntu's image already ships an account there ("ubuntu"). Debian's leaves
+  # it free. See examples/dev-user/ for what to do on Ubuntu.
+  image: images:debian/12
 
 workspace:
   source: .

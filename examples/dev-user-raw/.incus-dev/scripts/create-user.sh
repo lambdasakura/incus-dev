@@ -14,12 +14,20 @@ if ! getent group "$gid" >/dev/null; then
 fi
 group="$(getent group "$gid" | cut -d: -f1)"
 
+# Refuse rather than shadow. Two accounts on one uid give that id two names,
+# and id(1) answers with whichever getent returns first -- so the shell you
+# land in disagrees with $USER about who you are. The base image is chosen so
+# this does not arise; another one may need the id moved out of the way first.
+existing="$(getent passwd "$uid" | cut -d: -f1 || true)"
+if [ -n "$existing" ] && [ "$existing" != "$user" ]; then
+    echo "uid $uid already belongs to '$existing' in this image." >&2
+    echo "Use it (DEV_USER=$existing), or move it first:" >&2
+    echo "  usermod -u <other uid> $existing" >&2
+    exit 1
+fi
+
 if ! id "$user" >/dev/null 2>&1; then
-    # --non-unique: the image usually ships an account on uid 1000 already
-    # (Ubuntu's is "ubuntu"). Both names then exist; what the workspace cares
-    # about is the id.
-    useradd --create-home --shell /bin/bash --non-unique \
-        --uid "$uid" --gid "$group" "$user"
+    useradd --create-home --shell /bin/bash --uid "$uid" --gid "$group" "$user"
 fi
 
 echo "$user ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/90-$user"
