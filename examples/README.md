@@ -12,7 +12,8 @@ they are not embedded in the binary.
 | [minimal](minimal/) | A single `dev.yml`, nothing else |
 | [shell-based](shell-based/) | Provisioned with shell scripts; no Ansible |
 | [ansible-based](ansible-based/) | Provisioned with Ansible |
-| [dev-user](dev-user/) | Provisioning creates an ordinary account; `idev shell` lands in it |
+| [dev-user](dev-user/) | Provisioning creates an ordinary account; `idev shell` lands in it (`idmap: shift`) |
+| [dev-user-raw](dev-user-raw/) | The same, mapped with `raw` and `workspace.owner` -- the way that works on WSL |
 | [volumes](volumes/) | Several persistent volumes that survive `idev rebuild` |
 | [multi-workspace](multi-workspace/) | Several host directories mounted, one of them read-only |
 

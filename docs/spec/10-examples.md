@@ -223,6 +223,39 @@ workspaceにとって意味を持つのはuidであり、それは要求した�
 
 ---
 
+### raw で一般ユーザーへ写す
+
+`examples/dev-user-raw/` が実物である。同じ目的を `shift` ではなく
+`raw` + `workspace.owner` で達成する（3.7.3）。
+
+```yaml
+workspace:
+  idmap: raw
+  owner:
+    uid: 1000
+    gid: 1000
+```
+
+`shift` 版との違いは2点である。
+
+| | `dev-user`（shift） | `dev-user-raw`（raw + owner） |
+| --- | --- | --- |
+| WSL | 動かない（カーネルにidmapped mountsが無い） | 動く |
+| 書くid | **実行者ごとに違う**（自分のuid/gidを書く） | コンテナ側のidであり、実行者と無関係 |
+| ホスト設定 | 不要 | `/etc/subuid` / `/etc/subgid` が要る |
+| コンテナのrootが書いたファイル | ホストのroot所有 | subuid所有（実行者のものにならない） |
+
+2行目が実務上の差である。実daemonで確認したところ、`owner: {uid: 4242}` を
+ホストuid 1000 の環境で実行すると、コンテナ内は uid 4242、
+書いたファイルはホストで uid 1000 の所有になった。
+したがって `dev.yml` をプロジェクト全員で共有できる。
+
+provisioningはrootで走るため、`raw` + `owner` ではprovisioningが
+workspaceへ書いたファイルは実行者のものにならない。例のスクリプトは
+workspaceへ何も書かない。
+
+---
+
 ## 10.3.2 volumeを複数持つ
 
 `examples/volumes/` が実物である。

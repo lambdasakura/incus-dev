@@ -12,7 +12,8 @@
 | [minimal](minimal/) | `dev.yml` 1ファイルのみ |
 | [shell-based](shell-based/) | シェルスクリプトで構成（Ansible不要） |
 | [ansible-based](ansible-based/) | Ansibleで構成 |
-| [dev-user](dev-user/) | provisioningで一般ユーザーを作り、`idev shell` をそこへ入れる |
+| [dev-user](dev-user/) | provisioningで一般ユーザーを作り、`idev shell` をそこへ入れる（`idmap: shift`） |
+| [dev-user-raw](dev-user-raw/) | 同じことを `raw` + `workspace.owner` で行う。WSLで動くのはこちら |
 | [volumes](volumes/) | `idev rebuild` を越えて残る永続volumeを複数持つ |
 | [multi-workspace](multi-workspace/) | ホストのディレクトリを複数マウントする（1つは読み取り専用） |
 

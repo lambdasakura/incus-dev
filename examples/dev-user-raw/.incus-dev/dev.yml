@@ -1,0 +1,68 @@
+# Work as an ordinary user, mapped with raw rather than shift.
+#
+# examples/dev-user/ does the same job with idmap: shift. This one uses raw
+# with an owner, which differs in two ways that decide which you want:
+#
+#   - it works on WSL, whose kernel has no idmapped mounts and so cannot
+#     do shift at all
+#   - the ids below are the container's, not yours. Whoever runs idev is the
+#     one the mapping lands on, so this file is the same for everyone on the
+#     project, while the shift example needs each person's own uid
+#
+# What it costs: raw needs a line in /etc/subuid and /etc/subgid on the host,
+# and container root is no longer you (see workspace.owner below).
+schema: 1
+
+runtime:
+  # workspace.owner needs idev 1.2.
+  version: "1.2"
+
+project:
+  name: dev-user-raw-example
+
+instance:
+  image: images:ubuntu/24.04
+
+workspace:
+  source: .
+  target: /workspace
+
+  # raw maps you onto one id inside the container. Without owner that is root,
+  # and the workspace then looks root-owned from inside, so the account below
+  # could not write to it.
+  idmap: raw
+  owner:
+    uid: 1000
+    gid: 1000
+
+  # The trade, and it is not small: one host id maps onto one container id, so
+  # with owner set container *root* is not you. Provisioning runs as root, so
+  # anything a provision step writes into /workspace is owned by a subuid you
+  # cannot touch. Write into the workspace as the account, not as root.
+  #
+  # Needs on the host, once, with your own uid and gid:
+  #   /etc/subuid:  root:<id -u>:1
+  #   /etc/subgid:  root:<id -g>:1
+  # No incus restart afterwards. idev says so if they are missing.
+
+provision:
+  - name: base packages
+    run: |
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends sudo git make
+
+  - name: developer account
+    run: sh /workspace/.incus-dev/scripts/create-user.sh
+    env:
+      DEV_USER: developer
+      # These are workspace.owner's ids, and have nothing to do with your own.
+      DEV_UID: "1000"
+      DEV_GID: "1000"
+
+shell:
+  # Where 'idev shell' and 'idev exec' land. 'idev shell --user root' for the
+  # times root is needed.
+  user: developer
+  command: /bin/bash
+  cwd: /workspace

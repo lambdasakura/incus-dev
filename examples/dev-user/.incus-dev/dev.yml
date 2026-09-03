@@ -42,6 +42,8 @@ workspace:
   # here because it needs nothing set up on the host, so this example runs as
   # it stands. Under raw+owner what the container writes as root -- including
   # anything provisioning puts in the workspace -- is not yours.
+  #
+  # examples/dev-user-raw/ is that arrangement written out.
 
 provision:
   - name: base packages
