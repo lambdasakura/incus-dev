@@ -11,7 +11,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	go.yaml.in/yaml/v2 v2.4.4
 	golang.org/x/term v0.45.0
-	golang.org/x/text v0.37.0
+	golang.org/x/text v0.42.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
